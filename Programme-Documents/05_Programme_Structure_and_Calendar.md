@@ -1,6 +1,6 @@
 # Programme Structure and Calendar
 
-> **Status:** Owner-provided schedule applied to the 64-week curriculum; DVT approval pending. The [author's 15-week DevOps syllabus](DevOps_15_Week_Syllabus.md) is the source of truth for Weeks 1–15.
+> **Status:** Owner-provided schedule applied to the 64-week curriculum; DVT approval pending. The [author's 15-week DevOps syllabus](../DevOps_15_Week_Syllabus.md) is the source of truth for Weeks 1–15.
 
 ## Calendar principles
 
@@ -15,10 +15,10 @@
 
 | Discipline | Week numbers | Duration | Calendar start | Calendar end |
 | --- | --- | ---: | --- | --- |
-| [DevOps Engineering](DEVOPS_Overview.md) | 1–15 | 15 weeks | 23-Nov-2026 | 28-Mar-2027 |
-| [Cloud Engineering](CLOUD_Overview.md) | 16–31 | 16 weeks | 29-Mar-2027 | 18-Jul-2027 |
-| [AI Engineering](AI_Overview.md) | 32–43 | 12 weeks | 19-Jul-2027 | 10-Oct-2027 |
-| [Platform Engineering](PLATFORM_Overview.md) | 44–64 | 21 weeks | 11-Oct-2027 | 26-Mar-2028 |
+| [DevOps Engineering](../DEVOPS_Overview.md) | 1–15 | 15 weeks | 23-Nov-2026 | 28-Mar-2027 |
+| [Cloud Engineering](../CLOUD_Overview.md) | 16–31 | 16 weeks | 29-Mar-2027 | 18-Jul-2027 |
+| [AI Engineering](../AI_Overview.md) | 32–43 | 12 weeks | 19-Jul-2027 | 10-Oct-2027 |
+| [Platform Engineering](../PLATFORM_Overview.md) | 44–64 | 21 weeks | 11-Oct-2027 | 26-Mar-2028 |
 | **Total** | **1–64** | **64 weeks** | **23-Nov-2026** | **26-Mar-2028** |
 
 ## Detailed weekly learning calendar

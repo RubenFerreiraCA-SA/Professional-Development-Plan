@@ -49,7 +49,7 @@ The 64-week curriculum progresses through four core disciplines:
 | **Platform Engineering** | 44–64 | 21 weeks |
 | **Total** | **1–64** | **64 weeks** |
 
-* **Authoritative Syllabus:** The **[original 15-week DevOps syllabus](DevOps_15_Week_Syllabus.md)** remains authoritative for modules D01–D06, including module sequence, weekly labs, and assessment weightings. It is not superseded by this charter.
+* **Authoritative Syllabus:** The **[original 15-week DevOps syllabus](../DevOps_15_Week_Syllabus.md)** remains authoritative for modules D01–D06, including module sequence, weekly labs, and assessment weightings. It is not superseded by this charter.
 * **Scheduling Exclusions:** Week 0 is reserved for onboarding and planning. The December 2026 and December 2027 leave periods are excluded from the 64-week count, and formal reviews are budgeted separately. See the [dated calendar](05_Programme_Structure_and_Calendar.md) for exact dates.
 
 #### Platform Engineering Specialisations (Weeks 44–64)

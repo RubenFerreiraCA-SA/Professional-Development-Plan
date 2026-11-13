@@ -4,7 +4,7 @@
 
 ## Source of teaching plan
 
-The [original 15-week DevOps Engineering syllabus](DevOps_15_Week_Syllabus.md) determines the instructional sequence. It places **Datadog & Observability at Weeks 14–15**. The programme will not move those lessons without explicit author approval.
+The [original 15-week DevOps Engineering syllabus](../DevOps_15_Week_Syllabus.md) determines the instructional sequence. It places **Datadog & Observability at Weeks 14–15**. The programme will not move those lessons without explicit author approval.
 
 ## Individual DVT PDP — mandatory milestone
 
