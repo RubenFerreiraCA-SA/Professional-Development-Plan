@@ -32,7 +32,7 @@ Examples use **HashiCorp Terraform** and the **AWS** provider. The design princi
 ```bash
 export HARBOUR_ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
 cd "$HARBOUR_ROOT"
-terraform version   # Terraform >= 1.5 recommended
+terraform version   # Terraform >= 1.9 required for this chapter
 aws sts get-caller-identity
 grep -n 'terraform\|\.tfstate\|.terraform' .gitignore || echo "Confirm D01 ignore rules still cover Terraform artifacts"
 ```
@@ -71,7 +71,7 @@ cd infra/sandbox-hello
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.9.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -199,7 +199,7 @@ cd infra/bootstrap
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.9.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -345,7 +345,7 @@ cd "$HARBOUR_ROOT/infra/lock-drill"
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.9.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -829,7 +829,7 @@ cd "$HARBOUR_ROOT/infra/envs/staging"
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.9.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -883,6 +883,7 @@ variable "container_image" {
   description = "ECR image@sha256 digest. Required when enable_runtime is true."
   default     = ""
 
+  # Cross-variable validation requires Terraform >= 1.9 (matches required_version).
   validation {
     condition = (
       !var.enable_runtime || (
@@ -1172,7 +1173,16 @@ Create two roles (plan / apply). **Do not** use `repo:OWNER/REPO:*` — that all
 }
 ```
 
-Prefer also constraining with `token.actions.githubusercontent.com:job_workflow_ref` (or your org’s equivalent claims) to **`OWNER/REPO/.github/workflows/harbour-terraform-plan.yml@refs/heads/main`** so a PR that modifies workflows cannot mint a new workflow file and inherit the plan role until that change is merged through review.
+**Pick one identity mechanism and configure both ends the same way** — they are not interchangeable:
+
+| Mechanism | Where you configure it | What AWS trusts |
+| --- | --- | --- |
+| **AWS condition on `job_workflow_ref`** | IAM trust policy `Condition` on `token.actions.githubusercontent.com:job_workflow_ref` | Exact workflow file + ref that minted the token (GitHub includes this claim for reusable/caller workflows; verify with a decoded token in training) |
+| **GitHub OIDC subject (`sub`) customisation** | GitHub org/repo Actions OIDC subject claim settings | Whatever shape you configure into `sub` (e.g. including workflow path). IAM then matches `token.actions.githubusercontent.com:sub` |
+
+This chapter’s worked example uses **IAM conditions on concrete claims** (`sub` limited to `ref:refs/heads/main` and/or `environment:staging-plan`, plus optionally `job_workflow_ref` equal to `OWNER/REPO/.github/workflows/harbour-terraform-plan.yml@refs/heads/main`). If you instead customise GitHub’s `sub` format, rewrite the IAM `sub` condition to match **that** format — do not assume `job_workflow_ref` and a custom `sub` mean the same string.
+
+Before relying on `job_workflow_ref`, decode one Actions OIDC token in a throwaway job (`actions/github-script` or similar) and confirm the claim is present for your workflow type.
 
 **Apply role trust:** narrower still — e.g. only `repo:OWNER/REPO:environment:staging` after required reviewers approve.
 
@@ -1191,16 +1201,17 @@ Store ARNs as GitHub **Actions secrets** (`AWS_PLAN_ROLE_ARN`, `AWS_APPLY_ROLE_A
 
 ### 5.6.3 Worked example — untrusted validate (every PR, no AWS)
 
-`.github/workflows/harbour-terraform-validate.yml` — **required check** for all PRs:
+`.github/workflows/harbour-terraform-validate.yml` — **required check** for all PRs.
+
+Do **not** add `paths:` filters on a required workflow (same lesson as D04 §4.3.4): a docs-only PR would skip the check and block merges. Always run; keep the job cheap (modules only, no AWS).
 
 ```yaml
 name: harbour-terraform-validate
 
 on:
   pull_request:
-    paths:
-      - "infra/**"
-      - ".github/workflows/harbour-terraform-validate.yml"
+  push:
+    branches: ["main"]
 
 permissions:
   contents: read
@@ -1222,7 +1233,7 @@ jobs:
           terraform test
 ```
 
-No `id-token: write`. No state. Safe for forks and same-repo PRs that may contain hostile HCL/scripts in other paths — this job only exercises local module validation.
+No `id-token: write`. No state. Safe for forks and same-repo PRs — this job only exercises local module validation. If you later add path-aware optimisation, use D04’s always-running **gate** job as the required check name, not the skipped test job.
 
 ### 5.6.4 Worked example — trusted plan (after merge / protected environment)
 
@@ -1272,19 +1283,43 @@ jobs:
         run: |
           terraform plan -input=false -no-color -out="${{ runner.temp }}/stg.tfplan"
           terraform show -no-color "${{ runner.temp }}/stg.tfplan" > "${{ runner.temp }}/stg.plan.txt"
-      - name: Publish a limited reviewer summary (not a full plan dump)
+      - name: Write allowlisted plan summary from JSON (addresses/actions only)
         run: |
-          # Count-oriented summary for humans. Full plan stays on the runner temp disk
-          # for this job only unless your org has a private, ACL-controlled store.
-          {
-            echo "## Harbour staging plan summary"
-            echo
-            echo "- commit: ${{ github.sha }}"
-            echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo
-            grep -E '^Plan:|  # |  \+|  ~|  -' "${{ runner.temp }}/stg.plan.txt" | head -n 80 || true
-          } > "${{ runner.temp }}/stg.summary.md"
-          cat "${{ runner.temp }}/stg.summary.md"
+          # Full plan binary stays on the runner (${{ runner.temp }}/stg.tfplan).
+          # Reviewers get ONLY resource addresses + change actions — not attribute values.
+          terraform show -json "${{ runner.temp }}/stg.tfplan" > "${{ runner.temp }}/stg.plan.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          plan = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"] + "/stg.plan.json").read_text())
+          lines = [
+              "# Harbour staging plan summary",
+              "",
+              f"- commit: {os.environ.get('GITHUB_SHA', '')}",
+              f"- run: {os.environ.get('GITHUB_SERVER_URL', '')}/{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}",
+              "",
+              "| Action | Address |",
+              "| --- | --- |",
+          ]
+          for rc in plan.get("resource_changes", []) or []:
+              actions = rc.get("change", {}).get("actions") or []
+              # Skip no-ops
+              if actions == ["no-op"]:
+                  continue
+              addr = rc.get("address", "")
+              action = ",".join(actions)
+              # Allowlist: never include rc["change"]["before"|"after"] attribute objects
+              lines.append(f"| `{action}` | `{addr}` |")
+          summary = "\n".join(lines) + "\n"
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "stg.summary.md"
+          out.write_text(summary)
+          print(summary)
+          PY
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         with:
           name: harbour-stg-plan-summary-${{ github.sha }}
@@ -1292,13 +1327,14 @@ jobs:
           retention-days: 5
 ```
 
-**About “redacting” full plans:** regex scrubbing of `terraform show` output is **illustrative only** and **not a security boundary**. Plans can expose sensitive values under many attribute names and encodings. Prefer:
+**Full plan vs summary:**
 
-1. Restrict who can read workflow logs/artifacts (private repo, limited retention, environment protection).
-2. Share a **summary** (resource counts / addresses) with reviewers.
-3. Keep full plan binaries/text off shared channels unless you have a controlled review system designed for them.
+| Artifact | Where it lives | Contents |
+| --- | --- | --- |
+| `stg.tfplan` / `stg.plan.json` | Trusted runner only (`runner.temp`) | Complete planned values — treat as sensitive |
+| `stg.summary.md` | Optional private artifact for reviewers | Allowlisted **addresses + actions** only (no `before`/`after` attributes) |
 
-Do not claim that `sed` makes a plan safe to distribute.
+Building a summary by grepping human `terraform show` text can still leak attribute values. Prefer `terraform show -json` and an allowlist that never serialises change attribute objects. Regex redaction of full plans is **not** a security boundary and is not used here.
 
 **Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, OIDC **apply** role whose trust matches that environment, **fresh** `plan` then `apply` in the same job (never reuse a stale plan artifact across time/state changes).
 
@@ -1376,7 +1412,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 
 ### Example assessment conclusion (evidence still required)
 
-> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Reviewers get a plan summary; full plans are not treated as safe via regex redaction. A second engineer completed staging from the README.
+> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Reviewers get a JSON-derived address/action summary; full plan files stay on the trusted runner. A second engineer completed staging from the README.
 
 ---
 
