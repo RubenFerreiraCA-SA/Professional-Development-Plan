@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 33–36 of 64  
+**Weeks:** 32–35 of 64  
 **Purpose:** LLM integrations, retrieval, prompting and evaluation fundamentals.
 
 ## Module overview
