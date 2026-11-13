@@ -1,17 +1,36 @@
 # Certification Roadmap
 
-> **Status:** Draft scaffold — content and DVT approval pending.
+> **Status:** Working certification framework; no exam is presumed booked or passed.
 
-## Purpose
+## Source of teaching plan
 
-Mandatory versus optional credentials, exam objectives, prerequisites, cost estimates, booking and evidence requirements.
+The [original 15-week DevOps Engineering syllabus](DevOps_15_Week_Syllabus.md) determines the instructional sequence. It places **Datadog & Observability at Weeks 14–15**. The programme will not move those lessons without explicit author approval.
 
-## Content to develop
+## Individual DVT PDP — mandatory milestone
 
-_TODO: Complete this section and cross-reference the relevant syllabus modules and evidence._
+| Requirement | Detail |
+| --- | --- |
+| Certification | Datadog Fundamentals |
+| DVT PDP deadline | 31 March 2027 |
+| Instructional alignment | D06 — Weeks 14–15 |
+| Practical evidence | Datadog monitoring, logs, APM and alerting labs in the source syllabus |
+| Required proof | Official certification credential or proof accepted by DVT |
+| Booking | Pending |
 
-## Revision record
+**Scheduling note:** An early, parallel Datadog certification-preparation track may be necessary. This does not modify the six instructional modules or their weightings.
 
-| Date | Version | Change | Reviewer |
-| --- | --- | --- | --- |
-| 2026-11-13 | 0.1 | Initial scaffold | Pending |
+## Additional certification targets
+
+_TODO: Validate current exam availability, providers, exam codes, prices and objectives, then align each to the existing syllabus without distorting the learning sequence._
+
+## Certificate register
+
+| Certificate | Module alignment | Target date | Exam booked | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Datadog Fundamentals | D06 | Before 31 March 2027 | No | Pending | [PDP plan](02_Datadog_PDP_Plan.md) |
+
+## Review / revision log
+
+| Date | Change | Approval |
+| --- | --- | --- |
+| 2026-11-13 | Aligned roadmap to original 15-week DevOps sequence | DVT sign-off pending |
