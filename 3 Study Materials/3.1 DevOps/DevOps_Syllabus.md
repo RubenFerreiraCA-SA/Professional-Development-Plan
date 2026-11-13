@@ -2,18 +2,26 @@
 
 *Estimated 120–150 Study Hours · Learning Objectives & Hands-On Lab Assignments*
 
-## Program Structure & Weighting Overview
+## Modules and estimated study time
 
 This approximately 120–150-hour curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous capstone project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
 
-| Code | Module Title | Estimated hours | Weight | Core Milestone |
+| Code | Module | Estimated hours | Weight | Core milestone |
 | --- | --- | ---: | --- | --- |
-| D01 | Git & Repository Foundations | 8–10 | 7% | Set up a structured, branch-protected project repository. |
-| D02 | Docker & Containerization | 24–30 | 20% | Package and run a multi-service app locally with Docker Compose. |
-| D03 | CI/CD & Build Automation | 16–20 | 13% | Automate code testing, image scanning, and registry pushes. |
-| D04 | Infrastructure as Code & Terraform | 32–40 | 27% | Provision cloud networking and container clusters via code. |
-| D05 | GitOps, Automation & Operations | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
-| D06 | Datadog & Observability | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
+| D01 | [Git & Repository Foundations](D01_Git_and_Repository_Foundations.md) | 8–10 | 7% | Set up a structured, branch-protected project repository. |
+| D02 | [Docker & Containerization](D02_Docker_and_Containerization.md) | 24–30 | 20% | Package and run a multi-service app locally with Docker Compose. |
+| D03 | [CI/CD & Build Automation](D03_CICD_and_Build_Automation.md) | 16–20 | 13% | Automate code testing, image scanning, and registry pushes. |
+| D04 | [Infrastructure as Code & Terraform](D04_Infrastructure_as_Code_and_Terraform.md) | 32–40 | 27% | Provision cloud networking and container clusters via code. |
+| D05 | [GitOps, Automation & Operations](D05_GitOps_Automation_and_Operations.md) | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
+| D06 | [Datadog & Observability](D06_Datadog_and_Observability.md) | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
+
+## Continuous practical project
+
+The modules develop one reusable application delivery example across Git, Docker, CI/CD, Terraform, GitOps and Datadog. Each lesson includes a hands-on lab that builds on earlier work. The [module companion pages](D01_Git_and_Repository_Foundations.md) can be used to collect links to completed work; the lesson objectives and labs below remain the source of truth.
+
+## Certifications
+
+Completing these materials does **not** award a certification, and certifications are **optional**. Learners may independently pursue relevant external certifications if they choose.
 
 ## D01: Git & Repository Foundations (8–10 hours | 7%)
 
