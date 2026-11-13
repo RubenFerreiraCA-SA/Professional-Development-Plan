@@ -457,4 +457,4 @@ Use these as references when a feature behaves differently on your host—not as
 - [GitHub — CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 
-**Course detail:** [D01 — Repository Fundamentals](../../3%20Course%20Detail/3.1%20DevOps/D01%20Repository%20Fundamentals.md) · **Next textbook:** D02 — Advanced Git (not yet authored)
+**Course detail:** [D01 — Repository Fundamentals](../../3%20Course%20Detail/3.1%20DevOps/D01%20Repository%20Fundamentals.md) · **Next textbook:** [D02 — Advanced Git](D02%20Advanced%20Git.md)
