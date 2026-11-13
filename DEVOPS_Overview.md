@@ -2,9 +2,9 @@
 
 > **Status:** Author-designed 15-week teaching syllabus adopted as the source of truth. DVT sign-off remains pending.
 
-**Programme weeks:** 1–16  
-**Instruction:** Weeks 1–15  
-**Integration assessment and certification review:** Week 16 (additional programme scheduling, not part of the original syllabus)
+**Programme weeks:** 1–15  
+**Instruction:** Weeks 1–15 (23 November 2026 – 28 March 2027)  
+**Formal review and sign-off:** Outside the 64 instructional weeks, according to the separate review budget.
 
 ## Authoritative curriculum
 
@@ -22,7 +22,7 @@ All original learning objectives, lab assignments, module names, weekly order an
 | D04 | Infrastructure as Code & Terraform | 7–10 | 27% | [D04](D04_Infrastructure_as_Code_and_Terraform.md) |
 | D05 | GitOps, Automation & Operations | 11–13 | 20% | [D05](D05_GitOps_Automation_and_Operations.md) |
 | D06 | Datadog & Observability | 14–15 | 13% | [D06](D06_Datadog_and_Observability.md) |
-| — | Integration assessment and certification review (proposed) | 16 | Not part of source weighting | [Assessment framework](07_Assessment_Framework.md) |
+
 
 ## Continuous practical project
 
@@ -35,5 +35,5 @@ The syllabus develops one organisation-neutral application delivery demonstratio
 ## Notes for DVT review
 
 - The 15 instructional weeks and their weights are taken from the author's syllabus.
-- The proposed Week 16 assessment requires separate definition and approval.
+- No extra DevOps teaching or review week is counted. Week 16 begins Cloud Engineering.
 - Completion of the course does not imply the external certification has been earned.
