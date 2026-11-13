@@ -1,6 +1,6 @@
 # Platform Engineering Professional Development Plan
 
-A **reusable PDP framework with an estimated 553–725 hours of study** for developers building skills in **Platform Engineering and its enabling disciplines**: DevOps, Cloud and AI.
+A **reusable PDP framework with an estimated 571–753 hours of study** for developers building skills in **Platform Engineering and its enabling disciplines**: DevOps, Cloud and AI.
 
 Follow the learning pathway, complete hands-on labs and build an Internal Developer Platform. Add your own dates, goals and pace.
 

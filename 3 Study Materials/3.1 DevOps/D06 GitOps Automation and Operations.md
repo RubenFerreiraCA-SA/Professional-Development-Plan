@@ -107,4 +107,4 @@ Connect D05 and D06 with a clear contract: Terraform provisions clusters and fou
 - [Kubernetes — Configure liveness, readiness and startup probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 - [Kubernetes — Horizontal Pod Autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
 
-**Previous:** [D05 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · **Next:** [D07 — Datadog and Observability](D07%20Datadog%20and%20Observability.md)
+**Previous:** [D05 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · **Next:** [D07 — Observability](D07%20Observability.md)

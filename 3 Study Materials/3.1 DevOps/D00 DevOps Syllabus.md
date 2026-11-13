@@ -2,7 +2,7 @@
 
 The DevOps discipline develops the engineering capabilities needed to create **secure, repeatable and operable delivery services** for other developers. It is the foundation for later Cloud, AI and Platform Engineering work.
 
-The seven modules below form a recommended progression, not a mandatory qualification or fixed-duration course. They are designed for developers who already have practical software engineering experience. **Each module owns its detailed learning activities and Practical Assessment**; this syllabus sets out the overall sequence, boundaries and expected outcomes.
+The eight modules below form a recommended progression, not a mandatory qualification or fixed-duration course. They are designed for developers who already have practical software engineering experience. **Each module owns its detailed learning activities and Practical Assessment**; this syllabus sets out the overall sequence, boundaries and expected outcomes.
 
 ## Modules
 
@@ -14,8 +14,9 @@ The seven modules below form a recommended progression, not a mandatory qualific
 | [D04 — CI/CD and Build Automation](D04%20CICD%20and%20Build%20Automation.md) | Trusted pipelines, isolated runners, verification, provenance and artifact promotion | 24–36 hours | An auditable pipeline from reviewed source to immutable release |
 | [D05 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) | State, drift, modules, IAM, infrastructure architecture and policy | 42–60 hours | Reusable infrastructure deployed through controlled, reviewed changes |
 | [D06 — GitOps, Automation and Operations](D06%20GitOps%20Automation%20and%20Operations.md) | Reconciliation, progressive delivery, rollbacks and day-two operations | 30–44 hours | A governed desired-state deployment with verified recovery |
-| [D07 — Datadog and Observability](D07%20Datadog%20and%20Observability.md) | Telemetry, incident diagnosis, SLIs/SLOs, alerting and reusable monitoring | 24–36 hours | Evidence-led incident analysis and a reusable observability service |
-| **Total** | **7 modules** | **161–235 hours** | **A working, traceable application delivery foundation** |
+| [D07 — Observability](D07%20Observability.md) | Vendor-neutral telemetry architecture, instrumentation, SLIs/SLOs and diagnostic reasoning | 18–28 hours | Instrumented services, meaningful objectives and reproducible incident investigation |
+| [D08 — Datadog](D08%20Datadog.md) | Agent and APM setup, dashboards, alerting, incident response and reusable provider configuration | 24–36 hours | Operational Datadog monitoring and repeatable second-service onboarding |
+| **Total** | **8 modules** | **179–263 hours** | **A working, traceable application delivery foundation** |
 
 **How estimates were developed:** Study-time ranges were assigned **after reviewing the module content, exercises, lab dependencies and Practical Assessments**. They are planning estimates, not constraints. A developer with prior experience may demonstrate an outcome more quickly; unfamiliar providers, infrastructure issues or additional depth may take longer. Completion is determined by demonstrated capability.
 
@@ -29,7 +30,8 @@ The learning is cumulative. Each module produces assets needed in later modules:
 4. **D04 — Build an artifact you can trust.** Turn reviewed code into tested, traceable, immutable container releases.
 5. **D05 — Provision the environment safely.** Use Terraform modules, state controls and reviewed infrastructure changes.
 6. **D06 — Operate declared deployments.** Promote those exact release artifacts through GitOps, then test drift, rollback and resilience.
-7. **D07 — Prove the service works.** Correlate logs, metrics and traces, define service objectives and diagnose failures.
+7. **D07 — Understand and design observability.** Instrument services with portable telemetry, define SLIs/SLOs and investigate failures using evidence.
+8. **D08 — Operate Datadog.** Implement agents, APM, logs, dashboards, monitors and reusable onboarding for additional teams.
 
 ### Core lessons carried through the syllabus
 
@@ -43,7 +45,8 @@ The original teaching topics remain part of the pathway, but are now explored th
 | D04 | Pull-request validation; automated container builds, scanning and registry releases |
 | D05 | Terraform resource lifecycle; state and drift; reusable modules; secure networking, IAM and container infrastructure |
 | D06 | GitOps controller and declarative sync; release/rollback strategy; autoscaling and day-two recovery |
-| D07 | Datadog metrics and logs; distributed tracing, service objectives and actionable alerting |
+| D07 | Monitoring versus observability; metrics, structured logs, distributed traces, OpenTelemetry pipeline, service objectives, incident diagnosis and governance |
+| D08 | Datadog Agent; infrastructure monitoring, APM and log correlation; dashboards, SLOs, actionable alerting, incident investigation and provider-specific operations |
 
 ## What a Platform Engineer must be able to demonstrate
 
@@ -69,7 +72,7 @@ Where a provider feature, paid service or external reviewer is unavailable, docu
 
 ## Scope and boundaries
 
-D03 introduces container runtime fundamentals, and D06 uses a **small, isolated Kubernetes environment** to practise GitOps. Deep Kubernetes administration, multi-cluster platform design, developer portals and organisation-wide platform operations are developed later in the Platform Engineering discipline. Cloud Engineering revisits networking, IAM and infrastructure at greater breadth. AI Engineering covers LLM and agent capabilities separately.
+D07 builds the vendor-neutral observability foundation; D08 applies it in Datadog. D03 introduces container runtime fundamentals, and D06 uses a **small, isolated Kubernetes environment** to practise GitOps. Deep Kubernetes administration, multi-cluster platform design, developer portals and organisation-wide platform operations are developed later in the Platform Engineering discipline. Cloud Engineering revisits networking, IAM and infrastructure at greater breadth. AI Engineering covers LLM and agent capabilities separately.
 
 Avoid unnecessary complexity: a demonstrable secure delivery system is more valuable than a fragile collection of tools.
 
