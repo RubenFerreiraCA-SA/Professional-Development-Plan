@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 61–64 of 64  
+**Weeks:** 60–64 of 64  
 **Purpose:** Integration, platform product goals, technical defence and capstone.
 
 ## Module overview
@@ -19,7 +19,15 @@ _TODO: Write measurable outcomes._
 
 ## Weekly syllabus
 
-_TODO: Add each week's topics, learning outcomes and learning resources._
+| Week | Core learning and practical work |
+| --- | --- |
+| 60 | Platform architecture patterns, service boundaries, self-service platform API design, architecture decision records |
+| 61 | Golden path integration: service templates, infrastructure automation, provisioning and deployment workflows |
+| 62 | Platform controls: policy-as-code, secrets, observability, SLOs, cost governance and accessibility |
+| 63 | Reliability engineering: failure injection, recovery exercises, monitoring, user testing and platform improvements |
+| 64 | Final platform implementation, technical documentation, evidence preparation and practical demonstration rehearsal |
+
+These are **five instructional/practical weeks**. Formal evaluation and DVT sign-off are separately budgeted and fall outside the 64-week teaching plan.
 
 ## Practical labs and deliverables
 
