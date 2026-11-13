@@ -1,35 +1,23 @@
-# Practical Project — Generic Internal Developer Platform
+# Practical Project — Internal Developer Platform
 
-**Purpose:** One organisation-neutral project demonstrating integrated skills across all four disciplines.
+Build a **generic Internal Developer Platform** that helps developers create, deploy and operate a sample application.
 
-## Outcome
-
-Build a small, repeatable engineering environment where a developer can create, build, deploy and monitor a sample application using documented, secure, self-service workflows.
-
-## Progressive scope
-
-| Programme stage | Practical deliverables |
+| Stage | Deliverables |
 | --- | --- |
-| **DevOps, Weeks 1–15** | Protected repository, multi-service Docker setup, CI/CD, image scanning, Terraform, GitOps, Datadog instrumentation |
-| **Cloud, Weeks 16–31** | Secure cloud deployment, networking/IAM, managed services, cost controls, recovery and architecture documentation |
-| **AI, Weeks 32–43** | A limited, evaluated AI capability such as read-only diagnostics or documentation assistance, with permissions and safeguards |
-| **Platform, Weeks 44–64** | Kubernetes deployment, reusable templates/golden path, developer self-service, observability, SLOs, resilience testing |
+| DevOps · Weeks 1–15 | Git, Docker, CI/CD, Terraform, GitOps and monitoring |
+| Cloud · Weeks 16–31 | Secure cloud infrastructure, networking, IAM and resilience |
+| AI · Weeks 32–43 | Limited, evaluated AI diagnostics or workflow assistance |
+| Platform · Weeks 44–64 | Kubernetes, golden paths, reusable templates and observability |
 
-The DevOps deliverables must follow the practical labs in the [original 15-week syllabus](../DevOps_15_Week_Syllabus.md).
+The [original DevOps syllabus](../DevOps_15_Week_Syllabus.md) defines its practical labs. The final five weeks include platform architecture, integration, security, testing and technical documentation.
 
-## Acceptance checks
+## Completion checks
 
-- A new developer can follow the instructions to reproduce the environment.
-- Builds and deployments are automated and produce traceable results.
-- Secrets are not committed; access follows least-privilege principles.
-- Failures can be observed, diagnosed and recovered from.
-- Platform workflows reduce manual, repeated setup steps.
-- Code, architecture decisions, operating instructions and demonstration evidence are available.
+- Setup can be reproduced using documentation.
+- Builds and deployments are automated.
+- Access, secrets and cloud costs are controlled.
+- Failures can be observed and troubleshot.
+- Reusable workflows reduce manual developer work.
+- The implementation and technical decisions are documented.
 
-**Week 64 is practical engineering and documentation within P04**, not a review-only buffer. Formal DVT review and sign-off remain external to the instructional plan.
-
-## Boundaries
-
-Use sample applications and non-confidential data. Protect credentials; control cloud costs. No proprietary employer/client systems are required.
-
-**Detailed implementation tasks** belong in the individual teaching modules. Evidence links belong in the [Study & Evidence Log](05_Study_and_Evidence_Log.md).
+Use sample data and avoid confidential systems. Record progress in the [Progress Log](05_Progress_Log.md).

@@ -1,53 +1,33 @@
 # Programme Foundation
 
-**64-week Professional Development Programme · Draft for DVT review**
+A **64-week practical learning programme** covering DevOps, Cloud, AI and Platform Engineering.
 
-The programme expands application-development skills into **DevOps, Cloud, AI and Platform Engineering** through structured study and practical work. The intended outcome is an engineer who can build, deploy, operate and improve software delivery platforms.
+**Goal:** Learn to build, deploy, secure and operate software—and the platforms developers use to deliver it.
 
-| Item | Agreed plan |
-| --- | --- |
-| Study period | 23 Nov 2026 – 26 Mar 2028 |
-| Weekly effort | Approx. 8–10 hours |
-| Week 0 | 16–22 Nov 2026: planning only |
-| Formal reviews | Outside the 64 instructional weeks |
-| Status | Independently proposed; DVT approval pending |
-
-## Learning pathway
-
-| Discipline | Weeks | Core capability |
+| Discipline | Weeks | Focus |
 | --- | --- | --- |
-| [DevOps](../DEVOPS_Overview.md) | 1–15 | Git, Docker, CI/CD, Terraform, GitOps and Datadog |
-| [Cloud](../CLOUD_Overview.md) | 16–31 | Linux, networking, AWS and cloud architecture |
-| [AI](../AI_Overview.md) | 32–43 | LLM integration, agents and LLMOps |
+| [DevOps](../DEVOPS_Overview.md) | 1–15 | Git, Docker, CI/CD, Terraform, GitOps and observability |
+| [Cloud](../CLOUD_Overview.md) | 16–31 | Linux, networking, AWS and architecture |
+| [AI](../AI_Overview.md) | 32–43 | LLMs, agents and LLMOps |
 | [Platform](../PLATFORM_Overview.md) | 44–64 | Kubernetes, self-service platforms and DevEx |
 
-**[The author's 15-week DevOps syllabus](../DevOps_15_Week_Syllabus.md) is authoritative** for D01–D06, including its module order, weekly labs and weighting. Other module specifications are still drafts. The [calendar](01_Programme_Calendar.md) is authoritative for dates.
+The four disciplines build on each other. Platform Engineering combines them into reusable developer services. Specialisations include infrastructure, developer experience, security, reliability, data and leadership.
 
-The disciplines connect as follows: DevOps automates delivery; Cloud provides infrastructure; AI adds intelligent capabilities; Platform Engineering combines these into repeatable services for developers. Platform specialisations include infrastructure, developer experience, security, reliability, data and platform leadership.
+## Approach
 
-*Diagram placeholder: insert the existing disciplines-and-specialisations graphic when its image file is committed.*
+Allow around **8–10 hours per instructional week** for learning, labs, troubleshooting and technical notes. Every numbered week contains learning or practical work.
 
-## Intended outcomes
+The [original DevOps syllabus](../DevOps_15_Week_Syllabus.md) controls the first 15 weeks, including the module sequence, labs and weightings.
 
-By completion, the participant should be able to:
-- Automate application builds, tests, deployments and infrastructure.
-- Design and operate secure, observable and resilient cloud solutions.
-- Integrate and evaluate applied AI capabilities.
+## Outcomes
+
+- Automate application builds, deployments and infrastructure.
+- Design and operate secure, observable cloud systems.
+- Integrate and evaluate applied AI.
 - Deploy and troubleshoot Kubernetes workloads.
-- Provide reusable developer self-service workflows and explain architectural trade-offs.
+- Create reusable developer self-service workflows.
+- Demonstrate working solutions and explain technical choices.
 
-## Delivery and evidence
+Use the [roadmap](01_Programme_Roadmap.md), [learning guide](02_Learning_and_Assessment.md), [optional certification list](03_Certification_Options.md), [practical project](04_Practical_Project.md) and [progress log](05_Progress_Log.md).
 
-Each instructional week combines study, hands-on work, troubleshooting and brief documentation. Competence is demonstrated through working systems, lab outputs, technical decisions and relevant external certifications—not attendance alone.
-
-A [generic Internal Developer Platform capstone](04_Practical_Project.md) integrates skills throughout the programme. It must use non-confidential systems and data.
-
-Assessment requirements are defined in [Learning & Assessment](02_Learning_and_Assessment.md). Certification targets and the personal Datadog deadline are in [Certifications & PDP](03_Certifications_and_PDP.md). Evidence is kept in the [Study & Evidence Log](05_Study_and_Evidence_Log.md).
-
-## Governance
-
-Markdown in this repository is the working source of truth. Material curriculum changes are committed to version control; any change to the original DevOps syllabus requires deliberate author approval.
-
-The programme is **not an accredited qualification**, and proposing it does not imply DVT approval, funding, promotion, placement or certification success. See [DVT Review & Sign-off](06_DVT_Review_and_Signoff.md).
-
-**Do not publish** confidential employer/client information, credentials or private performance reviews in this public repository.
+**Generic by design:** Add personal dates, targets and other requirements separately.
