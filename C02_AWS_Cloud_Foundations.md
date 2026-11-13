@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 21–24 of 64  
+**Weeks:** 20–23 of 64  
 **Purpose:** AWS services, IAM, billing and foundational architecture.
 
 ## Module overview
