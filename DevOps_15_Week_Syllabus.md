@@ -4,89 +4,16 @@ DevOps Engineering Syllabus
 
 Program Structure & Weighting Overview
 
-This 15-week curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01âD06). Learners progress through a continuous capstone projectâstarting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
+This 15-week curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous capstone project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
 
-Module Title
-
-Duration
-
-Schedule
-
-Weight
-
-Core Milestone
-
-D01
-
-Git & Repository Foundations
-
-1 week
-
-Week 1
-
-7%
-
-Set up a structured, branch-protected project repository.
-
-D02
-
-Docker & Containerization
-
-3 weeks
-
-Weeks 2â4
-
-20%
-
-Package and run a multi-service app locally with Docker Compose.
-
-D03
-
-CI/CD & Build Automation
-
-2 weeks
-
-Weeks 5â6
-
-13%
-
-Automate code testing, image scanning, and registry pushes.
-
-D04
-
-Infrastructure as Code & Terraform
-
-4 weeks
-
-Weeks 7â10
-
-27%
-
-Provision cloud networking and container clusters via code.
-
-D05
-
-GitOps, Automation & Operations
-
-3 weeks
-
-Weeks 11â13
-
-20%
-
-Automate continuous cloud deployments, rollbacks, and scaling.
-
-D06
-
-Datadog & Observability
-
-2 weeks
-
-Weeks 14â15
-
-13%
-
-Monitor live system metrics, logs, APM traces, and alerts.
+| Code | Module Title | Duration | Schedule | Weight | Core Milestone |
+| --- | --- | --- | --- | --- | --- |
+| D01 | Git & Repository Foundations | 1 week | Week 1 | 7% | Set up a structured, branch-protected project repository. |
+| D02 | Docker & Containerization | 3 weeks | Weeks 2–4 | 20% | Package and run a multi-service app locally with Docker Compose. |
+| D03 | CI/CD & Build Automation | 2 weeks | Weeks 5–6 | 13% | Automate code testing, image scanning, and registry pushes. |
+| D04 | Infrastructure as Code & Terraform | 4 weeks | Weeks 7–10 | 27% | Provision cloud networking and container clusters via code. |
+| D05 | GitOps, Automation & Operations | 3 weeks | Weeks 11–13 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
+| D06 | Datadog & Observability | 2 weeks | Weeks 14–15 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
 
 D01: Git & Repository Foundations (Week 1 | 7%)
 
@@ -102,7 +29,10 @@ Learning Objectives:
 
 - Practice feature branching, clean commit conventions, and pull request code reviews.
 
-D02: Docker & Containerization (Weeks 2â4 | 20%)
+| Hands-On Lab Assignment: Create the master capstone repository on GitHub or GitLab, configure branch protection on main, add a project README.md and .gitignore covering .env, Docker, and Terraform files, and merge a sample feature branch via pull request. |
+| --- |
+
+D02: Docker & Containerization (Weeks 2–4 | 20%)
 
 Week 2: Container Fundamentals & Images
 
@@ -114,6 +44,9 @@ Learning Objectives:
 
 - Write optimized multi-stage Dockerfile builds that leverage layer caching and run as non-root users.
 
+| Hands-On Lab Assignment: Write a multi-stage Dockerfile for a sample web API that cuts image size by at least 50%, verified using docker history and docker inspect. |
+| --- |
+
 Week 3: Container Networking & Storage
 
 Learning Objectives:
@@ -123,6 +56,9 @@ Learning Objectives:
 - Configure custom bridge networks so isolated containers communicate securely.
 
 - Inject runtime configuration safely using environment variables and .env files.
+
+| Hands-On Lab Assignment: Connect a database container to the API over an isolated bridge network with a persistent volume, proving data survives container deletion without exposing database ports to the host. |
+| --- |
 
 Week 4: Multi-Container Applications
 
@@ -134,7 +70,10 @@ Learning Objectives:
 
 - Publish versioned container images to a remote container registry.
 
-D03: CI/CD & Build Automation (Weeks 5â6 | 13%)
+| Hands-On Lab Assignment: Combine a frontend, backend API, and database into a docker-compose.yml stack that boots cleanly with one command, then push tagged images to a remote registry. |
+| --- |
+
+D03: CI/CD & Build Automation (Weeks 5–6 | 13%)
 
 Week 5: Continuous Integration Workflows
 
@@ -146,6 +85,9 @@ Learning Objectives:
 
 - Manage pipeline secrets, environment variables, and build artifacts securely.
 
+| Hands-On Lab Assignment: Build a CI pipeline (e.g., GitHub Actions or GitLab CI) that automatically lints and tests code on every pull request, blocking merges if automated checks fail. |
+| --- |
+
 Week 6: Automated Image Builds & Delivery
 
 Learning Objectives:
@@ -156,7 +98,10 @@ Learning Objectives:
 
 - Implement semantic and Git-SHA tagging strategies for registry pushes.
 
-D04: Infrastructure as Code & Terraform (Weeks 7â10 | 27%)
+| Hands-On Lab Assignment: Extend the CI workflow so merges to main automatically build, vulnerability-scan (e.g., with Trivy), and push production-ready container images to the registry. |
+| --- |
+
+D04: Infrastructure as Code & Terraform (Weeks 7–10 | 27%)
 
 Week 7: IaC Concepts & Terraform Basics
 
@@ -168,6 +113,9 @@ Learning Objectives:
 
 - Execute the core Terraform lifecycle (init, plan, apply, and destroy).
 
+| Hands-On Lab Assignment: Provision a cloud storage bucket and basic compute instance via Terraform without hardcoding credentials. |
+| --- |
+
 Week 8: State Management & Team Workflows
 
 Learning Objectives:
@@ -177,6 +125,9 @@ Learning Objectives:
 - Configure remote state backends with state locking to prevent team conflicts.
 
 - Import existing cloud resources and detect or resolve configuration drift.
+
+| Hands-On Lab Assignment: Migrate Terraform state to a remote backend, manually alter a resource in the cloud console to simulate drift, and use Terraform to detect and revert the drift. |
+| --- |
 
 Week 9: Modular & Reusable Infrastructure
 
@@ -188,6 +139,9 @@ Learning Objectives:
 
 - Isolate multi-environment setups (dev, staging, prod) using workspaces or directory structures.
 
+| Hands-On Lab Assignment: Convert existing Terraform files into a reusable module and deploy separate dev and prod environments from the shared codebase. |
+| --- |
+
 Week 10: Cloud Networking & Compute Provisioning
 
 Learning Objectives:
@@ -198,7 +152,10 @@ Learning Objectives:
 
 - Deploy managed container hosting infrastructure (such as ECS, GKE, or EKS).
 
-D05: GitOps, Automation & Operations (Weeks 11â13 | 20%)
+| Hands-On Lab Assignment: Deploy a complete private cloud network and managed container cluster ready to host the capstone application. |
+| --- |
+
+D05: GitOps, Automation & Operations (Weeks 11–13 | 20%)
 
 Week 11: GitOps Principles & Pull-Based Delivery
 
@@ -210,6 +167,9 @@ Learning Objectives:
 
 - Deploy and configure a GitOps operator (such as ArgoCD or Flux).
 
+| Hands-On Lab Assignment: Install a GitOps operator on the cloud cluster and sync the capstone application live from the /deploy directory of the repository. |
+| --- |
+
 Week 12: Release Strategies & Rollbacks
 
 Learning Objectives:
@@ -219,6 +179,9 @@ Learning Objectives:
 - Automate image tag updates in Git repositories when new builds pass CI.
 
 - Execute rapid rollbacks using Git commit history as the single source of truth.
+
+| Hands-On Lab Assignment: Automate image tag updates from CI to the GitOps configuration, deploy a broken image tag, and restore service health with a single git revert. |
+| --- |
 
 Week 13: Day-Two Operations & Runbook Automation
 
@@ -230,7 +193,10 @@ Learning Objectives:
 
 - Practice incident simulation and self-healing recovery workflows on live environments.
 
-D06: Datadog & Observability (Weeks 14â15 | 13%)
+| Hands-On Lab Assignment: Set up auto-scaling rules, run a load test to trigger scaling, and manually terminate a running container pod to verify self-healing without downtime. |
+| --- |
+
+D06: Datadog & Observability (Weeks 14–15 | 13%)
 
 Week 14: Metrics, Logs & Infrastructure Monitoring
 
@@ -242,6 +208,9 @@ Learning Objectives:
 
 - Build custom dashboards tracking system health, resource utilization, and container metrics.
 
+| Hands-On Lab Assignment: Deploy the Datadog Agent to the cluster and build a custom dashboard tracking CPU/memory metrics, container restarts, and filtered error logs. |
+| --- |
+
 Week 15: APM Tracing & Actionable Alerting
 
 Learning Objectives:
@@ -251,3 +220,6 @@ Learning Objectives:
 - Define Service Level Objectives (SLOs) and meaningful monitors to reduce alert fatigue.
 
 - Configure automated alert routing to incident channels (e.g., Slack or PagerDuty).
+
+| Hands-On Lab Assignment: Instrument Datadog APM on the backend API to trace database queries and configure an alert monitor that fires a notification when error rates spike. |
+| --- |
