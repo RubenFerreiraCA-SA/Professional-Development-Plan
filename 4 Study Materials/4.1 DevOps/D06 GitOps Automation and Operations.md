@@ -138,40 +138,95 @@ On a fresh shell with `kubectl` context `kind-harbour`, re-run `flux check` and 
 
 ### 6.2.4 Worked example — hand off from bootstrap token to read-only Git access
 
-**Bootstrap** often needs write access so Flux can commit its install manifests once. **Ongoing reconciliation** should only **read** desired state. Rotating or deleting the personal access token in GitHub **does not** by itself replace the Secret already stored in the cluster — you must configure the controller’s Git credentials, verify sync, **then** revoke the bootstrap credential.
+**Bootstrap** often needs write access so Flux can commit its install manifests once. **Ongoing reconciliation** should only **read** desired state. Rotating or deleting the personal access token in GitHub **does not** by itself replace the Secret already stored in the cluster.
 
-1. Create a **deploy key** (read-only) on the training repo, or a fine-scoped token with contents/read only. Save the private key locally (not in Git).
+**Planned transition ≠ uninterrupted availability.** On a training kind cluster, a short reconcile outage while you cut over credentials is acceptable if you treat it as a **maintenance window**: prepare the new identity, switch Secret and URL **together**, verify, then revoke the old token. Do not claim zero-downtime rotation unless you have dual credentials overlapping by design (advanced; not required here).
 
-2. Create / replace the Secret Flux uses for the GitRepository (bootstrap with `--token-auth` typically stores HTTPS credentials in `flux-system` in namespace `flux-system`):
+#### Path A — stay on HTTPS (simplest atomic swap)
+
+Replace the token **inside** the existing HTTPS Secret. `GitRepository.spec.url` stays `https://…` — Secret and URL never disagree.
 
 ```bash
-# SSH deploy key path (preferred for ongoing pull):
+# Read-only PAT (contents:read) — store only in the cluster Secret, not in Git
 flux create secret git flux-system \
+  --namespace=flux-system \
+  --url="https://github.com/${GITHUB_USER}/${GITHUB_REPO}.git" \
+  --username=git \
+  --password="${GITHUB_READONLY_TOKEN}"
+
+flux reconcile source git flux-system -n flux-system
+flux get sources git flux-system -n flux-system
+```
+
+**Expected:** Source Ready=True using the new token. **Then** revoke the bootstrap PAT. Reconcile once more to prove the revoked token is unused.
+
+#### Path B — HTTPS → SSH deploy key (coordinate Secret + URL)
+
+`GitRepository.spec.url` and the Secret’s credential material **must agree** (HTTPS Secret with `https://` URL, or SSH key Secret with `ssh://` URL). Changing only one first breaks fetch until the other catches up — that is a **planned cutover**, not a seamless handoff.
+
+1. Create a **read-only deploy key** on the training repo. Save the private key locally (not in Git).
+
+2. Capture known_hosts for the Git host (Flux SSH Secrets need host key material):
+
+```bash
+ssh-keyscan github.com > /tmp/flux-known_hosts 2>/dev/null
+# Spot-check: file is non-empty and lists github.com
+wc -l /tmp/flux-known_hosts
+```
+
+3. **Prepare** the new Secret YAML and the GitRepository URL edit **before** applying either permanently. Prefer a **new Secret name** so you can point the GitRepository at it in one commit:
+
+```bash
+flux create secret git flux-system-ssh \
   --namespace=flux-system \
   --url="ssh://git@github.com/${GITHUB_USER}/${GITHUB_REPO}.git" \
   --private-key-file="${HOME}/.ssh/harbour-flux-ro" \
-  --export > /tmp/flux-git-secret.yaml
-# Inspect locally; apply without committing the private key:
-kubectl apply -f /tmp/flux-git-secret.yaml
-shred -u /tmp/flux-git-secret.yaml 2>/dev/null || rm -f /tmp/flux-git-secret.yaml
+  --known-hosts-file=/tmp/flux-known_hosts \
+  --export > /tmp/flux-git-secret-ssh.yaml
+# Inspect locally (no private key in git):
+kubectl apply -f /tmp/flux-git-secret-ssh.yaml
+shred -u /tmp/flux-git-secret-ssh.yaml 2>/dev/null || rm -f /tmp/flux-git-secret-ssh.yaml
+rm -f /tmp/flux-known_hosts
 ```
 
-If you stay on HTTPS, recreate the Secret with the **read-only** token (`flux create secret git ... --username=git --password=...`) and point the `GitRepository` `secretRef` at it. If you switch URL scheme (HTTPS → SSH), update the `GitRepository` `.spec.url` in Git under `clusters/harbour-local/` and push so the change is auditable.
+4. In the same local change set under `clusters/harbour-local/` (bootstrap GitRepository manifest), set **both**:
 
-3. **Verify reconciliation still works** *before* revoking anything:
+- `.spec.url` → `ssh://git@github.com/${GITHUB_USER}/${GITHUB_REPO}.git`
+- `.spec.secretRef.name` → `flux-system-ssh`
+
+Commit and push that single change (or apply the patched GitRepository once if you are mid-bootstrap and the source cannot pull yet — then commit the same YAML so Git catches up):
 
 ```bash
-flux reconcile source git flux-system -n flux-system
-flux get sources git -A
-kubectl -n flux-system get secret flux-system -o jsonpath='{.type}{"\n"}'
-# After §6.4 exists, also: flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+# Example one-shot apply for the cutover window (still commit the same fields to Git):
+kubectl -n flux-system patch gitrepository flux-system --type=merge -p '{
+  "spec": {
+    "url": "ssh://git@github.com/'"${GITHUB_USER}"'/'"${GITHUB_REPO}"'.git",
+    "secretRef": { "name": "flux-system-ssh" }
+  }
+}'
 ```
 
-**Expected:** Source Ready=True with the new credential. If it fails, **do not** revoke the bootstrap token yet — fix auth first.
+**Do not** apply an SSH-only Secret to a GitRepository that still says `https://…`, and do not flip the URL to `ssh://` while the Secret still only holds an HTTPS token.
 
-4. **Only then** revoke the original bootstrap PAT / broad token in the Git host UI. Confirm a forced reconcile still succeeds.
+5. **Verify the new identity** before revoking anything:
 
-5. Record in the Progress Log: bootstrap credential type, replacement type (deploy key vs RO token), revoke time, and the reconcile command that proved continuity.
+```bash
+kubectl -n flux-system get gitrepository flux-system \
+  -o jsonpath='url={.spec.url} secret={.spec.secretRef.name}{"\n"}'
+flux reconcile source git flux-system -n flux-system
+flux get sources git flux-system -n flux-system
+kubectl -n flux-system logs deploy/source-controller --tail=40 | grep -iE 'error|github|ssh|auth' || true
+# After §6.4 exists:
+# flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+```
+
+**Expected:** `url` is `ssh://…`, `secretRef` is `flux-system-ssh`, Source Ready=True. If it fails (host key, deploy key not read-only on the right repo, wrong URL), **fix before** revoking the bootstrap token — you may temporarily patch back to HTTPS + old Secret to restore fetch while you debug.
+
+6. **Only then** revoke the original bootstrap PAT in the Git host UI. Delete or leave unused the old `flux-system` HTTPS Secret once you are sure nothing references it. Force reconcile again.
+
+7. Progress Log: path chosen (A/B), cutover window acknowledged, `url` + `secretRef` pair, revoke time, reconcile proof.
+
+**Reflect:** Why is “update Secret, then later update URL” unsafe even if each step looks correct in isolation?
 
 ### 6.2.5 Challenge — credential blast radius
 
@@ -840,22 +895,60 @@ spec:
           averageUtilization: 50
 ```
 
-Add `- hpa.yaml` under staging `resources:`. Commit, reconcile, then generate load and watch utilisation:
+Add `- hpa.yaml` under staging `resources:`. Commit and reconcile.
+
+**Two different claims — keep them separate:**
+
+| Claim | What proves it | What does **not** prove it |
+| --- | --- | --- |
+| **HPA configured** | Object exists; `TARGETS` shows a **numeric** CPU % (not `<unknown>`); scaleTargetRef points at `harbour-api` | HTTP load that barely moves CPU |
+| **Scale-out demonstrated** | `REPLICAS` rises above `minReplicas` under load you caused, with `kubectl top` showing elevated CPU | Configuring the HPA alone |
 
 ```bash
 flux reconcile kustomization harbour-api-staging -n flux-system --with-source
 kubectl -n harbour-staging get hpa harbour-api
 kubectl -n harbour-staging describe hpa harbour-api
+# Competent bar for "HPA configured": TARGETS is numeric, e.g. 2%/50% — not <unknown>
+```
 
-# Load against the port-forward (or ClusterIP via a throwaway pod):
-kubectl -n harbour-staging run loadgen --rm -it --restart=Never --image=busybox:1.36 -- \
+**Optional HTTP load (may not scale):** Harbour’s `/health` is cheap. A busybox wget loop is fine for traffic/churn experiments but often **will not** drive CPU to the HPA threshold. Treat scale-out here as best-effort only.
+
+```bash
+kubectl -n harbour-staging run loadgen-http --rm -it --restart=Never --image=busybox:1.36 -- \
   /bin/sh -c 'while true; do wget -q -O- http://harbour-api/health >/dev/null; done'
-# In another terminal while loadgen runs:
+```
+
+**Controlled CPU load (prefer this to demonstrate scale-out):** burn CPU **inside** a Harbour pod so metrics-server sees utilisation on the HPA’s scale target. Training only — delete when done.
+
+```bash
+# Record baseline:
+kubectl -n harbour-staging get deploy harbour-api -o jsonpath='replicas={.status.replicas}{"\n"}'
+kubectl -n harbour-staging get hpa harbour-api
+
+POD="$(kubectl -n harbour-staging get pod -l app=harbour-api -o jsonpath='{.items[0].metadata.name}')"
+# Stress one replica's CPU (python is in the Harbour image from D03):
+kubectl -n harbour-staging exec -it "$POD" -- python -c '
+import multiprocessing as mp, time
+def burn():
+    while True:
+        x = 0
+        for i in range(10_000_000):
+            x += i
+if __name__ == "__main__":
+    procs = [mp.Process(target=burn) for _ in range(2)]
+    for p in procs: p.start()
+    time.sleep(180)
+    for p in procs: p.terminate()
+'
+
+# While that runs (second terminal):
 kubectl -n harbour-staging top pods
 kubectl -n harbour-staging get hpa harbour-api -w
 ```
 
-**Expected:** HPA `TARGETS` shows a real CPU percentage (not `<unknown>`); under sustained load, `REPLICAS` may rise toward `maxReplicas`. Record before/after replica counts and a `kubectl top pods` sample. If CPU stays near zero, lower the target temporarily or run a tighter loop — do not invent scale events you did not observe.
+**Expected for scale-out evidence:** `kubectl top` shows the stressed pod’s CPU clearly elevated; HPA `TARGETS` climbs; `REPLICAS` increases (allow a minute or two for the HPA sync period). Record baseline replicas, peak replicas, and a `top` sample. If replicas never move, say so honestly — you still pass **HPA configured** with numeric targets; mark **scale-out demonstrated** only when replicas actually rose.
+
+When finished, delete any leftover loadgen pods and let the HPA (or a reconcile) return replicas toward `minReplicas`.
 
 `--kubelet-insecure-tls` is a **kind training** compromise. Do not carry it into a production cluster hardening story without justification.
 
@@ -996,7 +1089,7 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 3. Reviewed promotion of the **same** artifact between envs via Git, with **both** environments verified running that image after reconcile.
 4. Broken-release drill with diagnosis and **Git** rollback of a **recorded** bad commit SHA (not a blind `revert HEAD`).
 5. Drift drill with reconcile or documented non-auto policy.
-6. Pod kill / HPA experiment evaluated against client-facing behaviour (HPA only claimed if metrics-server shows real CPU).
+6. Pod kill / HPA experiment evaluated against client-facing behaviour. Separate evidence: **HPA configured** (numeric targets via metrics-server) vs **scale-out demonstrated** (replicas rose under controlled CPU load — not assumed from HTTP wget alone).
 7. Runbook covering rollout failure, secrets and data assumptions; image-pull auth path documented if private registries were used.
 
 ### Evaluation rubric
@@ -1017,13 +1110,13 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 - Does Flux/Argo show the same image Git declares in **staging and prod**?
 - Can you promote without cluster creds in CI?
 - Did rollback revert the recorded `BAD_SHA` on the Flux-tracked branch?
-- Are secrets absent from the repo? Was the bootstrap token revoked after the read-only handoff?
+- Are secrets absent from the repo? Did Secret + GitRepository URL agree during cutover, and was the bootstrap token revoked only after the new identity reconciled?
 - Is prune scoped safely? Is the kind runtime vs D05 ECS platform difference clear in your ADR?
 - Does the runbook admit what Git revert cannot fix?
 
 ### Example assessment conclusion (evidence still required)
 
-> kind cluster `harbour` (not the D05 ECS service) runs Flux against staging and prod overlays. Bootstrap PAT was replaced with a read-only deploy key, then revoked. Promotion PRs pinned the same `harbour-api:good` (or digest) in both envs; both Kustomizations reconciled to matching images. `BAD_SHA` … was reverted as `REVERT_SHA` …; `/ready` recovered. Manual scale drift self-healed. Pod kill showed brief client errors with two replicas. metrics-server installed; `kubectl top` showed CPU; HPA targets were numeric. Runbook committed. Terraform remains out of the Deployment ownership path.
+> kind cluster `harbour` (not the D05 ECS service) runs Flux against staging and prod overlays. Bootstrap PAT → read-only path: HTTPS RO token swap (or atomic SSH URL+secretRef cutover with known_hosts); verified Ready; then PAT revoked. Promotion PRs pinned the same `harbour-api:good` (or digest) in both envs; both Kustomizations reconciled to matching images. `BAD_SHA` … was reverted as `REVERT_SHA` …; `/ready` recovered. Manual scale drift self-healed. Pod kill showed brief client errors with two replicas. HPA configured (numeric targets); scale-out demonstrated with in-pod CPU burn (replicas 2→N). Runbook committed. Terraform remains out of the Deployment ownership path.
 
 ---
 
