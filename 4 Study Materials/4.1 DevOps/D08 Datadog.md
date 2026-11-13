@@ -419,27 +419,36 @@ Document target (e.g. 99%), window and what burns the budget — same arithmetic
 - Validation: seed metric data first → stop Agent → wait for status **No Data** (not “Alert”) → start Agent → **OK**. Confirm notify if configured.  
 - Runbook: `docs/observability/datadog/runbook-missing-telemetry.md` — distinguish “app down” vs “blind.”
 
-**Validation protocol (both monitors):**
+**Validation protocol (per monitor — statuses differ):**
 
 ```text
+Error-rate (Monitor 1):
 1. Record monitor ID + query screenshot/JSON
-2. Induce condition ( /v1/fail loop  OR  stop Agent )
-3. Wait until Datadog shows Alert (poll UI — do not claim Alert after a fixed sleep alone)
-4. Mitigate (stop faults / start Agent)
-5. Confirm recovery (**OK → No Data → OK** for missing-telemetry; threshold **Alert** only for the error-rate monitor)
+2. Induce /v1/fail traffic
+3. Wait until Datadog shows Alert (poll UI — not a fixed sleep alone)
+4. Stop fault injection
+5. Confirm recovery: Alert → OK
+
+Missing-telemetry (Monitor 2):
+1. Record monitor ID; seed system.cpu.user while Agent is up (monitor OK)
+2. Stop datadog-agent; confirm app /health still OK
+3. Wait until Datadog shows No Data (not Alert)
+4. Confirm training notify if configured
+5. Start Agent; confirm recovery: OK → No Data → OK
 ```
 
 | Claim | Evidence |
 | --- | --- |
 | Monitor **configured** | Query + thresholds saved |
-| Monitor **Alert observed** | UI state or Events timeline |
-| On-call **paged** | Only if your training notify target received a message |
+| Error-rate **Alert → OK** | UI state or Events timeline |
+| Missing-telemetry **OK → No Data → OK** | UI status text/screenshot (No Data ≠ Alert) |
+| On-call **paged** / notify received | Only if your training notify target got a message |
 
 ### 8.5.4 Noisy threshold refinement
 
 Create a deliberately noisy CPU > 5% monitor, observe flapping, then fix with longer window / grouping / smarter query. Record before/after.
 
-**Verify:** Dashboard + SLO exist; both monitors have Alert-observed validation notes.
+**Verify:** Dashboard + SLO exist; Monitor 1 has Alert → OK evidence; Monitor 2 has OK → No Data → OK evidence.
 
 ---
 
@@ -759,7 +768,7 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 | --- | --- | --- | --- |
 | Intake | Agent installed | OTLP/APM/logs + UST consistent | Collector dual-path or K8s DaemonSet hardened |
 | Correlation | Separate signals | Click-through trace↔log↔version | Broken propagation found and fixed |
-| Monitors | Created in UI | Both validated to Alert + recover | Terraform-managed + notify proof |
+| Monitors | Created in UI | Error-rate Alert→OK; missing-telemetry OK→No Data→OK | Terraform-managed + notify proof |
 | Incidents | Restarted stuff | Hypotheses + contradict + SLI verify | Separates CPU coincidence from cause |
 | Platform | One service | Second service via onboarding doc | Module/automation for new services |
 | Governance | Ignored cost | Written review with controls | Measured ingest + tag policy enforced |
@@ -771,7 +780,7 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 - Does `/proc/1/cmdline` show `opentelemetry-instrument`?  
 - Did you start **only** `docker-compose.datadog.yml` (Collector not defined; D07 stack `down`)?  
 - Can you click Trace → Log and Log → Trace for the same `trace_id`?  
-- Can you show Alert → recover for **both** monitors?  
+- Can you show error-rate **Alert → OK** and missing-telemetry **OK → No Data → OK**?  
 - Was `worker` started only after `harbour_worker` source existed (§8.7.3)?  
 - Does missing-telemetry evidence show **No Data** (not mislabeled Alert)?  
 - Are keys absent from Git and not blanked by Compose `${DD_API_KEY}`?
