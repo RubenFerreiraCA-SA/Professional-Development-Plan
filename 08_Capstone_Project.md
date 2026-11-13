@@ -8,7 +8,7 @@ Organisation-neutral project brief, architecture, progressive deliverables, acce
 
 ## Programme timing
 
-Work on this organisation-neutral capstone accumulates across all disciplines. Week 64 (20–26 March 2028) is reserved for the final **technical build, integration and documentation**, not a formal review. Formal assessment and DVT sign-off take place separately and do not consume an instructional week.
+Work on this organisation-neutral capstone accumulates across all disciplines. Week 64 (20–26 March 2028) is a **technical build, integration and documentation teaching week** within P04. Platform engineering learning and capstone integration span Weeks 60–64; formal reviews remain outside the 64-week programme. Formal assessment and DVT sign-off take place separately and do not consume an instructional week.
 
 ## Content to develop
 
