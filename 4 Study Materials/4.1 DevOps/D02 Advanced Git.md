@@ -1,17 +1,17 @@
-# D02 — Advanced Git
+# Chapter 2 — Advanced Git (D02)
 
-*A progressive, hands-on textbook for software developers moving into Platform Engineering*
+*DevOps Engineering textbook · Chapter 2 of 8*
 
 | | Details |
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [D02 course detail](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md) for its provisional estimate. |
 | **Prerequisites** | [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md), regular use of branches, commits and pull/merge requests, and confidence in a terminal. |
 
-## How to study this module
+## How to study this chapter
 
 The purpose of Advanced Git is not to memorise more commands. It is to **predict what Git will do, recognise what has happened, and repair mistakes without endangering a shared delivery system**.
 
-Work through the chapters in order. Each one adds a layer to your mental model and asks you to **understand → inspect → practise → verify → explain**. The worked examples use a small application inspired by the **Harbour API** repository from D01. You can bring the lessons back to that Final Project repository, but use **disposable local repositories for all history rewriting, conflict and recovery drills**. Never reproduce a destructive exercise on a real team's `main` branch.
+Work through the sections in order. Each one adds a layer to your mental model and asks you to **understand → inspect → practise → verify → explain**. The worked examples use a small application inspired by the **Harbour API** repository from D01. You can bring the lessons back to that Final Project repository, but use **disposable local repositories for all history rewriting, conflict and recovery drills**. Never reproduce a destructive exercise on a real team's `main` branch.
 
 This text teaches the requirements defined in [D02 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md), which remains the authoritative outline. The [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md) describes how D02 connects to the larger programme.
 
@@ -47,9 +47,9 @@ pwd
 
 ---
 
-## Chapter 1 — A Git commit is a snapshot in a graph
+## Section 2.1 — A Git commit is a snapshot in a graph
 
-### 1.1 Why a mental model matters
+### 2.1.1 Why a mental model matters
 
 Git is a *distributed version-control system*. It tracks snapshots of files and the relationships between those snapshots. A branch is not a separate directory containing a second copy of your project: it is a movable name that normally points to a commit.
 
@@ -65,7 +65,7 @@ A --- B --- C            main
 
 Each letter is a commit, and the lines show **parent relationships**. Commit `D` has `B` as its parent; `E` has `D` as its parent. `C` and `E` share an ancestor, `B`, but neither is necessarily a descendant of the other. A label such as `main` just tells you which commit a ref currently names.
 
-### 1.2 Git's four important object concepts
+### 2.1.2 Git's four important object concepts
 
 Git stores content in an object database, usually under `.git/objects`:
 
@@ -79,7 +79,7 @@ Git stores content in an object database, usually under `.git/objects`:
 
 Object IDs are content-derived. Even if two commits point to equivalent file trees, differences in parents, timestamps, metadata or messages generally give them distinct identities. This is why rewriting history is consequential even when the resulting files look the same.
 
-### 1.3 Worked example: create and inspect objects
+### 2.1.3 Worked example: create and inspect objects
 
 Create a *fresh* local training repository:
 
@@ -118,7 +118,7 @@ Read the output deliberately:
 - `git ls-tree -r HEAD` walks the snapshot and lists the blob object associated with `app/service.txt`.
 - `git show HEAD:app/service.txt` reads the file content from the commit, which may be different from the current working directory later.
 
-### Practice 1
+### Exercise 2.1
 
 Change only the commit message of a new local throwaway commit using `git commit --amend`, then compare the old and new commit IDs. **Do this only for a commit that has not been published.** Explain why changing a message changes the object's identity even if its file tree is unchanged.
 
@@ -130,9 +130,9 @@ Can `git status` tell you everything about whether a commit has been published? 
 
 ---
 
-## Chapter 2 — Three trees: working directory, index and committed snapshot
+## Section 2.2 — Three trees: working directory, index and committed snapshot
 
-### 2.1 The three places a change can exist
+### 2.2.1 The three places a change can exist
 
 A useful everyday model is:
 
@@ -145,7 +145,7 @@ The working directory is what your editor sees. The **index** records the next c
 
 The difference between these explains why `git diff`, `git diff --cached` and `git show HEAD` can display different content.
 
-### 2.2 Worked example: stage one version, edit another
+### 2.2.2 Worked example: stage one version, edit another
 
 In `objects-demo`:
 
@@ -163,7 +163,7 @@ git diff --cached -- app/service.txt
 
 This matters in platform repositories: a developer may believe they are reviewing one configuration while the index contains another.
 
-### 2.3 Restore, reset and revert are not synonyms
+### 2.2.3 Restore, reset and revert are not synonyms
 
 | Command | Primary intention | Typical scope |
 | --- | --- | --- |
@@ -176,7 +176,7 @@ This matters in platform repositories: a developer may believe they are reviewin
 
 These commands are context-sensitive. For example, `git reset --hard` can discard uncommitted tracked-file changes; it does not necessarily erase every untracked file. Never use it as a reflexive “cleanup” step.
 
-### Practice 2
+### Exercise 2.2
 
 In your sandbox, save the output of the staged and unstaged diffs. Then run:
 
@@ -200,9 +200,9 @@ Which action is safest when an already-published deployment configuration must b
 
 ---
 
-## Chapter 3 — Refs, HEAD, history and the merge base
+## Section 2.3 — Refs, HEAD, history and the merge base
 
-### 3.1 Branches are pointers; HEAD tells you what is checked out
+### 2.3.1 Branches are pointers; HEAD tells you what is checked out
 
 Most of the time, `HEAD` is a symbolic reference to a branch such as `refs/heads/main`. When you check out a specific commit rather than a branch, you enter **detached HEAD** state. You can inspect and even commit there, but those new commits are not automatically named by a long-lived branch.
 
@@ -223,7 +223,7 @@ git log --graph --decorate --oneline --all
 
 The feature and `main` now have independent commits after their common starting point.
 
-### 3.2 Find a common ancestor
+### 2.3.2 Find a common ancestor
 
 ```bash
 git merge-base main feature/health-details
@@ -238,7 +238,7 @@ The **merge base** is a best common ancestor. For ordinary divergent history:
 
 A three-dot *diff* is not the same as a three-dot *log*. Git uses the notation differently depending on the command; always check what question a command answers.
 
-### 3.3 Detached HEAD: a recoverable state, not a catastrophe
+### 2.3.3 Detached HEAD: a recoverable state, not a catastrophe
 
 ```bash
 git switch --detach HEAD~1
@@ -257,7 +257,7 @@ git switch -c saved/experiment
 
 Use the command *while still at that detached commit*. Otherwise identify the old commit via reflog first.
 
-### Practice 3
+### Exercise 2.3
 
 Draw your actual branch graph with four or five commit IDs and show the parent of each non-root commit. Explain which diff range a reviewer should use and why. Save the merge-base ID and a short decision note.
 
@@ -267,9 +267,9 @@ Understanding commit ancestry helps when an artifact is deployed from an unexpec
 
 ---
 
-## Chapter 4 — Merge, squash merge, rebase and cherry-pick
+## Section 2.4 — Merge, squash merge, rebase and cherry-pick
 
-### 4.1 Four strategies, four different histories
+### 2.4.1 Four strategies, four different histories
 
 Suppose the graph is:
 
@@ -295,7 +295,7 @@ A --- B --- C ------- M   main
 
 No strategy is universally superior. Teams should consider collaboration style, auditability, backports, GitOps reconciliation and cost of investigating production incidents.
 
-### 4.2 A reproducible comparison
+### 2.4.2 A reproducible comparison
 
 Rather than modify the D01 repository, build two independent copies of a small history:
 
@@ -349,7 +349,7 @@ git diff demo/merge demo/squash
 
 **Expected:** The merge commit has two parent IDs, while the squash commit has one. Because the two integrations start from the same `main` and apply the same feature changes, their resulting file snapshots should be equivalent, so the final diff should be empty.
 
-### 4.3 Explore rebase without rewriting a shared branch
+### 2.4.3 Explore rebase without rewriting a shared branch
 
 Create a **new, disposable copy** of the feature branch at its original tip and replay it onto `main`:
 
@@ -363,7 +363,7 @@ git rev-parse demo/rebase
 
 **Expected:** `demo/rebase` ends at new commit IDs; the original `feature/retries` ref is unchanged. The `demo/rebase` branch begins from `main` and contains replayed feature commits.
 
-### 4.4 Cherry-pick for backports
+### 2.4.4 Cherry-pick for backports
 
 Create a new branch from the baseline and selectively replay a feature commit:
 
@@ -381,7 +381,7 @@ git log --oneline -3
 
 **Expected:** The backport gains the retries change, but not the later backoff change. The cherry-picked commit has a new ID because its parent is different.
 
-### Practice 4 — an integration policy ADR
+### Exercise 2.4 — an integration policy ADR
 
 Compare your four histories and answer:
 
@@ -395,9 +395,9 @@ Write a short `docs/decisions/0002-integration-policy.md` in the *real* Harbour 
 
 ---
 
-## Chapter 5 — Conflicts are competing intentions, not just broken text
+## Section 2.5 — Conflicts are competing intentions, not just broken text
 
-### 5.1 How a three-way merge works
+### 2.5.1 How a three-way merge works
 
 Git compares **base**, **ours** and **theirs** versions of content. When two branches edit overlapping text, Git may not know the intended combined result. It pauses rather than inventing the application's meaning.
 
@@ -408,7 +408,7 @@ During an ordinary merge:
 
 For rebases, “ours” and “theirs” can be counterintuitive because the replayed commit is being applied onto another base. Never make a decision using the label alone; inspect the stages and graph.
 
-### 5.2 Simulate two developers with two clones
+### 2.5.2 Simulate two developers with two clones
 
 This is an intentionally **local-only collaboration test**. It uses a bare repository as a shared remote, avoiding the need for credentials or a hosted service.
 
@@ -469,7 +469,7 @@ cat settings.conf
 
 You should see the base `timeout=5`, Bob's version `timeout=3` and Alice's version `timeout=10`. The working file contains conflict markers.
 
-### 5.3 Resolve by engineering intent
+### 2.5.3 Resolve by engineering intent
 
 A resolver should not choose `timeout=10` merely because it was “theirs”, nor `timeout=3` because it was “ours”. The decision depends on request latency, retry budgets, upstream failure characteristics and product requirements.
 
@@ -487,13 +487,13 @@ If the editor opens for the merge message, save and close it. For a *merge* conf
 
 **Expected:** The merge commit has two parents and the resolved file contains exactly `timeout=8`.
 
-### 5.4 Abort and re-attempt safely
+### 2.5.4 Abort and re-attempt safely
 
 In a fresh throwaway clone, recreate a similar conflict and run `git merge --abort`. Confirm the branch returns to its pre-merge state. A rebase stopped in conflict is instead aborted with `git rebase --abort`.
 
 Do not run abort commands blindly if you have unrelated uncommitted work. Inspect `git status` and save work safely *before* starting complex operations.
 
-### Practice 5
+### Exercise 2.5
 
 Create a second conflict involving a deployment manifest's replica count or health timeout. Write a five-sentence resolution note: base, competing intentions, chosen result, validation and operational risk.
 
@@ -503,15 +503,15 @@ Is a syntactically conflict-free merge automatically correct? **No.** Two change
 
 ---
 
-## Chapter 6 — Recovering work and undoing mistakes
+## Section 2.6 — Recovering work and undoing mistakes
 
-### 6.1 A ref moves; objects do not instantly vanish
+### 2.6.1 A ref moves; objects do not instantly vanish
 
 A branch points at a commit. If you move the branch backward, previously referenced commits may become unreachable from branch heads, but can often be found through the **reflog**. Reflogs are local records of ref movement and are subject to expiration and garbage collection; they are not an indefinite backup or a reliable record stored on every remote.
 
 This explains why the correct recovery technique depends on whether work was **local/unpublished** or **published/shared**.
 
-### 6.2 Recover an intentionally discarded local commit
+### 2.6.2 Recover an intentionally discarded local commit
 
 Use a separate repository for this destructive demonstration:
 
@@ -552,7 +552,7 @@ git log --oneline --all --graph
 
 If your reflog cannot locate the commit, investigate `git fsck --unreachable` in a disposable environment; understand that pruning and garbage collection can make retrieval impossible.
 
-### 6.3 Published history calls for revert
+### 2.6.3 Published history calls for revert
 
 Suppose a broken configuration commit has already been merged and teammates may have fetched it. Moving a shared branch backward with `reset` and force-pushing would invalidate other people's assumptions and potentially bypass the team's review policy.
 
@@ -578,7 +578,7 @@ cat flags.conf
 
 **Expected:** The latest commit is a revert; the file content returns to `feature=off`. The original feature commit **still exists in history**. `git revert` may conflict if later changes overlap, and reverting merge commits requires a deliberate mainline-parent choice.
 
-### 6.4 Compare the correct recovery tools
+### 2.6.4 Compare the correct recovery tools
 
 | Situation | Prefer | Why |
 | --- | --- | --- |
@@ -589,7 +589,7 @@ cat flags.conf
 | Bad change already on protected `main` | Reviewed `git revert` commit | Keeps shared history and makes rollback auditable |
 | Credential leaked into history | Revoke/rotate first, then coordinated response | Removing the latest line does not unexpose the credential |
 
-### Practice 6
+### Exercise 2.6
 
 Write a short incident response for each scenario above. For a published bad deployment configuration, explain how reverting the *desired-state commit* will later interact with GitOps (D06). Note that reversing configuration does **not** undo irreversible data migrations or side effects.
 
@@ -599,9 +599,9 @@ Do not use `git push --force` to repair a protected production branch. Even `--f
 
 ---
 
-## Chapter 7 — Find the first bad commit with git bisect
+## Section 2.7 — Find the first bad commit with git bisect
 
-### 7.1 Regression debugging as binary search
+### 2.7.1 Regression debugging as binary search
 
 A regression means a behaviour that previously worked now fails. If you know one **good** commit and one **bad** commit, `git bisect` checks commits along the ancestry path to narrow down the first bad one.
 
@@ -613,7 +613,7 @@ This works best when:
 
 Git bisect does not automatically explain *why* a commit caused the bug. It identifies a candidate to investigate.
 
-### 7.2 Build an intentionally failing history
+### 2.7.2 Build an intentionally failing history
 
 Create a deterministic shell test and several commits:
 
@@ -648,7 +648,7 @@ git commit -m "docs: record owner"
 
 The shell test exits with success if the timeout is at most 8 and failure otherwise. The first commit was good; the third commit introduced the failure.
 
-### 7.3 Run bisect
+### 2.7.3 Run bisect
 
 ```bash
 git bisect start
@@ -674,21 +674,21 @@ git bisect reset
 
 **Expected:** Git identifies `feat: increase timeout beyond contract` as the first bad commit. `git bisect reset` returns you to your original checked-out state.
 
-### 7.4 More realistic complications
+### 2.7.4 More realistic complications
 
 In production, some commits may be unbuildable or depend on unavailable infrastructure. A test may be flaky, or multiple commits might interact. Under such circumstances, `git bisect skip` can omit an untestable revision, but may leave the result ambiguous.
 
 Also distinguish **first bad commit** from **root cause**. The identified change may merely expose an older defect or violate an unstated contract.
 
-### Practice 7
+### Exercise 2.7
 
 Change the test to check an environment-independent application behaviour. Run bisect again and capture the bisect log. Then explain what extra evidence would be needed before reverting a commit in production.
 
 ---
 
-## Chapter 8 — Engineering history policies for a platform team
+## Section 2.8 — Engineering history policies for a platform team
 
-### 8.1 Git history is an operational asset
+### 2.8.1 Git history is an operational asset
 
 A platform team will eventually need to answer: *Which change led to this deployed artifact? Who reviewed the change? Was it backported? Can we roll it back safely?* An integration policy should support these questions without slowing every developer down.
 
@@ -700,7 +700,7 @@ Consider:
 - **Coordination:** Multiple maintainers should not be forced to recover from routine history rewrites.
 - **Developer experience:** The workflow should be straightforward enough that teams use it consistently.
 
-### 8.2 A practical policy decision
+### 2.8.2 A practical policy decision
 
 For Harbour Platform, compare two proposals:
 
@@ -712,7 +712,7 @@ Neither is inherently wrong. Policy A retains some topology and makes branch int
 
 Decide which fits an application-plus-platform repository. Document assumptions: number of maintainers, review rules, release tagging, backports, and how the build system associates artifacts with commits.
 
-### 8.3 Optional advanced techniques
+### 2.8.3 Optional advanced techniques
 
 These topics go beyond the core assessment but are useful when a real problem requires them:
 
@@ -727,7 +727,7 @@ For one optional topic, record the **problem it solves**, a small test and **the
 
 ---
 
-## Final Practical Assessment — history, collaboration and recovery
+## Practical Assessment — Chapter 2 — history, collaboration and recovery
 
 **Scenario:** The Harbour Platform team has two developers editing shared configuration. One change conflicts with another. A local commit disappears during maintenance. A later configuration change introduces a regression into a test branch. The team must recover without rewriting protected shared history.
 
@@ -814,4 +814,4 @@ The conclusion alone is **not** proof; it must be backed by the working reposito
 - [GitHub — Branch protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 
-**Previous textbook:** [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md) · **Course detail:** [D02 — Advanced Git](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md) · **Next textbook:** D03 — Docker and Containerization (not yet authored)
+**Previous chapter:** [Chapter 1 — Repository Fundamentals](D01%20Repository%20Fundamentals.md) · **Course detail:** [D02 — Advanced Git](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md) · **Next chapter:** Chapter 3 — Docker and Containerization (not yet authored)

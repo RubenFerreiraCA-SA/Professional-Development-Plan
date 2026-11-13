@@ -1,5 +1,5 @@
-# D01 — Repository Fundamentals
-*A progressive, hands-on textbook for experienced developers moving into Platform Engineering*
+# Chapter 1 — Repository Fundamentals (D01)
+*DevOps Engineering textbook · Chapter 1 of 8*
 
 | | Details |
 | --- | --- |
@@ -8,9 +8,9 @@
 
 ## How to use this textbook
 
-**Read each chapter in order.** Every chapter adds something to the *same* running project. At the end you will have a small repository that an application team and a platform team can use safely. The explanations begin with fundamentals, but the decisions and final assessment are intended for experienced software developers.
+**Work through each section in order.** Every section adds something to the *same* running project. At the end you will have a small repository that an application team and a platform team can use safely. The explanations begin with fundamentals, but the decisions and final assessment are intended for experienced software developers.
 
-Each chapter contains: **Concept → Worked example → Practice → Verify → Reflect.** Commands target a POSIX shell (Linux/macOS or an equivalent terminal). Use GitHub or GitLab where a hosted provider is needed; controls differ by provider and account plan.
+Each section contains: **Concept → Worked example → Practice → Verify → Reflect.** Commands target a POSIX shell (Linux/macOS or an equivalent terminal). Use GitHub or GitLab where a hosted provider is needed; controls differ by provider and account plan.
 
 **The relationship to the programme:** [D00 syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md) describes the pathway; [D01 course detail](../../3%20Course%20Detail/3.1%20DevOps/D01%20Repository%20Fundamentals.md) defines the outcomes and assessment requirements. This book *teaches* those requirements. The project can grow into the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md).
 
@@ -34,9 +34,9 @@ Do not confuse directories with actual isolation: moving a file under `infra/` d
 
 ---
 
-## Chapter 1 — Why repositories need architecture
+## Section 1.1 — Why repositories need architecture
 
-### 1.1 From storage to an engineering interface
+### 1.1.1 From storage to an engineering interface
 
 A repository stores tracked files and their history, but an engineering organisation also uses it to define *how work moves toward production*. A newcomer should be able to answer:
 
@@ -50,7 +50,7 @@ A repository that answers these questions consistently is a **developer interfac
 
 **Worked example.** Suppose a developer changes the API's timeout. If application code and production infrastructure share a repository with no ownership rules, that developer may unintentionally change deployment configuration in the same pull request. A thoughtful directory structure makes the boundary visible; review rules and automated checks later enforce it.
 
-### 1.2 Repository models and their trade-offs
+### 1.1.2 Repository models and their trade-offs
 
 A **monorepo** houses multiple related components together. It simplifies coordinated changes and shared visibility, but can increase permission complexity and pipeline cost.
 
@@ -60,7 +60,7 @@ A **separate deployment-configuration repository** can isolate production desire
 
 There is no universally correct model. Choose based on change frequency, ownership, secrets boundaries, build tooling and operational risk—not fashionable terminology.
 
-### 1.3 Create the project
+### 1.1.3 Create the project
 
 Run the following in an empty training directory (replace the name if it already exists):
 
@@ -95,9 +95,9 @@ git log -1 --oneline
 
 ---
 
-## Chapter 2 — Collaboration: remotes, branches and reviewed changes
+## Section 1.2 — Collaboration: remotes, branches and reviewed changes
 
-### 2.1 Local Git and the remote host are different systems
+### 1.2.1 Local Git and the remote host are different systems
 
 Git maintains local history. GitHub or GitLab hosts a copy and adds collaboration features: pull/merge requests, permissions, code reviews, checks and branch rules.
 
@@ -105,7 +105,7 @@ A **remote** is a named destination for fetching and pushing Git refs. A **branc
 
 These distinctions matter when a review seems approved but the actual commit changes, or when a remote policy differs from what local Git allows.
 
-### 2.2 Connect the training repository
+### 1.2.2 Connect the training repository
 
 Create an **empty repository** in your chosen Git host, without automatically generating an additional README. Choose private visibility if practical. Copy its HTTPS or SSH clone URL.
 
@@ -121,7 +121,7 @@ Here `origin` is just a conventional remote name. The `-u` establishes upstream 
 
 **Troubleshooting:** A 403/permission error may mean wrong credentials or insufficient repository rights. A non-fast-forward error means the remote history advanced. Inspect and integrate carefully; do not reflexively force-push to `main`.
 
-### 2.3 Work through a branch
+### 1.2.3 Work through a branch
 
 ```bash
 git switch -c docs/add-onboarding
@@ -161,9 +161,9 @@ Request review where possible. If you are the only contributor, use a second aut
 
 ---
 
-## Chapter 3 — Repository hygiene and the boundary around secrets
+## Section 1.3 — Repository hygiene and the boundary around secrets
 
-### 3.1 Tracked, untracked and ignored are different states
+### 1.3.1 Tracked, untracked and ignored are different states
 
 Git records files once you stage and commit them. A `.gitignore` file prevents *untracked* matching files from being suggested for addition in ordinary workflows. It does **not** remove tracked content from history and does **not** secure a secret.
 
@@ -209,7 +209,7 @@ git status --short
 
 **Expected:** `.env` is ignored; `.env.example` can be tracked. The `|| true` lets the check continue when the file is correctly *not* ignored (exit status 1). Review the output rather than treating command success alone as proof.
 
-### 3.2 What if a secret was already committed?
+### 1.3.2 What if a secret was already committed?
 
 If a real credential enters Git history, **revoke or rotate it first**. Removing the current file is insufficient: clones, caches and earlier commits may retain it. History rewriting is a separate, carefully coordinated response with significant disruption and is covered only at a conceptual level here; advanced history mechanics belong in D02.
 
@@ -223,9 +223,9 @@ Use a fabricated token string to demonstrate a preventative scanner. Choose an a
 
 ---
 
-## Chapter 4 — Ownership is not the same as permission
+## Section 1.4 — Ownership is not the same as permission
 
-### 4.1 Identify who is accountable
+### 1.4.1 Identify who is accountable
 
 A code owner is the person or team responsible for reviewing changes in a particular part of the codebase. **Ownership is a review and accountability concept**; filesystem layout alone does not enforce it.
 
@@ -233,7 +233,7 @@ A protected branch is a host-side policy controlling what changes may reach a br
 
 A repository role governs what an identity can do (read, write, maintain, administer). A permission and an approval rule solve different problems: someone may be allowed to propose an infrastructure change without being allowed to approve or merge it.
 
-### 4.2 Worked example: GitHub CODEOWNERS
+### 1.4.2 Worked example: GitHub CODEOWNERS
 
 If using GitHub, create `.github/CODEOWNERS`:
 
@@ -247,7 +247,7 @@ Replace the placeholders with **existing users or teams that have appropriate re
 
 **Important nuance:** In GitHub, the CODEOWNERS file identifies requested owners, but a branch protection rule or ruleset requiring code-owner review is needed to *enforce* that review. Host plans and repository settings may restrict what you can enable.
 
-### 4.3 Build a permission matrix
+### 1.4.3 Build a permission matrix
 
 Write down the intended rules **before** clicking settings:
 
@@ -268,9 +268,9 @@ This is a *design example*, not an automatically implemented access policy. Your
 
 ---
 
-## Chapter 5 — The repository as a software supply-chain boundary
+## Section 1.5 — The repository as a software supply-chain boundary
 
-### 5.1 Why trust must follow the change
+### 1.5.1 Why trust must follow the change
 
 Consider this chain:
 
@@ -289,7 +289,7 @@ Threats include a stolen developer credential, an untrusted pull request that ex
 
 Protecting `main` is essential but not sufficient. A passing review does not prove a package is safe, a commit signature does not guarantee correct code, and repository access does not establish who deployed an artifact.
 
-### 5.2 Design controls according to their purpose
+### 1.5.2 Design controls according to their purpose
 
 | Control | Protects against | Does **not** guarantee |
 | --- | --- | --- |
@@ -301,7 +301,7 @@ Protecting `main` is essential but not sufficient. A passing review does not pro
 | Signed commits/tags | Some forms of provenance spoofing | The signed content is trustworthy |
 | Required CI checks | Merging without specified validations | The test suite covers all risks |
 
-### 5.3 Worked threat scenario
+### 1.5.3 Worked threat scenario
 
 Imagine an external contributor opens a request that modifies `.github/workflows/release.yml`. A workflow running untrusted source with a token capable of publishing packages may leak or misuse credentials. That can happen even though the application code looks harmless.
 
@@ -321,9 +321,9 @@ You are **not** required to implement CI here; this is the threat model that D04
 
 ---
 
-## Chapter 6 — Document decisions instead of accumulating rules
+## Section 1.6 — Document decisions instead of accumulating rules
 
-### 6.1 The architecture decision record
+### 1.6.1 The architecture decision record
 
 Engineers need to know not only **what** was chosen, but **why**. An ADR makes important trade-offs discoverable after the original author leaves.
 
@@ -351,7 +351,7 @@ Consequences:
 
 The file above is a **starting point**, not a conclusion you must copy. Make an actual decision based on your scenario. A useful ADR is short enough to read and specific enough to disagree with.
 
-### 6.2 Make onboarding a repeatable contract
+### 1.6.2 Make onboarding a repeatable contract
 
 Expand `CONTRIBUTING.md` to answer:
 
@@ -371,17 +371,17 @@ Expand `CONTRIBUTING.md` to answer:
 
 ---
 
-## Chapter 7 — Put the repository under test
+## Section 1.7 — Put the repository under test
 
 The earlier chapters produced a repository layout, a collaboration workflow, ignore rules, ownership intentions, provider controls and an ADR. Now test them together.
 
-### 7.1 Integration exercise
+### 1.7.1 Integration exercise
 
 Create a feature branch that changes two things: an application README and an infrastructure README. Open a pull/merge request and observe which reviewers are requested. Explain whether the merge is blocked until an authorised reviewer approves it.
 
 Then create a second harmless request that affects only `app/`. Compare the review requirements. If your host cannot enforce the distinction, explain the limitation and what repository architecture or host policy could solve it.
 
-### 7.2 Test the failure modes
+### 1.7.2 Test the failure modes
 
 Use a training identity and non-sensitive changes:
 
@@ -393,13 +393,13 @@ Use a training identity and non-sensitive changes:
 
 Do not create real secrets, destructive branch mutations or intentionally malicious workflows to perform these tests.
 
-### 7.3 The difference between evidence and assertion
+### 1.7.3 The difference between evidence and assertion
 
 A screenshot of a branch-rule setting proves it was displayed. A rejected unauthorised merge attempt offers stronger evidence that it was *enforced*. Conversely, a plan limitation means you cannot demonstrate enforcement. In a professional assessment, saying **“not enforceable in this environment; here is the alternative”** is better than pretending.
 
 ---
 
-## Final Practical Assessment — production-ready repository foundation
+## Practical Assessment — Chapter 1 — production-ready repository foundation
 
 **Scenario:** You are joining a platform team supporting two delivery groups. Developers need a straightforward contribution process. The application team should be able to work rapidly, while production-related infrastructure and deployment changes demand stronger oversight.
 
@@ -457,4 +457,4 @@ Use these as references when a feature behaves differently on your host—not as
 - [GitHub — CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 
-**Course detail:** [D01 — Repository Fundamentals](../../3%20Course%20Detail/3.1%20DevOps/D01%20Repository%20Fundamentals.md) · **Next textbook:** [D02 — Advanced Git](D02%20Advanced%20Git.md)
+**Course detail:** [D01 — Repository Fundamentals](../../3%20Course%20Detail/3.1%20DevOps/D01%20Repository%20Fundamentals.md) · **Next chapter:** [Chapter 2 — Advanced Git](D02%20Advanced%20Git.md)
