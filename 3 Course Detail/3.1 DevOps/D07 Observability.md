@@ -145,4 +145,6 @@ Deliver evidence independent of any particular commercial monitoring vendor:
 - [Google SRE — Service Level Objectives](https://sre.google/sre-book/service-level-objectives/)
 - [Google SRE Workbook — Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/)
 
+**Textbook:** [Chapter 7 — Observability](../../4%20Study%20Materials/4.1%20DevOps/D07%20Observability.md)
+
 **Previous:** [D06 — GitOps, Automation and Operations](D06%20GitOps%20Automation%20and%20Operations.md) · **Next:** [D08 — Datadog](D08%20Datadog.md)

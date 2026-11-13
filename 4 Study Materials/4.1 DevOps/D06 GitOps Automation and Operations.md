@@ -1157,4 +1157,4 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 - [kind](https://kind.sigs.k8s.io/)
 - [Kustomize](https://kubectl.docs.kubernetes.io/references/kustomize/)
 
-**Previous chapter:** [Chapter 5 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · **Course detail:** [D06 — GitOps, Automation and Operations](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) · **Next chapter:** Chapter 7 — Observability (not yet authored) · **Checklist:** [Final Project Checklist · D06](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
+**Previous chapter:** [Chapter 5 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · **Course detail:** [D06 — GitOps, Automation and Operations](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) · **Next chapter:** [Chapter 7 — Observability](D07%20Observability.md) · **Checklist:** [Final Project Checklist · D06](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
