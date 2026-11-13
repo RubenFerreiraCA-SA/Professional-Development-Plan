@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 60–64 of 64  
+**Estimated study time:** 40–50 hours  
 **Purpose:** Integration, platform product goals, technical defence and capstone.
 
 ## Module overview
@@ -17,17 +17,17 @@ _TODO: Identify required prior knowledge._
 
 _TODO: Write measurable outcomes._
 
-## Weekly syllabus
+## Learning activities
 
-| Week | Core learning and practical work |
+| Activity | Core learning and practical work |
 | --- | --- |
-| 60 | Platform architecture patterns, service boundaries, self-service platform API design, architecture decision records |
-| 61 | Golden path integration: service templates, infrastructure automation, provisioning and deployment workflows |
-| 62 | Platform controls: policy-as-code, secrets, observability, SLOs, cost governance and accessibility |
-| 63 | Reliability engineering: failure injection, recovery exercises, monitoring, user testing and platform improvements |
-| 64 | Final platform implementation, technical documentation, evidence preparation and practical demonstration rehearsal |
+| 1 (8–10 hours) | Platform architecture patterns, service boundaries, self-service platform API design, architecture decision records |
+| 2 (8–10 hours) | Golden path integration: service templates, infrastructure automation, provisioning and deployment workflows |
+| 3 (8–10 hours) | Platform controls: policy-as-code, secrets, observability, SLOs, cost governance and accessibility |
+| 4 (8–10 hours) | Reliability engineering: failure injection, recovery exercises, monitoring, user testing and platform improvements |
+| 5 (8–10 hours) | Final platform implementation, technical documentation, evidence preparation and practical demonstration rehearsal |
 
-These are **five instructional/practical weeks**. Formal evaluation and DVT sign-off are separately budgeted and fall outside the 64-week teaching plan.
+These **five practical activities** represent approximately **40–50 study hours**, dedicated to platform engineering, implementation and demonstration.
 
 ## Practical labs and deliverables
 

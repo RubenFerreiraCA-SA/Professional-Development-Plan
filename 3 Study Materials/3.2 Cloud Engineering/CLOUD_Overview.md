@@ -2,7 +2,7 @@
 
 > **Status:** Draft scaffold — unapproved.
 
-**Programme period:** Weeks 16–31  
+**Estimated study time:** 128–160 hours  
 **Scope:** Linux, networking, AWS foundations, architecture and cloud services.
 
 ## Discipline objectives

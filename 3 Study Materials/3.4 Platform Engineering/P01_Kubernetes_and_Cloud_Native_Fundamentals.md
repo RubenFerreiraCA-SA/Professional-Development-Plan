@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 44–49 of 64  
+**Estimated study time:** 48–60 hours  
 **Purpose:** Cluster concepts, workloads, networking and packaging.
 
 ## Module overview
@@ -17,9 +17,9 @@ _TODO: Identify required prior knowledge._
 
 _TODO: Write measurable outcomes._
 
-## Weekly syllabus
+## Learning activities
 
-_TODO: Add each week's topics, learning outcomes and learning resources._
+_TODO: Add each activity's topics, learning outcomes and learning resources._
 
 ## Practical labs and deliverables
 

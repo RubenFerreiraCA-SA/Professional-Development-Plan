@@ -1,14 +1,14 @@
 # D03 — CI/CD & Build Automation
 
-> **Source of truth:** [Author's 15-Week DevOps Engineering Syllabus](DevOps_15_Week_Syllabus.md). This page is an index for the module, not a replacement or redesign.
+> **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
-**Instructional weeks:** 5–6 of 64  
+**Estimated study time:** 16–20 hours  
 **Assessment weighting in source syllabus:** 13%  
 **Focus:** Pull-request validation, builds, vulnerability scanning and image releases.
 
-## Weekly lessons and labs
+## Lessons and labs
 
-See the **D03** section in the [source syllabus](DevOps_15_Week_Syllabus.md). The original weekly objectives and practical labs remain authoritative.
+See the **D03** section in the [source syllabus](DevOps_Syllabus.md). The original learning objectives and practical labs remain authoritative.
 
 ## Progress and assessment evidence
 
@@ -16,4 +16,4 @@ _Add links to completed labs and supporting evidence as you work through the mod
 
 ## Programme integration
 
-This module contributes to the 64-week learning pathway. The original 15-week DevOps syllabus remains authoritative.
+This module contributes to the recommended learning pathway. The original DevOps syllabus remains authoritative.

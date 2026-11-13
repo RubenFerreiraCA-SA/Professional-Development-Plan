@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 32–35 of 64  
+**Estimated study time:** 32–40 hours  
 **Purpose:** LLM integrations, retrieval, prompting and evaluation fundamentals.
 
 ## Module overview
@@ -17,9 +17,9 @@ _TODO: Identify required prior knowledge._
 
 _TODO: Write measurable outcomes._
 
-## Weekly syllabus
+## Learning activities
 
-_TODO: Add each week's topics, learning outcomes and learning resources._
+_TODO: Add each activity's topics, learning outcomes and learning resources._
 
 ## Practical labs and deliverables
 

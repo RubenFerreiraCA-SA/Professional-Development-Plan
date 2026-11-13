@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 24–31 of 64  
+**Estimated study time:** 64–80 hours  
 **Purpose:** Secure, resilient and cost-conscious AWS solution design.
 
 ## Module overview
@@ -17,9 +17,9 @@ _TODO: Identify required prior knowledge._
 
 _TODO: Write measurable outcomes._
 
-## Weekly syllabus
+## Learning activities
 
-_TODO: Add each week's topics, learning outcomes and learning resources._
+_TODO: Add each activity's topics, learning outcomes and learning resources._
 
 ## Practical labs and deliverables
 

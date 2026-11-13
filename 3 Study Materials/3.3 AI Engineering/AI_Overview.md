@@ -2,7 +2,7 @@
 
 > **Status:** Draft scaffold — unapproved.
 
-**Programme period:** Weeks 32–43  
+**Estimated study time:** 96–120 hours  
 **Scope:** Applied LLM engineering, agents, evaluations and LLM operations.
 
 ## Discipline objectives
