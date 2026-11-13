@@ -12,8 +12,8 @@ See the **D01** section in the [source syllabus](DevOps_15_Week_Syllabus.md). Th
 
 ## Progress and assessment evidence
 
-_TODO: Add links to completed labs, review notes, certification attempts and supporting evidence as the module is studied._
+_Add links to completed labs and supporting evidence as you work through the module._
 
 ## Programme integration
 
-This module contributes to the proposed 64-week programme. Formal reviews and DVT sign-off are budgeted outside the 64 instructional weeks. Week 16 starts Cloud Engineering; it does not change the 15-week source syllabus.
+This module contributes to the 64-week learning pathway. The original 15-week DevOps syllabus remains authoritative.
