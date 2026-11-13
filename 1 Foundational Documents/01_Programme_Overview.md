@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This is a **reusable 64-week Professional Development Plan (PDP) framework** for software developers working towards **Platform Engineering**.
+This framework helps **any software developer create their own Professional Development Plan (PDP)** with a focus on **Platform Engineering and its enabling disciplines**.
 
-The goal is practical capability: understand how software is built, deployed and operated, then use that knowledge to create secure, reliable, self-service developer platforms. It is a learning pathway, not a qualification or a promise of a particular job.
+It provides a **recommended 64-week learning pathway**, supporting study materials, practical exercises and guidance that developers can adapt to their experience, goals and available time.
 
 ## Four connected disciplines
 
