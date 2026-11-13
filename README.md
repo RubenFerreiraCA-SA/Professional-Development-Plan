@@ -15,6 +15,7 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 
 - **[Foundational Documents](1%20Foundational%20Documents/)** — purpose, pathway and guide
 - **[PDP Templates](2%20PDP%20templates/)** — planned reusable templates
-- **[Study Materials](3%20Study%20Materials/)** — discipline overviews and module content
+- **[Course Detail](3%20Course%20Detail/)** — syllabuses, module outlines, outcomes and assessments
+- **[Study Materials](4%20Study%20Materials/)** — progressively written, textbook-style teaching chapters
 
-The **[DevOps syllabus](3%20Study%20Materials/3.1%20DevOps/D00%20DevOps%20Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.
+The first full textbook is **[D01 — Repository Fundamentals](4%20Study%20Materials/4.1%20DevOps/D01%20Repository%20Fundamentals.md)**. The **[DevOps syllabus](3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.
