@@ -66,7 +66,7 @@ These are engineering outcomes. A screenshot, passing command or completed readi
 
 Each module provides a **Practical Assessment** appropriate to that subject. Collect links to the working repository, reviewed changes, build artifacts, infrastructure plans, deployment history, monitoring results, runbooks and architectural decisions.
 
-The recommended [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) integrates those assets into one **Internal Developer Platform**. This work is cumulative, not a separate project deferred until the end. Developers may substitute equivalent practical work consistent with their personal PDP.
+The recommended [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) integrates those assets into one **Internal Developer Platform**. Track the module-by-module Harbour increments on the [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md). This work is cumulative, not a separate project deferred until the end. Developers may substitute equivalent practical work consistent with their personal PDP.
 
 Where a provider feature, paid service or external reviewer is unavailable, document the limitation and show a reasonable alternative. Do not claim an untested control was enforced.
 

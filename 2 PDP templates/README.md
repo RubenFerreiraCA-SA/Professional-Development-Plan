@@ -10,6 +10,7 @@ Use these templates to turn the programme into **your** plan: set weekly capacit
 | 2 | [Capacity Planner](PDP%20Capacity%20Planner.xlsx) (+ [guide](2.2%20Capacity%20and%20Timeline.md)) | Hours per week → programme duration and milestones |
 | 3 | Same workbook · *Module Plan* sheet (or [Module Schedule](2.3%20Module%20Schedule.md)) | Which modules, in what order, by when |
 | 4 | [Progress and Evidence Log](2.4%20Progress%20and%20Evidence%20Log.md) | What you actually completed and where the proof lives |
+| 5 | [Final Project Checklist](../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) | What Harbour / the IDP must gain after each module |
 
 **Recommended path:** fill the profile briefly, then do all planning in **`PDP Capacity Planner.xlsx`** (Google Sheets / Excel / LibreOffice). Use the Markdown files if you prefer plain text, or to keep a narrative copy of the plan in git.
 

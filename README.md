@@ -11,6 +11,7 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 - [How To Guide](1%20Foundational%20Documents/1.3%20How%20To%20Guide.md) — how to personalise and follow it
 - [PDP Templates](2%20PDP%20templates/) — hours/week → timeline and detailed plan
 - [Final Project](1%20Foundational%20Documents/1.4%20Final%20Project.md) — practical application of the learning
+- [Final Project Checklist](1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) — module-by-module Harbour / IDP increments
 
 ## Repository
 
