@@ -2,7 +2,7 @@
 
 > **Status:** Draft scaffold — unapproved.
 
-**Programme period:** Weeks 17–32  
+**Programme period:** Weeks 16–31  
 **Scope:** Linux, networking, AWS foundations, architecture and cloud services.
 
 ## Discipline objectives
