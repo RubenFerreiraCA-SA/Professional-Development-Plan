@@ -110,18 +110,34 @@ cp observability/datadog/datadog.env.example observability/datadog/datadog.env
 # Edit datadog.env with a real training API key — do not commit
 ```
 
-### 8.2.2 Worked example — Agent service + OTLP intake
+### 8.2.2 Worked example — complete D08 Compose file (no Collector clash)
 
-Add to `observability/docker-compose.yml` (or `observability/docker-compose.datadog.yml` that you merge with `-f`). **Pin** the Agent image tag.
+Do **not** rely on `docker compose stop otel-collector` alone: stopping a container leaves the D07 service definition able to reclaim host `:4317` on the next `compose up`. Use a **dedicated** Compose file for D08 that never defines the Collector/Jaeger/Prometheus services.
+
+Create `observability/docker-compose.datadog.yml` (complete working stack):
 
 ```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: harbour
+      POSTGRES_PASSWORD: harbour-training-only
+      POSTGRES_DB: harbour
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbour -d harbour"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   datadog-agent:
     image: gcr.io/datadoghq/agent:7.57.0
     env_file:
       - ./datadog/datadog.env
+    # Keys/site come ONLY from env_file — do NOT set DD_API_KEY / DD_SITE under
+    # environment: with ${DD_API_KEY}. Compose interpolates that from the *host*
+    # shell/project .env, which can override a valid env_file value with empty.
     environment:
-      DD_API_KEY: "${DD_API_KEY}"  # prefer env_file only; avoid shell export leaks in shared history
-      DD_SITE: "${DD_SITE:-datadoghq.eu}"
       DD_HOSTNAME: harbour-local
       DD_APM_ENABLED: "true"
       DD_APM_NON_LOCAL_TRAFFIC: "true"
@@ -133,8 +149,6 @@ Add to `observability/docker-compose.yml` (or `observability/docker-compose.data
       DD_PROCESS_AGENT_ENABLED: "false"
       DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
     ports:
-      # If otel-collector still binds host 4317, stop that service or use a compose
-      # override that removes host publish from the collector for the D08 lab.
       - "4317:4317"
       - "4318:4318"
     volumes:
@@ -142,23 +156,20 @@ Add to `observability/docker-compose.yml` (or `observability/docker-compose.data
       - /proc/:/host/proc/:ro
       - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
     pid: host
-```
 
-> **Port conflict with D07 Collector:** Only one process should publish host `4317` for the lab. For D08, **stop** `otel-collector` (and Jaeger if unused) *or* run a compose override that points Harbour at `datadog-agent` and leaves the Collector off. Do not dual-bind.
-
-Point Harbour at the Agent (Compose `api` environment — mandatory override for this chapter):
-
-```yaml
   api:
+    image: harbour-api:otel
+    env_file:
+      - ./otel/harbour.env
     environment:
       DATABASE_HOST: db
       OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
       OTEL_METRIC_EXPORT_INTERVAL: "5000"
       OTEL_BSP_SCHEDULE_DELAY: "1000"
+      OTEL_SERVICE_NAME: harbour-api
       DD_SERVICE: harbour-api
       DD_ENV: local
       DD_VERSION: dev
-    # Keep D07 mandatory instrumentation wrapper:
     entrypoint: ["opentelemetry-instrument"]
     command:
       - uvicorn
@@ -167,49 +178,100 @@ Point Harbour at the Agent (Compose `api` environment — mandatory override for
       - "0.0.0.0"
       - --port
       - "8000"
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
       datadog-agent:
         condition: service_started
+
+  worker:
+    image: harbour-api:otel
+    working_dir: /work/app
+    volumes:
+      - ../app:/work/app:ro
+    environment:
+      PYTHONPATH: /work/app
+      OTEL_SERVICE_NAME: harbour-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      DD_SERVICE: harbour-worker
+      DD_ENV: local
+      DD_VERSION: dev
+    entrypoint: ["opentelemetry-instrument"]
+    command:
+      - uvicorn
+      - harbour_worker.main:app
+      - --app-dir
+      - /work/app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - datadog-agent
 ```
 
-### 8.2.3 Worked example — bring-up and Agent health
+`DD_API_KEY` and `DD_SITE` must appear in `datadog/datadog.env` (from the example). The Agent reads them via `env_file` only.
+
+### 8.2.3 Worked example — validated D08 startup (Collector cannot win :4317)
 
 ```bash
 cd "$HARBOUR_ROOT/observability"
 test -f datadog/datadog.env
-# Ensure API key is not the placeholder:
 grep -q 'replace-me' datadog/datadog.env && echo "EDIT datadog.env FIRST" && exit 1
+test -f docker-compose.datadog.yml
 
-# Avoid 4317 clash with D07 collector if still defined:
-docker compose stop otel-collector jaeger 2>/dev/null || true
+# Tear down the D07 stack so nothing holds/reclaims host 4317:
+docker compose -f docker-compose.yml down 2>/dev/null || true
 
-docker compose up -d db datadog-agent api
-docker compose ps
+# Start ONLY the D08 file — do not merge with docker-compose.yml:
+docker compose -f docker-compose.datadog.yml up -d
+docker compose -f docker-compose.datadog.yml ps
 
-# Agent status (agent image includes its CLI):
-docker compose exec datadog-agent agent status | head -n 80
-docker compose exec datadog-agent agent status | grep -iE 'API Key|OTLP|APM|Reporter|Forwarder' || true
+# Prove Collector is not in this project:
+docker compose -f docker-compose.datadog.yml config --services | grep -E 'otel-collector|jaeger' \
+  && echo "FAIL: collector still defined" && exit 1 || echo "ok: no collector services"
+
+# Who owns host 4317?
+ss -ltnp | grep ':4317' || netstat -ltnp 2>/dev/null | grep ':4317' || true
+
+docker compose -f docker-compose.datadog.yml exec api \
+  sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+# Expect: opentelemetry-instrument … uvicorn …
+
+docker compose -f docker-compose.datadog.yml exec datadog-agent agent status | head -n 80
+docker compose -f docker-compose.datadog.yml exec datadog-agent agent status \
+  | grep -iE 'API Key|OTLP|APM|Reporter|Forwarder' || true
 ```
 
-**Expected:** Agent reports a valid API key / forwarder success (wording varies by version). OTLP receiver listening. No repeated auth failures in `docker compose logs datadog-agent --tail=50`.
+**Expected:** Only `db`, `datadog-agent`, `api`, `worker` run. Agent reports a valid API key / forwarder success. OTLP listening. No auth failures in `docker compose -f docker-compose.datadog.yml logs datadog-agent --tail=50`.
 
-In the Datadog UI: **Infrastructure → Host Map** (or Fleet) → host `harbour-local` appears within a few minutes.
+In the Datadog UI: **Infrastructure → Host Map** (or Fleet) → host `harbour-local` within a few minutes.
+
+**Everyday commands for the rest of this chapter** use the same file flag:
+
+```bash
+alias d08='docker compose -f "$HARBOUR_ROOT/observability/docker-compose.datadog.yml"'
+# examples: d08 ps | d08 logs api | d08 stop datadog-agent
+```
 
 ### 8.2.4 Practice — reproduce
 
-From a fresh shell, re-check Agent status and that `api` PID 1 still starts with `opentelemetry-instrument`:
-
 ```bash
-docker compose exec api sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+docker compose -f docker-compose.datadog.yml exec api \
+  sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+docker compose -f docker-compose.datadog.yml exec datadog-agent agent status | head -n 40
 ```
 
 ### 8.2.5 Challenge — least privilege
 
 Document which mounts you granted (`docker.sock`, `/proc`, cgroup) and what an attacker with Agent-container access could learn. Note one mount you would remove in a locked-down Kubernetes DaemonSet and what visibility you would lose.
 
-**Verify:** Host visible in UI; Agent status healthy; Harbour still serves `/health`.
+**Verify:** Host visible in UI; Agent status healthy; Harbour serves `/health`; `docker-compose.datadog.yml` has **no** `otel-collector` service.
 
 ---
 
@@ -241,10 +303,10 @@ Find the error in APM/logs (§8.4). Infrastructure may look fine.
 
 ```bash
 curl -sf http://127.0.0.1:8000/ready
-docker compose stop datadog-agent
+docker compose -f docker-compose.datadog.yml stop datadog-agent
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:8000/health || echo APP_DOWN; done
 # UI: metrics/traces go stale — do not interpret as "service healthy because no alerts"
-docker compose start datadog-agent
+docker compose -f docker-compose.datadog.yml start datadog-agent
 ```
 
 **Expected:** `APP_DOWN` does not appear. Datadog shows a **visibility gap**. Record timestamps for both drills.
@@ -273,16 +335,50 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/v1/fail
 # Slow (temporary): add sleep in /v1/info only for this drill, rebuild/restart api, then remove
 ```
 
-### 8.4.2 Worked example — navigate Service → Trace → Span → Log
+### 8.4.2 Worked example — parse logs and link Trace ↔ Log in Datadog
 
-In Datadog APM:
+D07’s `/v1/info` logs a JSON **string** containing `"trace_id":"…"`. A substring in the message is **not** enough for Datadog’s APM “related logs” link — the platform needs an extracted attribute mapped to the reserved Trace ID field (`dd.trace_id` via the Trace ID remapper).
 
-1. Open service `harbour-api` / env `local`.  
-2. Find a recent trace; open the flame graph.  
-3. Identify DB/client span when `/ready` or DB work runs (D07 two-component path).  
-4. From a span, open **related logs** (or search logs for `@trace_id:${TID}` / the hex id your logger emits).  
+**1. Confirm the raw log is ingested**
 
-**Expected:** Same `trace_id` as the JSON log line from D07’s `/v1/info` handler. If logs lack correlation, fix logger fields or Agent log collection — do not claim correlation you cannot click through.
+```bash
+RESP="$(curl -sS http://127.0.0.1:8000/v1/info)"
+TID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["trace_id"])' <<<"$RESP")"
+echo "TID=${TID}"
+# Datadog → Logs: search the hex string; you should see the container log line
+```
+
+**2. Pipeline (training UI — Logs → Pipelines)**
+
+Create a pipeline that matches Harbour API container logs (e.g. filter `service:harbour-api` or the compose container name), with processors in order:
+
+| Step | Processor | Purpose |
+| --- | --- | --- |
+| A | **Grok Parser** or **JSON Parser** | If the whole message is JSON, parse it; if the JSON is embedded in a text line, Grok extract a `json_payload` then JSON-parse that attribute |
+| B | Confirm attribute | Facet/attribute `trace_id` (32-char hex from D07) exists on the parsed log |
+| C | **Trace ID Remapper** | Source attribute `trace_id` → Datadog Trace ID (creates the APM link). If your Agent/OTel path already sets `dd.trace_id`, still verify it is present as a reserved attribute |
+
+Save and wait for new logs (pipelines apply to new events).
+
+**3. Verify linkage both directions (required evidence)**
+
+```bash
+# Generate a fresh linked event
+RESP="$(curl -sS http://127.0.0.1:8000/v1/info)"
+TID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["trace_id"])' <<<"$RESP")"
+echo "Open APM → search trace ${TID}"
+echo "From that trace, open Logs — expect the info_request line"
+echo "From that log event, open Trace — expect the same ${TID}"
+```
+
+In APM: service `harbour-api` → open the trace → **Logs** tab / related logs shows the JSON event with the same id.  
+In Logs: open the event → attributes include mapped Trace ID → jump to Trace works.
+
+**Expected:** Click-through works **both ways**. If the hex appears only in `message` and Trace ID is empty, the remapper/pipeline is incomplete — fix before claiming correlation.
+
+**4. Spans**
+
+Still identify DB/client spans on `/ready` when Postgres is used (D07 two-component path).
 
 ### 8.4.3 Worked example — break and restore propagation
 
@@ -397,7 +493,41 @@ Stop Agent while app serves traffic (§8.3.2). Show in the write-up how a respon
 
 ## Section 8.7 — Datadog as a reusable platform service
 
-### 8.7.1 Worked example — Terraform for a monitor (minimum as-code)
+### 8.7.1 Worked example — Terraform monitor (complete + preflight)
+
+`terraform/datadog/variables.tf` (complete — commit this file; **never** commit real key values):
+
+```hcl
+variable "dd_api_key" {
+  type        = string
+  sensitive   = true
+  description = "Datadog API key (ingest/automation). Set via TF_VAR_dd_api_key."
+}
+
+variable "dd_app_key" {
+  type        = string
+  sensitive   = true
+  description = "Datadog Application key with monitor write scope. Set via TF_VAR_dd_app_key."
+}
+
+variable "dd_api_url" {
+  type        = string
+  description = "Datadog API base URL for your site."
+  default     = "https://api.datadoghq.eu/"
+}
+
+variable "training_notify" {
+  type        = string
+  description = "Training-only notification handle (email or @webhook-name), not production on-call."
+  default     = "your-training-email@example.com"
+}
+
+variable "harbour_host" {
+  type        = string
+  description = "DD_HOSTNAME from the Agent"
+  default     = "harbour-local"
+}
+```
 
 `terraform/datadog/providers.tf`:
 
@@ -415,45 +545,72 @@ terraform {
 provider "datadog" {
   api_key = var.dd_api_key
   app_key = var.dd_app_key
-  api_url = var.dd_api_url # e.g. https://api.datadoghq.eu/
+  api_url = var.dd_api_url
 }
 ```
 
-`terraform/datadog/variables.tf` — keys via env `TF_VAR_dd_api_key` / `TF_VAR_dd_app_key` or a secret backend — **never** commit `terraform.tfvars` with real keys.
+**Preflight — verify a metric exists before creating the monitor** (known-working path: host/Agent series, not a fragile service-check string):
 
-`terraform/datadog/monitor_missing_agent.tf`:
+```bash
+# From a machine with curl + your API/APP keys (not committed):
+# Metrics Explorer / Notebook: query avg:datadog.agent.running{host:harbour-local}
+# or avg:system.cpu.user{host:harbour-local}
+# Expect a non-empty timeseries while the Agent is up.
+```
+
+If `datadog.agent.running` is empty on your site/plan, use `system.cpu.user` (always present when infra monitoring works) for the monitor below — still proves “host telemetry missing” when the Agent is stopped.
+
+`terraform/datadog/monitor_missing_telemetry.tf`:
 
 ```hcl
-resource "datadog_monitor" "harbour_agent_missing" {
-  name    = "harbour-local: Datadog Agent / host not reporting"
-  type    = "service check"
-  # Adjust query to a check your Agent actually emits (e.g. datadog.agent.up).
-  # If service checks differ on your site, use an equivalent metric monitor —
-  # the requirement is managed-as-code + validated Alert, not this exact string.
-  query   = "\"datadog.agent.up\".over(\"host:harbour-local\").by(\"host\").last(2).count_by_status()"
-  message = """
-Agent/host telemetry missing for harbour-local.
-Runbook: docs/observability/datadog/runbook-missing-telemetry.md
-Notify: training channel only @${var.training_notify}
-"""
+resource "datadog_monitor" "harbour_missing_telemetry" {
+  name = "harbour-local: missing host telemetry (Agent down or silent)"
+  type = "metric alert"
+  query = <<-EOT
+    avg(last_10m):avg:system.cpu.user{host:${var.harbour_host}} < 0
+  EOT
+  # system.cpu.user is >= 0 when reporting. Combined with notify_no_data, stopping
+  # the Agent produces No Data → Alert. The "< 0" threshold never matches live CPU;
+  # No Data is the training signal for "Agent blind spot".
+  message = <<-EOT
+    Missing telemetry for ${var.harbour_host}.
+    Distinguish: app may still be healthy (curl /health) while Datadog is blind.
+    Runbook: docs/observability/datadog/runbook-missing-telemetry.md
+    @${var.training_notify}
+  EOT
+
   monitor_thresholds {
-    critical = 1
+    critical = 0
   }
-  notify_no_data    = true
-  no_data_timeframe = 10
-  tags              = ["service:harbour-api", "env:local", "managed:terraform"]
+
+  notify_no_data      = true
+  no_data_timeframe   = 10
+  require_full_window = false
+  include_tags        = true
+  tags = [
+    "service:harbour-api",
+    "env:local",
+    "managed:terraform",
+    "drill:missing-telemetry",
+  ]
 }
 ```
 
 ```bash
 cd "$HARBOUR_ROOT/terraform/datadog"
-export TF_VAR_dd_api_key='…' TF_VAR_dd_app_key='…'   # not logged to git
+export TF_VAR_dd_api_key='…'
+export TF_VAR_dd_app_key='…'
+export TF_VAR_training_notify='your-training-email@example.com'
+# optional: export TF_VAR_dd_api_url='https://api.datadoghq.com/'
+
 terraform init
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
-**Expected:** plan shows create; UI shows the managed monitor; second plan is empty (or intentional drift). Then validate Alert by stopping the Agent (§8.5.3) — Terraform create alone is not validation.
+**Validate (required):** with Agent running, monitor OK / no alert; `docker compose -f …/docker-compose.datadog.yml stop datadog-agent`; wait until Datadog shows **No Data / Alert**; start Agent; confirm recovery. Terraform apply alone is not validation.
+
+**Expected:** second `terraform plan` is empty (or intentional drift); Alert observed for the missing-telemetry drill.
 
 ### 8.7.2 Worked example — onboarding package
 
@@ -485,47 +642,25 @@ service, env, version (match OTel resource attributes)
 
 ### 8.7.3 Worked example — second service (`harbour-worker`)
 
-Minimal second component under `app/harbour_worker/main.py`:
+The `worker` service is already defined in `docker-compose.datadog.yml` (§8.2.2) with `working_dir: /work/app`, `PYTHONPATH=/work/app`, and `uvicorn --app-dir /work/app` so `harbour_worker.main:app` imports reliably.
+
+Create `app/harbour_worker/main.py` (and empty `app/harbour_worker/__init__.py` if needed):
 
 ```python
 from fastapi import FastAPI
+
 app = FastAPI()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "harbour-worker"}
 ```
 
-Compose service (same Agent OTLP endpoint; **different** `DD_SERVICE` / `OTEL_SERVICE_NAME`):
-
-```yaml
-  worker:
-    image: harbour-api:otel   # or a thin image with FastAPI + OTel pins
-    working_dir: /work
-    volumes:
-      - ../app:/work/app:ro
-    environment:
-      OTEL_SERVICE_NAME: harbour-worker
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
-      OTEL_METRIC_EXPORT_INTERVAL: "5000"
-      DD_SERVICE: harbour-worker
-      DD_ENV: local
-      DD_VERSION: dev
-    entrypoint: ["opentelemetry-instrument"]
-    command:
-      - uvicorn
-      - harbour_worker.main:app
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8001"
-    ports:
-      - "8001:8001"
-    depends_on:
-      - datadog-agent
-```
-
 ```bash
 curl -sS http://127.0.0.1:8001/health
+# Expect JSON status ok — if ModuleNotFoundError, confirm --app-dir /work/app and the volume mount
+docker compose -f "$HARBOUR_ROOT/observability/docker-compose.datadog.yml" logs worker --tail=40
 # Datadog APM: service harbour-worker appears after traffic
 ```
 
@@ -533,7 +668,7 @@ curl -sS http://127.0.0.1:8001/health
 2. Record which steps were self-service vs needed platform help.  
 3. List one automation to add next (module variable `service_name`).
 
-**Verify:** Second service visible; onboarding doc alone almost sufficient for a colleague.
+**Verify:** `/health` on `:8001` works; worker visible in APM; onboarding doc alone almost sufficient for a colleague.
 
 ---
 
@@ -559,11 +694,12 @@ curl -sS http://127.0.0.1:8001/health
 
 | Symptom | Likely cause | First check |
 | --- | --- | --- |
-| No host in UI | Bad API key / wrong `DD_SITE` | `agent status`; key not `replace-me` |
-| No traces | App still pointed at old Collector; Agent OTLP off | `OTEL_EXPORTER_OTLP_ENDPOINT`; Agent OTLP config |
-| Port bind error | Collector and Agent both on host 4317 | Stop collector for D08 lab |
+| No host in UI | Bad API key / wrong `DD_SITE` | `agent status`; key only in `env_file` (not empty `${DD_API_KEY}`) |
+| No traces | Still using D07 compose / wrong OTLP target | Use `-f docker-compose.datadog.yml` only |
+| Port bind error | D07 Collector still up on 4317 | `compose -f docker-compose.yml down` before D08 up |
 | Bare uvicorn | Missing `entrypoint: opentelemetry-instrument` | `/proc/1/cmdline` |
-| Logs without traces | Collection off / no trace_id field | Log pipeline; D07 logger JSON |
+| Worker import error | Wrong workdir / PYTHONPATH | `--app-dir /work/app` as in §8.2.2 |
+| Logs without APM link | JSON not parsed / no Trace ID remapper | §8.4.2 pipeline both-directions check |
 | Monitor never Alerts | Window too long / wrong query / no notify wait | Induce fault; poll UI until Alert |
 | Huge bill surprise | Container collect-all + high cardinality | Exclusions; tag allowlist |
 
@@ -600,14 +736,15 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 ### Self-check
 
 - Does `/proc/1/cmdline` show `opentelemetry-instrument`?  
-- Did you stop the D07 Collector clash on `4317` deliberately?  
+- Did you start **only** `docker-compose.datadog.yml` (Collector not defined; D07 stack `down`)?  
+- Can you click Trace → Log and Log → Trace for the same `trace_id`?  
 - Can you show Alert → recover for **both** monitors?  
-- Is the second service using the package, not a one-off clickpath?  
-- Are keys absent from Git?
+- Does `curl :8001/health` work without import errors?  
+- Are keys absent from Git and not blanked by Compose `${DD_API_KEY}`?
 
 ### Example assessment conclusion (evidence still required)
 
-> Training Datadog EU site; Agent `7.57.0` with OTLP; Harbour OTLP→Agent after Collector stopped. UST `harbour-api`/`local`/`dev`. Trace_id matched logs. Dashboard + SLO filed. Monitors: error-ratio Alert under `/v1/fail`; missing-telemetry Alert with Agent stopped — both recovered. Incident write-up contradicted CPU-only theory. Terraform manages missing-telemetry monitor. `harbour-worker` onboarded from ONBOARDING.md. Governance notes retention and tag deny-list. Keys only in `datadog.env`.
+> Used `docker-compose.datadog.yml` only (`docker-compose.yml down` first; no Collector). API key via `env_file` only. OTLP→Agent; `/proc/1/cmdline` showed `opentelemetry-instrument`. Log pipeline JSON + Trace ID remapper: APM↔Logs click-through for `/v1/info`. Terraform `variables.tf` complete; `system.cpu.user` + `notify_no_data` monitor Alerted when Agent stopped. Worker on `:8001` with `--app-dir /work/app`. ONBOARDING.md + governance filed. Keys not in Git.
 
 ---
 
@@ -615,7 +752,7 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 
 | You need to… | Start by… | Avoid… |
 | --- | --- | --- |
-| Get traces into DD | OTLP endpoint → Agent; check `agent status` | Leaving app on dead Collector port |
+| Get traces into DD | `-f docker-compose.datadog.yml`; OTLP→Agent | Merging D07 compose / empty `${DD_API_KEY}` |
 | Prove correlation | Same trace_id in log + APM | Assuming UI adjacency without IDs |
 | Page-worthy signal | User-impact monitor + runbook | CPU-only pages |
 | Spot blindness | Missing-telemetry monitor + Agent stop drill | “No alerts ⇒ healthy” |
