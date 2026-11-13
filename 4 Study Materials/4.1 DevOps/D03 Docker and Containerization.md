@@ -947,4 +947,4 @@ Align with [D03 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D03%20Dock
 - [SLSA](https://slsa.dev/)
 - [Syft](https://github.com/anchore/syft) · [Grype](https://github.com/anchore/grype) · [Trivy](https://github.com/aquasecurity/trivy)
 
-**Previous chapter:** [Chapter 2 — Advanced Git](D02%20Advanced%20Git.md) · **Course detail:** [D03 — Docker and Containerization](../../3%20Course%20Detail/3.1%20DevOps/D03%20Docker%20and%20Containerization.md) · **Next chapter:** Chapter 4 — CI/CD and Build Automation (not yet authored) · **Checklist:** [Final Project Checklist · D03](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
+**Previous chapter:** [Chapter 2 — Advanced Git](D02%20Advanced%20Git.md) · **Course detail:** [D03 — Docker and Containerization](../../3%20Course%20Detail/3.1%20DevOps/D03%20Docker%20and%20Containerization.md) · **Next chapter:** [Chapter 4 — CI/CD and Build Automation](D04%20CICD%20and%20Build%20Automation.md) · **Checklist:** [Final Project Checklist · D03](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

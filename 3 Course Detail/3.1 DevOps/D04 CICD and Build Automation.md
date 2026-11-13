@@ -134,4 +134,6 @@ Implement a simple `dev` → `test` or `staging` promotion process (local or ine
 - [OCI image specification](https://github.com/opencontainers/image-spec)
 - [Docker — Build attestations](https://docs.docker.com/build/metadata/attestations/)
 
+**Textbook:** [Chapter 4 — CI/CD and Build Automation](../../4%20Study%20Materials/4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md)
+
 **Previous:** [D03 — Docker and Containerization](D03%20Docker%20and%20Containerization.md) · **Next:** [D05 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md)

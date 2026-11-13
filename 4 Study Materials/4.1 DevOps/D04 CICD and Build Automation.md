@@ -1,0 +1,875 @@
+# Chapter 4 — CI/CD and Build Automation (D04)
+
+*DevOps Engineering textbook · Chapter 4 of 8*
+
+| | Details |
+| --- | --- |
+| **Estimated study time** | Work at your own pace; see the [D04 course detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md) for the current planning estimate (about 24–36 hours). |
+| **Prerequisites** | [D01](D01%20Repository%20Fundamentals.md), [D02](D02%20Advanced%20Git.md), [D03](D03%20Docker%20and%20Containerization.md); comfort writing automated tests and using GitHub or GitLab. |
+
+## How to study this chapter
+
+Pipelines are a **platform product**. Your job is not “make green checks appear.” It is to convert an approved source change into a **traceable, tested, immutable artifact**, then promote that *same* artifact without rebuilding it for each environment.
+
+Work in order: **Concept → Worked example → Practice → Verify → Reflect**. Where CI is easy to get wrong (untrusted pull requests, mutable tags, secrets), this chapter **shows a working sequence first**, then asks you to reproduce it, then adds a harder challenge.
+
+Implementation examples use **GitHub Actions**. The design principles apply to GitLab CI and similar systems; where syntax differs, translate deliberately and note the difference in your ADR. This text teaches [D04 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md). The [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) D04 bar is: *a failing check blocks merge; a passing change yields a digest-addressed artifact traceable to the merge commit; promotion selects that digest (not a floating tag).*
+
+> **Safety boundary:** Use a private training repository. Store only fabricated secrets in Actions secrets. Do not enable workflows that run untrusted fork PRs with write credentials. Prefer GHCR private packages or a disposable local registry for training publishes.
+
+### Learning outcomes
+
+1. Design fast, deterministic PR validation with actionable failure feedback.
+2. Separate validation, release and promotion, and explain trust boundaries between them.
+3. Apply least-privilege tokens, safe triggers and secret hygiene for untrusted code.
+4. Publish container artifacts with commit SHA, image digest, SBOM/scan evidence.
+5. Promote and roll back by **digest**, without rebuilding for each environment.
+6. Extract a reusable pipeline component and apply it to a second service.
+7. Diagnose code, test, runner, cache, security and promotion failures distinctly.
+
+### Before you begin
+
+```bash
+export HARBOUR_ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
+cd "$HARBOUR_ROOT"
+test -f app/Dockerfile
+test -f app/harbour_api/main.py
+git status -sb
+docker version
+```
+
+You need a GitHub (or GitLab) remote with permission to add workflows and branch protection. Local `act` is optional; provider-hosted runs are the evidence that counts for the assessment.
+
+---
+
+## Section 4.1 — Delivery architecture before YAML
+
+### 4.1.1 The trust stages
+
+Draw this flow and keep it visible while you build:
+
+```text
+untrusted change (PR)     trusted integration (main)     release          promote
+---------------------     --------------------------     -------          -------
+lint / unit / smoke  -->  same checks + build once  -->  immutable   -->  point env
+no publish secrets        publish image + evidence       digest           at digest
+```
+
+| Stage | May run untrusted code? | May publish artifacts? | May deploy? |
+| --- | --- | --- | --- |
+| PR validation | Yes (isolated) | No | No |
+| Post-merge release | Only from protected `main` | Yes (narrow token) | Optional / separate |
+| Promotion | No application build | No rebuild | Yes (digest only) |
+
+**Design choices to defend** (capture in `docs/decisions/0004-delivery-architecture.md` as you go):
+
+- Trunk-based short-lived branches versus long-lived release branches
+- Required checks versus optional decorative workflows
+- Whether CD pushes live, or only updates desired-state that GitOps (D06) reconciles
+- Fast tests on every PR; slower suites at merge or release
+
+**Worked example — test matrix (fill durations with your measurements later):**
+
+| Suite | Trigger | Approx duration | Failure impact | Owner |
+| --- | --- | --- | --- | --- |
+| Lint / format | PR + main | minutes | Blocks merge | App team |
+| Unit tests | PR + main | minutes | Blocks merge | App team |
+| Container smoke (`/health`) | PR (optional) / release | minutes | Blocks release | App + platform |
+| Image scan | Release | minutes | Policy gate | Platform |
+| Promotion | Manual or main | minutes | Env drift / outage | Platform |
+
+**Practice:** Add one row for a test you are *not* running yet and state when it should enter the gate.
+
+**Reflect:** If a scan finds a critical CVE with no fix, who may approve an exception, and when does it expire?
+
+---
+
+## Section 4.2 — Make Harbour testable in CI
+
+CI cannot be deterministic if the app has no automated checks. Add a small unit test that does not require Postgres (keep DB integration for Compose/smoke).
+
+### 4.2.1 Worked example — unit test for `/health` and `/info`
+
+Create `app/tests/test_health.py`:
+
+```python
+from fastapi.testclient import TestClient
+
+from harbour_api.main import app
+
+client = TestClient(app)
+
+
+def test_health_ok():
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "harbour-api"
+
+
+def test_info_includes_service():
+    response = client.get("/v1/info")
+    assert response.status_code == 200
+    assert response.json()["service"] == "harbour-api"
+```
+
+Add test dependencies to `app/requirements.txt` (keep pins exact):
+
+```text
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+psycopg[binary]==3.2.4
+httpx==0.28.1
+pytest==8.3.4
+```
+
+`httpx` is required by FastAPI’s `TestClient` in current versions.
+
+### 4.2.2 Worked example — run tests locally before wiring CI
+
+```bash
+cd "$HARBOUR_ROOT/app"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest -q
+deactivate
+```
+
+**Expected:** both tests pass. If imports fail, run pytest from `app/` so `harbour_api` is on `PYTHONPATH` (or set `PYTHONPATH=.`).
+
+### 4.2.3 Deliberate regression (you will use this for the gate demo)
+
+```bash
+cd "$HARBOUR_ROOT/app"
+# temporary break — do not leave this committed on main
+printf '%s\n' 'def test_health_ok():' '    assert False, "deliberate regression"' > /tmp/broken_test_snippet.py
+```
+
+Better: edit `test_health.py` temporarily:
+
+```python
+def test_health_ok():
+    assert False, "deliberate regression for CI gate demo"
+```
+
+Run `pytest -q` and confirm failure, then **restore the real assertion** before continuing. You will re-introduce the failure on a PR branch in Section 4.3.
+
+Confirm `.venv/` stays ignored:
+
+```bash
+cd "$HARBOUR_ROOT"
+git check-ignore -v app/.venv
+git add app/tests app/requirements.txt
+git status --short
+git commit -m "test(app): add FastAPI health unit tests"
+```
+
+**Practice — reproduce:** From a clean shell, recreate the venv, install from `requirements.txt` only, and get a green `pytest -q`.
+
+**Challenge:** Add a test that fails if `HARBOUR_COMMIT` is missing in a release-shaped environment variable set — without breaking local default runs.
+
+---
+
+## Section 4.3 — Pull request validation pipeline
+
+### 4.3.1 Concept: deterministic installs and clean trees
+
+PR CI should:
+
+1. Install from **pinned** dependencies (`requirements.txt` pins; prefer a generated lockfile when you adopt `pip-tools` / `uv`)
+2. Run lint/tests in a clean runner
+3. Upload logs/reports even on failure
+4. Fail the required check on regression
+5. Never push images or use deployment secrets
+
+### 4.3.2 Worked example — GitHub Actions validate workflow
+
+Create `.github/workflows/harbour-validate.yml`:
+
+```yaml
+name: harbour-validate
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-validate.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-validate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harbour-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install dependencies (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Unit tests
+        run: pytest -q --junitxml=pytest-report.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbour-pytest-${{ github.run_id }}
+          path: app/pytest-report.xml
+
+      - name: Fail if the tree was dirtied
+        run: |
+          cd "${{ github.workspace }}"
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "CI must not leave uncommitted changes:"
+            git status --porcelain
+            exit 1
+          fi
+```
+
+Pin Actions by full commit SHA for production platforms; tags (`@v4`) are acceptable while learning if you document the risk and an upgrade plan.
+
+Commit and push:
+
+```bash
+cd "$HARBOUR_ROOT"
+mkdir -p .github/workflows
+# write the file, then:
+git add .github/workflows/harbour-validate.yml
+git commit -m "ci: add Harbour PR validation workflow"
+git push -u origin HEAD
+```
+
+Open the Actions tab and confirm a green run on `main` (or open a no-op PR).
+
+### 4.3.3 Worked example — failing check blocks merge
+
+1. In the GitHub UI (or API), require the `harbour-validate` / `test` check before merging into `main` (branch protection or rulesets).
+2. Create a branch that deliberately breaks the unit test:
+
+```bash
+cd "$HARBOUR_ROOT"
+git switch -c demo/ci-gate-failure
+# edit app/tests/test_health.py to assert False as shown earlier
+git add app/tests/test_health.py
+git commit -m "test: deliberate failure for gate demo"
+git push -u origin HEAD
+```
+
+3. Open a pull request. Wait for the failed check.
+4. Confirm the UI **blocks** merge (or document why your plan cannot enforce it — same honesty standard as D01).
+5. Capture evidence: PR URL, failed job log excerpt, protection screenshot/notes.
+6. Restore the test, push, confirm green, merge or close as you prefer.
+
+```bash
+git switch main
+git branch -D demo/ci-gate-failure  # after you are done; delete remote branch too
+```
+
+**Practice — reproduce:** Without looking at this section, recreate a failing PR and a fixed PR; keep both log links in your Progress Log.
+
+**Challenge:** Introduce a flaky test (`assert random.choice([True, False])`), observe intermittent failure, then replace it with a deterministic test and document why blind retry-on-failure is dangerous in a merge gate.
+
+**Verify:** Another engineer can see that a red required check prevents merge (or can read your documented plan limitation).
+
+**Reflect:** Who owns fixing a red main branch within your platform’s working agreement?
+
+---
+
+## Section 4.4 — Treat CI as a privileged system
+
+### 4.4.1 Threat model: hostile pull request
+
+Assume an external contributor opens a PR that runs `curl` to exfiltrate environment variables.
+
+| Control | Intent |
+| --- | --- |
+| `permissions: contents: read` on validate | Default deny writes |
+| No `pull_request_target` for build/test of untrusted code | Avoid privileged checkout + secrets |
+| Secrets not available to `pull_request` from forks | Prevent trivial secret theft |
+| Hosted ephemeral runners for untrusted PRs | Avoid persistent self-hosted contamination |
+| Separate release workflow with environment protection | Publish only from trusted refs |
+
+**Never** put `GITHUB_TOKEN` write scopes or registry passwords on the validation workflow “so we can also push a preview image” from fork PRs.
+
+### 4.4.2 Worked example — permission matrix
+
+Create `docs/decisions/0004-ci-permission-matrix.md`:
+
+```markdown
+# ADR 0004 — CI permission matrix (Harbour)
+
+| Job | Trigger | contents | packages | id-token | secrets | May publish image? |
+| --- | --- | --- | --- | --- | --- | --- |
+| harbour-validate / test | pull_request, push main | read | none | none | none | No |
+| harbour-release / build | push main (trusted) | read | write | write (if OIDC) | registry | Yes |
+| harbour-promote | workflow_dispatch / PR to deploy/ | read | read | none | none or GitOps only | No rebuild |
+
+Untrusted fork PRs must not receive registry credentials.
+```
+
+**Practice:** In repository Settings, confirm Actions permissions are restrictive by default; note any org-level override.
+
+**Challenge:** Sketch how OIDC to a cloud registry removes long-lived `REGISTRY_PASSWORD` (even if you still use a PAT for training).
+
+**Verify:** Validation workflow YAML contains no `${{ secrets.` registry or deploy keys.
+
+---
+
+## Section 4.5 — Release once: immutable artifact + evidence
+
+### 4.5.1 Concept: build after trust, promote the digest
+
+After checks pass on protected `main`:
+
+1. Build the Harbour image **once**
+2. Push to a registry
+3. Record **commit SHA ↔ registry manifest digest**
+4. Generate SBOM / scan that digest (or the image ID you pushed)
+5. Do **not** rebuild the same commit separately for “staging” and “prod”
+
+### 4.5.2 Worked example — release workflow (GHCR)
+
+Store these GitHub Actions secrets/variables only if needed (GHCR often works with `GITHUB_TOKEN` + `permissions: packages: write`):
+
+Create `.github/workflows/harbour-release.yml`:
+
+```yaml
+name: harbour-release
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: harbour-release-main
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/harbour-validate.yml
+    # If "workflow_call" is not added to validate, duplicate a short pytest job here instead.
+    # Prefer making validate callable — see Section 4.7.
+
+  release:
+    needs: [validate]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: meta
+        run: |
+          OWNER_LC='${{ github.repository_owner }}'
+          OWNER_LC="${OWNER_LC,,}"
+          IMAGE="ghcr.io/${OWNER_LC}/harbour-api"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:main
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          build-args: |
+            HARBOUR_COMMIT=${{ github.sha }}
+          provenance: true
+          sbom: true
+
+      - name: Record provenance locally
+        run: |
+          mkdir -p docs/releases
+          {
+            echo "commit=${{ github.sha }}"
+            echo "image=${{ steps.meta.outputs.image }}"
+            echo "digest=${{ steps.push.outputs.digest }}"
+            echo "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "docs/releases/${{ github.sha }}.txt"
+          cat "docs/releases/${{ github.sha }}.txt"
+
+      - name: Upload provenance note
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbour-release-${{ github.sha }}
+          path: docs/releases/${{ github.sha }}.txt
+```
+
+**Important wiring notes (read before you rely on this YAML):**
+
+1. `uses: ./.github/workflows/harbour-validate.yml` only works after you add `workflow_call:` to that workflow’s `on:` block (Section 4.7 shows the pattern). Until then, inline a pytest job under `release.needs` or rename `needs` away.
+2. `steps.push.outputs.digest` is the digest from `build-push-action` when push succeeds — that is the **registry digest** to promote.
+3. Writing under `docs/releases/` in CI does **not** commit to the repo unless you add a controlled bot commit. For training, the **Actions artifact** plus the job summary is enough evidence; committing release notes can be a later, deliberate choice.
+
+**Simpler first publish if reusable workflows feel heavy:** keep a single `release` job that runs pytest, then build-push, without `workflow_call`. Add reuse in Section 4.7.
+
+### 4.5.3 Worked example — simpler release job (recommended first implementation)
+
+Replace the split with one trustworthy job while learning:
+
+```yaml
+name: harbour-release
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: harbour-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Test
+        working-directory: app
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -q
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/harbour-api:${{ github.sha }}
+          build-args: |
+            HARBOUR_COMMIT=${{ github.sha }}
+
+      - name: Prove digest output
+        run: |
+          echo "commit=${{ github.sha }}"
+          echo "digest=${{ steps.push.outputs.digest }}"
+          echo "ref=ghcr.io/${{ github.repository_owner }}/harbour-api@${{ steps.push.outputs.digest }}"
+```
+
+GitHub lowercases owner names for GHCR; if push fails on case, set an explicit lowercase image name as in the earlier `OWNER_LC` snippet.
+
+Push the workflow, merge to `main`, and open the run. Copy:
+
+- commit SHA
+- `digest=sha256:…`
+- image reference `ghcr.io/<owner>/harbour-api@sha256:…`
+
+**Practice — reproduce:** `docker buildx imagetools inspect` on that `@sha256:…` reference from your laptop (after `docker login ghcr.io`) and confirm the digest matches the job log.
+
+**Challenge:** Run Trivy/Grype against that digest; write a three-line policy note: what would block release, what needs approval, what is accepted risk.
+
+**Verify:** You can show one merge commit, one digest, one workflow run URL.
+
+---
+
+## Section 4.6 — Promote by digest (no rebuild)
+
+### 4.6.1 Concept
+
+Promotion updates **pointers** (desired state), not source. For Harbour before full GitOps (D06), keep a small desired-state file the platform will later reconcile:
+
+`deploy/harbour-api/image-ref.txt`:
+
+```text
+# Format: repository@digest — never a mutable floating tag for promoted envs
+ghcr.io/example/harbour-api@sha256:replace-me
+```
+
+Environments:
+
+| Env | How you promote in training |
+| --- | --- |
+| `dev` | Auto-update on main release (optional) |
+| `staging` | PR that only changes `image-ref.txt` to an existing digest |
+
+### 4.6.2 Worked example — first pin + staging promotion PR
+
+After a successful release, set the file to the real digest (replace owner/digest):
+
+```bash
+cd "$HARBOUR_ROOT"
+mkdir -p deploy/harbour-api
+cat > deploy/harbour-api/image-ref.txt <<EOF
+ghcr.io/<owner-lowercase>/harbour-api@sha256:<digest-from-release-job>
+EOF
+printf '%s\n' '# Harbour deploy pointers' 'Promote by editing image-ref.txt to an existing digest.' > deploy/harbour-api/README.md
+git add deploy/harbour-api
+git commit -m "deploy: pin Harbour API to release digest"
+git push
+```
+
+Simulate rollback inventory — keep the previous digest in your Progress Log or:
+
+```bash
+echo "previous=ghcr.io/...@sha256:old" >> docs/releases/promotion-log.md
+echo "current=ghcr.io/...@sha256:new" >> docs/releases/promotion-log.md
+```
+
+**Promotion PR demo:** change *only* `image-ref.txt` to a known-good older digest on a branch, open PR titled `promote(staging): roll back harbour-api to <short-sha>`, merge after review. No Docker build in that PR.
+
+Optional workflow `.github/workflows/harbour-promote-guard.yml`:
+
+```yaml
+name: harbour-promote-guard
+
+on:
+  pull_request:
+    paths:
+      - "deploy/harbour-api/image-ref.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  digest-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require digest reference
+        run: |
+          REF="$(tr -d '[:space:]' < deploy/harbour-api/image-ref.txt | sed '/^#/d' | tail -n 1)"
+          echo "ref=${REF}"
+          case "$REF" in
+            *@sha256:*) echo "OK: digest pin" ;;
+            *) echo "Refuse mutable tag promotion: ${REF}"; exit 1 ;;
+          esac
+```
+
+**Practice — reproduce:** Create a PR that tries to promote `.../harbour-api:latest` and show the guard failing; fix to `@sha256:…` and show success.
+
+**Challenge:** Document the rule for failed promotion (freeze / alert / roll back) in one paragraph tied to Harbour.
+
+**Verify:** Staging pointer equals a digest that exists in the registry; rolling back is another pointer change, not a rebuild.
+
+---
+
+## Section 4.7 — Reusable pipeline for a second service
+
+### 4.7.1 Worked example — tiny second service
+
+Create `services/harbour-ping/app.py`:
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "harbour-ping"}
+```
+
+`services/harbour-ping/requirements.txt`:
+
+```text
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pytest==8.3.4
+```
+
+`services/harbour-ping/tests/test_health.py`:
+
+```python
+from fastapi.testclient import TestClient
+from app import app
+
+client = TestClient(app)
+
+
+def test_health():
+    assert client.get("/health").json()["service"] == "harbour-ping"
+```
+
+### 4.7.2 Worked example — reusable callable workflow (correct wiring)
+
+GitHub treats `workflow_call` inputs as belonging to **callable** runs. Do not mix “optional input or default” tricks on the same job that also handles `pull_request` without a clear split. Use a **reusable** workflow plus thin callers.
+
+**1. Reusable file** — `.github/workflows/python-validate.yml`:
+
+```yaml
+name: python-validate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+      requirements-file:
+        required: false
+        type: string
+        default: requirements.txt
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.requirements-file }}
+      - name: Install and test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r "${{ inputs.requirements-file }}"
+          pytest -q
+      - name: Fail if the tree was dirtied
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            exit 1
+          fi
+```
+
+**2. Caller for Harbour API** — replace the job body of `harbour-validate.yml` with:
+
+```yaml
+name: harbour-validate
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-validate.yml"
+      - ".github/workflows/python-validate.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - ".github/workflows/harbour-validate.yml"
+      - ".github/workflows/python-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/python-validate.yml
+    with:
+      working-directory: app
+```
+
+**3. Caller for harbour-ping** — `.github/workflows/harbour-ping-validate.yml`:
+
+```yaml
+name: harbour-ping-validate
+
+on:
+  pull_request:
+    paths:
+      - "services/harbour-ping/**"
+      - ".github/workflows/harbour-ping-validate.yml"
+      - ".github/workflows/python-validate.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "services/harbour-ping/**"
+      - ".github/workflows/harbour-ping-validate.yml"
+      - ".github/workflows/python-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/python-validate.yml
+    with:
+      working-directory: services/harbour-ping
+```
+
+Document ownership and breaking-change policy in `docs/decisions/0004-reusable-validate.md` (who may change `python-validate.yml`, how consumers are notified).
+
+**Practice — reproduce:** Make ping fail a test on a PR and show `harbour-ping-validate` goes red while Harbour API stays green if untouched.
+
+**Challenge:** Add a third caller with a different requirements filename via `requirements-file` input.
+
+**Verify:** Two services share one policy (pinned installs, `contents: read`); changing the reusable workflow affects both callers by design.
+
+---
+
+## Section 4.8 — Failure injection and diagnosis
+
+### 4.8.1 Worked example — classify failures
+
+Cause each once (disposable branches), capture logs, fill the table:
+
+| Fault you inject | How | Likely symptoms | Remediation |
+| --- | --- | --- | --- |
+| Code/test regression | `assert False` in unit test | Red validate, clear traceback | Fix test/code |
+| Dependency install failure | Typo in package name in requirements | Pip error early in job | Fix pin; do not retry forever |
+| Cache weirdness | Corrupt by changing requirement unexpectedly | Inconsistent local vs CI | Clear caches; make install deterministic |
+| Registry auth failure | Wrong token on release | Push denied | Fix identity; ensure PR jobs lack this secret |
+| Bad promotion | Tag without digest | Guard job fails | Pin `@sha256:` |
+
+**Practice — reproduce:** Pick two rows, inject, diagnose from logs only (pretend you did not cause them), write a short failure report.
+
+**Challenge:** Disable a runner label or break `working-directory` and show how the failure differs from an application bug.
+
+---
+
+## Practical Assessment — Chapter 4 — trusted software supply chain
+
+**Scenario:** Your platform offers delivery to two application teams. One ships a legitimate Harbour change; another submits untrusted or failing work. Show useful feedback without granting publish rights.
+
+Align with [D04 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md) and the [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) D04 acceptance criterion.
+
+### Required deliverables
+
+1. **PR pipeline** with pinned dependency installs, automated checks, and evidence that a failing check blocks merge (or an honest plan limitation).
+2. **Trusted release** publishing an image with commit SHA, **registry digest**, and SBOM/scan notes for that digest.
+3. **Permission model** proving validate jobs cannot publish; release uses narrow write permissions.
+4. **Promotion** of the **same** digest into `deploy/` (or equivalent), plus a rollback to a previous digest without rebuilding.
+5. **Reusable validate path** exercised by Harbour API and harbour-ping (or a second service).
+6. **Failure report** covering at least two fault classes from Section 4.8.
+
+### Evaluation rubric
+
+| Dimension | Developing | Competent | Advanced |
+| --- | --- | --- | --- |
+| PR validation | Workflow exists | Deterministic installs, required check, useful artifacts | Flake policy, concurrency, path filters |
+| Trust boundaries | Single mega-workflow | Clear validate vs release vs promote | OIDC, environment protection, fork PR hard rules |
+| Artifacts | Tag-only publish | Digest recorded with commit + run URL | Provenance/SBOM/signing with known limits |
+| Promotion | Rebuild per env | Same digest pinned; rollback demonstrated | GitOps-ready desired state only |
+| Reuse | Copy-paste YAML | Second service shares pattern/template | Versioned reusable workflow + change policy |
+| Diagnosis | “Re-run until green” | Classifies fault with log evidence | Prevents recurrence in platform defaults |
+
+**Completion standard:** **Competent** on every row.
+
+### Self-check
+
+- Can a stranger explain what commit produced which digest from your links alone?
+- Does a red required check block merge?
+- Can an untrusted PR steal a registry secret from your YAML/settings design?
+- Does promotion reject `:latest`?
+- Did learning Complete (Progress Log) and Final Project Checklist acceptance stay separate if integration lags?
+
+### Example assessment conclusion (evidence still required)
+
+> harbour-validate is required on `main`. A deliberate failing PR stayed unmergeable. harbour-release publishes `ghcr.io/…/harbour-api@sha256:…` for commit `abc123`. `deploy/harbour-api/image-ref.txt` pins that digest; a rollback PR pointed at the previous digest without rebuilding. harbour-ping uses the same validate pattern. Validate jobs have `contents: read` only.
+
+---
+
+## Quick-reference decision guide
+
+| You need to… | Start by… | Avoid… |
+| --- | --- | --- |
+| Gate merges | Required check on validate workflow | Optional checks nobody looks at |
+| Trust an image | Registry digest + commit SHA + run URL | `:latest` or rebuild-per-env |
+| Handle fork PRs | read-only validate, no secrets | `pull_request_target` + build untrusted code |
+| Promote | Edit desired-state digest pointer | `docker build` again for staging |
+| Debug CI | Classify fault with logs | Infinite re-run |
+| Reuse | Callable workflow / template + inputs | Divergent copy-paste per team |
+
+## Glossary
+
+| Term | Definition |
+| --- | --- |
+| Required check | Branch rule that blocks merge until named CI jobs succeed |
+| Immutable artifact | Bytes that do not change; identified by digest |
+| Promotion | Moving a known artifact to an environment pointer |
+| Provenance | Metadata linking artifact to source and build |
+| OIDC federation | Short-lived cloud creds from the CI identity provider |
+| Reusable workflow | Callable CI definition shared by multiple consumers |
+| Untrusted PR | Code that must not receive privileged secrets |
+| Merge gate | Policy combination of reviews + required checks |
+
+## References
+
+- [GitHub Actions — Security hardening](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions)
+- [GitHub — Using reusable workflows](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
+- [Docker build-push-action](https://github.com/docker/build-push-action)
+- [SLSA](https://slsa.dev/)
+- [GitLab CI/CD security](https://docs.gitlab.com/ci/security/)
+- [OpenID Connect — GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+
+**Previous chapter:** [Chapter 3 — Docker and Containerization](D03%20Docker%20and%20Containerization.md) · **Course detail:** [D04 — CI/CD and Build Automation](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md) · **Next chapter:** Chapter 5 — Infrastructure as Code and Terraform (not yet authored) · **Checklist:** [Final Project Checklist · D04](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
