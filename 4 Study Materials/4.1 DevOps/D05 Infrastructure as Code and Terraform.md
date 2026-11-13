@@ -1145,7 +1145,11 @@ Never paste long-lived AKIA keys into the repo. Never let PR-authored workflow f
 
 Create two roles (plan / apply). **Do not** use `repo:OWNER/REPO:*` — that allows many refs and job identities to assume the role.
 
-**Plan role trust** (example — require the exact workflow file and `main` or a protected environment job). Replace `AWS_ACCOUNT_ID`, `OWNER`, `REPO`:
+**Verified example A — ordinary trusted workflow (matches this chapter’s `harbour-terraform-plan.yml`)**
+
+The plan job is a normal workflow job (not a `workflow_call` reusable workflow). Constrain IAM with the claims that job actually receives: typically `aud` and `sub` (branch and/or environment), plus GitHub Environment protection on the job.
+
+Replace `AWS_ACCOUNT_ID`, `OWNER`, `REPO`:
 
 ```json
 {
@@ -1159,13 +1163,8 @@ Create two roles (plan / apply). **Do not** use `repo:OWNER/REPO:*` — that all
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": [
-            "repo:OWNER/REPO:ref:refs/heads/main",
-            "repo:OWNER/REPO:environment:staging-plan"
-          ]
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:OWNER/REPO:environment:staging-plan"
         }
       }
     }
@@ -1173,16 +1172,21 @@ Create two roles (plan / apply). **Do not** use `repo:OWNER/REPO:*` — that all
 }
 ```
 
-**Pick one identity mechanism and configure both ends the same way** — they are not interchangeable:
+Use `environment: staging-plan` on the plan job (as in §5.6.4) so `sub` carries the environment form. Alternatively trust `repo:OWNER/REPO:ref:refs/heads/main` if you only run plan on pushes to `main` without an environment. **Do not** add a `job_workflow_ref` condition to this ordinary-workflow example — GitHub defines that claim for jobs that use **reusable workflows**; requiring it here can cause `AssumeRoleWithWebIdentity` to fail when the claim is absent.
 
-| Mechanism | Where you configure it | What AWS trusts |
-| --- | --- | --- |
-| **AWS condition on `job_workflow_ref`** | IAM trust policy `Condition` on `token.actions.githubusercontent.com:job_workflow_ref` | Exact workflow file + ref that minted the token (GitHub includes this claim for reusable/caller workflows; verify with a decoded token in training) |
-| **GitHub OIDC subject (`sub`) customisation** | GitHub org/repo Actions OIDC subject claim settings | Whatever shape you configure into `sub` (e.g. including workflow path). IAM then matches `token.actions.githubusercontent.com:sub` |
+**Verified example B — reusable trusted workflow (optional hardening)**
 
-This chapter’s worked example uses **IAM conditions on concrete claims** (`sub` limited to `ref:refs/heads/main` and/or `environment:staging-plan`, plus optionally `job_workflow_ref` equal to `OWNER/REPO/.github/workflows/harbour-terraform-plan.yml@refs/heads/main`). If you instead customise GitHub’s `sub` format, rewrite the IAM `sub` condition to match **that** format — do not assume `job_workflow_ref` and a custom `sub` mean the same string.
+If you refactor plan into a reusable workflow (`workflow_call`) and a thin caller on `main`, AWS can additionally constrain `token.actions.githubusercontent.com:job_workflow_ref` (see current AWS IAM docs for GitHub OIDC). Only after you:
 
-Before relying on `job_workflow_ref`, decode one Actions OIDC token in a throwaway job (`actions/github-script` or similar) and confirm the claim is present for your workflow type.
+1. Run a throwaway job that prints/decodes the OIDC token claims for **that** reusable-workflow architecture.
+2. Confirm `job_workflow_ref` is present and note its exact value.
+3. Add an IAM `StringEquals` condition on that claim (e.g. the reusable workflow ref you observed).
+
+Until those three steps succeed, stay with example A.
+
+**Alternative — GitHub subject-claim customisation**
+
+GitHub org/repo settings can customise the OIDC `sub` format (for example to include workflow path). That changes what appears in `sub`; IAM must match **that** configured format via `token.actions.githubusercontent.com:sub`. This is a different mechanism from AWS’s `job_workflow_ref` condition key — configure one coherent pair (GitHub token shape ↔ IAM trust), and verify with a decoded token. Do not assume a custom `sub` string equals `job_workflow_ref`.
 
 **Apply role trust:** narrower still — e.g. only `repo:OWNER/REPO:environment:staging` after required reviewers approve.
 
@@ -1237,7 +1241,7 @@ No `id-token: write`. No state. Safe for forks and same-repo PRs — this job on
 
 ### 5.6.4 Worked example — trusted plan (after merge / protected environment)
 
-Run cloud plan only from a **trusted** context that matches the IAM `sub` / `job_workflow_ref` conditions (e.g. push to `main`, or `environment: staging-plan` with reviewers).
+Run cloud plan only from a **trusted** context that matches the IAM trust you configured in §5.6.2 example A (typically `aud` + `sub` for environment/branch on an ordinary workflow).
 
 `.github/workflows/harbour-terraform-plan.yml`:
 
@@ -1329,12 +1333,12 @@ jobs:
 
 **Full plan vs summary:**
 
-| Artifact | Where it lives | Contents |
-| --- | --- | --- |
-| `stg.tfplan` / `stg.plan.json` | Trusted runner only (`runner.temp`) | Complete planned values — treat as sensitive |
-| `stg.summary.md` | Optional private artifact for reviewers | Allowlisted **addresses + actions** only (no `before`/`after` attributes) |
+| Artifact | Where it lives | Contents | Exposure |
+| --- | --- | --- | --- |
+| `stg.tfplan` / `stg.plan.json` | Trusted runner only (`runner.temp`) | Complete planned values | Sensitive — do not publish |
+| `stg.summary.md` | Private artifact for **intended reviewers only** | Allowlisted **addresses + actions** (no attribute values) | **Lower exposure**, not automatically safe to publish — addresses can still name accounts, projects or environments |
 
-Building a summary by grepping human `terraform show` text can still leak attribute values. Prefer `terraform show -json` and an allowlist that never serialises change attribute objects. Regex redaction of full plans is **not** a security boundary and is not used here.
+Keep summary artifacts in a private repo, short retention, and audience-limited. Do not treat “no attribute values” as licence to post summaries publicly. Grepping human `terraform show` text is avoided because it can leak attributes; the JSON allowlist is the deliberate lower-exposure path, still inside a restricted trust boundary.
 
 **Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, OIDC **apply** role whose trust matches that environment, **fresh** `plan` then `apply` in the same job (never reuse a stale plan artifact across time/state changes).
 
@@ -1348,7 +1352,7 @@ Propose a change that sets `allowed_cidrs = ["0.0.0.0/0"]` (should already fail 
 
 **Practice — reproduce:** From the **summary artifact** alone, a second person describes blast radius without needing the full plan text.
 
-**Verify:** Untrusted PRs get validate-only; plan/apply OIDC is scoped to trusted workflow/ref/environment; full plans are not treated as safely shareable via redaction.
+**Verify:** Untrusted PRs get validate-only; ordinary-workflow plan/apply OIDC uses `aud`/`sub` (and environment protection) without requiring `job_workflow_ref` unless you verified a reusable-workflow token; summaries stay private to intended reviewers.
 
 ---
 
@@ -1397,7 +1401,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 | State | Local state | Remote + lock + access story | Tested recovery from versioned state |
 | Modules | Copied folders | Clear inputs/outputs/validation; two envs | Tests + versioning/upgrade notes |
 | Security | Open SG for convenience | Least privilege, restricted ingress, documented trade-offs | Policy-as-code gates |
-| Delivery | Manual only | Validate on PR; scoped OIDC plan/apply | `job_workflow_ref` / env trust; summary-not-full-plan sharing |
+| Delivery | Manual only | Validate on PR; `aud`/`sub` (+ env) for ordinary plan/apply | Reusable-workflow `job_workflow_ref` only after token proof; restricted summaries |
 | Operability | “It applied” | Second engineer succeeds from README | Cost alarms + destroy discipline |
 
 **Completion standard:** **Competent** on every row. Success is not merely `terraform apply` exiting zero.
@@ -1412,7 +1416,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 
 ### Example assessment conclusion (evidence still required)
 
-> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Reviewers get a JSON-derived address/action summary; full plan files stay on the trusted runner. A second engineer completed staging from the README.
+> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Intended reviewers get a lower-exposure JSON address/action summary (still private); full plan files stay on the trusted runner. A second engineer completed staging from the README.
 
 ---
 
