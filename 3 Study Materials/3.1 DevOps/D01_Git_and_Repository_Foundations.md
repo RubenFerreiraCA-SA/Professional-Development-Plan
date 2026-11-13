@@ -1,8 +1,6 @@
 # D01 — Git & Repository Foundations
 
-**Level:** Upper-intermediate to senior software developers  
 **Estimated study time:** 8–10 hours  
-**DevOps syllabus weighting:** 7%  
 **Prerequisites:** Confident daily use of Git, branching, commits, pull/merge requests and command-line tools.
 
 ## Objective
