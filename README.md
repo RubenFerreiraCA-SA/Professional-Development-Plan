@@ -20,4 +20,4 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 - **[Course Detail](3%20Course%20Detail/)** — syllabuses, module outlines, outcomes and assessments
 - **[Study Materials](4%20Study%20Materials/)** — progressively written, textbook-style teaching chapters
 
-DevOps textbooks for **[D01](4%20Study%20Materials/4.1%20DevOps/D01%20Repository%20Fundamentals.md)**–**[D04 — CI/CD](4%20Study%20Materials/4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md)** are available. The **[DevOps syllabus](3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.
+DevOps textbooks for **[D01](4%20Study%20Materials/4.1%20DevOps/D01%20Repository%20Fundamentals.md)**–**[D05 — Terraform](4%20Study%20Materials/4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md)** are available. The **[DevOps syllabus](3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.

@@ -119,4 +119,6 @@ Deliver a reusable, documented infrastructure offering for the Final Project.
 - [Terraform — Testing](https://developer.hashicorp.com/terraform/language/tests)
 - [OWASP — Infrastructure as Code Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Infrastructure_as_Code_Security_Cheat_Sheet.html)
 
+**Textbook:** [Chapter 5 — Infrastructure as Code and Terraform](../../4%20Study%20Materials/4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md)
+
 **Previous:** [D04 — CI/CD and Build Automation](D04%20CICD%20and%20Build%20Automation.md) · **Next:** [D06 — GitOps, Automation and Operations](D06%20GitOps%20Automation%20and%20Operations.md)
