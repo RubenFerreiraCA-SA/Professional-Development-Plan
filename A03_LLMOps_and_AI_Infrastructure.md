@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 41–44 of 64  
+**Weeks:** 40–43 of 64  
 **Purpose:** Deployment, monitoring, security and evaluation of AI services.
 
 ## Module overview
