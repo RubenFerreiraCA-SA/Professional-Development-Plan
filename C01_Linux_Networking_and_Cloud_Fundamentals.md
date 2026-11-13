@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 17–20 of 64  
+**Weeks:** 16–19 of 64  
 **Purpose:** Systems administration, connectivity and cloud concepts.
 
 ## Module overview
