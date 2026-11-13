@@ -16,4 +16,4 @@ _TODO: Add links to completed labs, review notes, certification attempts and sup
 
 ## Programme integration
 
-This module contributes to the proposed 64-week programme. Week 16 is reserved separately for DevOps integration assessment and certification review; it does not change the 15-week source syllabus.
+This module contributes to the proposed 64-week programme. Formal reviews and DVT sign-off are budgeted outside the 64 instructional weeks. Week 16 starts Cloud Engineering; it does not change the 15-week source syllabus.
