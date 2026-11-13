@@ -1,4 +1,4 @@
-# D06 — Datadog & Observability
+# D04 — CI/CD & Build Automation
 
 | | Details |
 | --- | --- |
@@ -8,11 +8,11 @@
 > **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
 **Assessment weighting in source syllabus:** 13%  
-**Focus:** Datadog monitoring, metrics, logs, tracing, dashboards and alerting.
+**Focus:** Pull-request validation, builds, vulnerability scanning and image releases.
 
 ## Lessons and labs
 
-See the **D06** section in the [source syllabus](DevOps_Syllabus.md). The original learning objectives and practical labs remain authoritative.
+See the **D04** section in the [source syllabus](DevOps_Syllabus.md). The original learning objectives and practical labs remain authoritative.
 
 ## Progress and assessment evidence
 

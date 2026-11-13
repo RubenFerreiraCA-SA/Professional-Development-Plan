@@ -1,4 +1,4 @@
-# D02 — Docker & Containerization
+# D06 — GitOps, Automation & Operations
 
 | | Details |
 | --- | --- |
@@ -8,11 +8,11 @@
 > **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
 **Assessment weighting in source syllabus:** 20%  
-**Focus:** Dockerfiles, storage, networking, Compose and image registries.
+**Focus:** GitOps reconciliation, release strategy, rollbacks and day-two operations.
 
 ## Lessons and labs
 
-See the **D02** section in the [source syllabus](DevOps_Syllabus.md). The original learning objectives and practical labs remain authoritative.
+See the **D06** section in the [source syllabus](DevOps_Syllabus.md). The original learning objectives and practical labs remain authoritative.
 
 ## Progress and assessment evidence
 
