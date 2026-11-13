@@ -6,9 +6,9 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 
 ## Start here
 
-- [Programme Overview](1%20Foundational%20Documents/01_Programme_Overview.md) — what the programme aims to achieve
-- [Learning Pathway](1%20Foundational%20Documents/02_Learning_Pathway.md) — modules and all 64 weeks
-- [Programme Guide](1%20Foundational%20Documents/03_Programme_Guide.md) — how to personalise and follow it
+- [Programme Overview](1%20Foundational%20Documents/1.1%20Programme%20Overview.md) — what the programme aims to achieve
+- [Course Outline](1%20Foundational%20Documents/1.2%20Course%20Outline.md) — modules and all 64 weeks
+- [How To Guide](1%20Foundational%20Documents/1.3%20How%20To%20Guide.md) — how to personalise and follow it
 
 ## Repository
 
