@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 45–50 of 64  
+**Weeks:** 44–49 of 64  
 **Purpose:** Cluster concepts, workloads, networking and packaging.
 
 ## Module overview
