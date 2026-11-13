@@ -17,19 +17,16 @@
 
 ## 01. Background and Rationale
 
-> **At a glance:** Modern software engineering increasingly requires skills beyond application code: delivery automation, cloud, AI and operational platforms.
 
 The programme builds on existing software development skills to meet broader engineering demands. It is a structured learning pathway, not a collection of unrelated courses.
 
 ## 02. Programme Purpose
 
-> **At a glance:** Develop practical, demonstrable capability across the software delivery lifecycle, progressing towards Platform Engineering.
 
 The goal is to design, build, deploy, operate and improve software systems and the tools developers use to deliver them.
 
 ## 03. Programme Philosophy
 
-> **At a glance:** Four connected disciplines build progressively towards reusable developer-facing platforms.
 
 | Discipline | What it contributes |
 | --- | --- |
@@ -44,7 +41,6 @@ DevOps comes first because its skills offer immediate value to a software develo
 
 ## 04. Platform Engineering Specialisations
 
-> **At a glance:** The programme provides a common foundation, not expert-level training in every platform specialisation.
 
 | Specialisation | Focus |
 | --- | --- |
@@ -57,7 +53,6 @@ DevOps comes first because its skills offer immediate value to a software develo
 
 ## 05. Programme Objectives
 
-> **At a glance:** Broaden technical ability, strengthen architectural judgement and produce verifiable engineering results.
 
 - Develop practical DevOps, Cloud, AI and Platform Engineering skills.
 - Apply appropriate security, reliability, maintainability and cost controls.
@@ -66,7 +61,6 @@ DevOps comes first because its skills offer immediate value to a software develo
 
 ## 06. Programme Learning Outcomes
 
-> **At a glance:** Completion should mean being able to build and explain solutions—not merely having studied the topics.
 
 Participants should be able to:
 
@@ -81,7 +75,6 @@ Detailed, assessable outcomes are maintained in [Programme Learning Outcomes](04
 
 ## 07. Programme Structure
 
-> **At a glance:** Exactly 64 instructional weeks. Planning, leave, exams and formal review administration do not replace teaching weeks.
 
 | Discipline | Weeks | Duration |
 | --- | --- | ---: |
@@ -97,7 +90,6 @@ Week 0 is for planning. The December 2026 and December 2027 leave periods are ex
 
 ## 08. Certification Strategy
 
-> **At a glance:** Certifications provide external recognition alongside practical evidence; they are not a substitute for working engineering skills.
 
 Certifications are selected for relevance, industry recognition and alignment with the curriculum. Official exam objectives, bookings, costs and results are recorded in the [Certification Roadmap](06_Certification_Roadmap.md) and [Evidence Tracker](03_Certification_and_Evidence_Tracker.md).
 
@@ -107,13 +99,11 @@ Certifications are selected for relevance, industry recognition and alignment wi
 
 ## 09. Teaching and Learning Methodology
 
-> **At a glance:** Self-directed study, with practical exercises and evidence of work every week.
 
 Allow approximately **8–10 hours per instructional week** for concepts, guided learning, independent labs, troubleshooting and documentation. Use non-confidential environments and comply with employer/client security requirements.
 
 ## 10. Assessment Philosophy
 
-> **At a glance:** Judge competence by working solutions and an ability to explain and troubleshoot them.
 
 Evidence may include code, infrastructure definitions, CI/CD pipelines, monitoring dashboards, labs, architecture decisions and demonstrations. Assessments should consider correctness, security, repeatability, reliability and technical reasoning.
 
@@ -121,7 +111,6 @@ Detailed rubrics belong in the [Assessment Framework](07_Assessment_Framework.md
 
 ## 11. Practical Project Framework
 
-> **At a glance:** Build a generic Internal Developer Platform incrementally across the programme.
 
 The organisation-neutral project grows through four stages:
 
@@ -134,7 +123,6 @@ The project must not depend on confidential employer or client systems. Scope an
 
 ## 12. Professional Development and Organisational Alignment
 
-> **At a glance:** Support discussions with DVT about technical competencies, practical exposure and potential career development.
 
 The programme offers a framework for upskilling and professional review. It does not guarantee a particular position, promotion or client assignment.
 
@@ -144,7 +132,6 @@ The programme offers a framework for upskilling and professional review. It does
 
 ## 13. Programme Governance
 
-> **At a glance:** GitHub and Markdown provide a maintained, version-controlled curriculum and evidence record.
 
 The **[Programme Foundation](00_Programme_Foundation.md)** defines overall purpose and policy; the [calendar](05_Programme_Structure_and_Calendar.md), module syllabi, [assessment framework](07_Assessment_Framework.md) and [certification roadmap](06_Certification_Roadmap.md) contain operational details.
 
@@ -152,7 +139,6 @@ Material changes should be recorded in version history. The author's DevOps syll
 
 ## 14. Programme Approval
 
-> **At a glance:** DVT is invited to review the proposed programme; no funding, certification or role commitments are implied by submission.
 
 | Reviewer | Name | Signature | Date |
 | --- | --- | --- | --- |
