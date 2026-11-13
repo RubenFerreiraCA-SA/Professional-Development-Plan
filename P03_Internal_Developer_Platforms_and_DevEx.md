@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 57–60 of 64  
+**Weeks:** 56–59 of 64  
 **Purpose:** Golden paths, developer portals, catalogues and self-service.
 
 ## Module overview
