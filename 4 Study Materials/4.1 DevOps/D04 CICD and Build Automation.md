@@ -186,21 +186,17 @@ PR CI should:
 
 ### 4.3.2 Worked example — GitHub Actions validate workflow
 
-Create `.github/workflows/harbour-validate.yml`:
+Create `.github/workflows/harbour-validate.yml`. **Do not add path filters yet** — a required check that is skipped on docs-only PRs will block merges. Teach a reliable gate first; optimise later (Section 4.3.4).
+
+Write generated reports under `${{ runner.temp }}`, not inside the checkout. Otherwise `pytest --junitxml=…` leaves an untracked file and a clean-tree check fails on a green test run.
 
 ```yaml
 name: harbour-validate
 
 on:
   pull_request:
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-validate.yml"
   push:
     branches: ["main"]
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-validate.yml"
 
 permissions:
   contents: read
@@ -232,18 +228,18 @@ jobs:
           pip install -r requirements.txt
 
       - name: Unit tests
-        run: pytest -q --junitxml=pytest-report.xml
+        run: pytest -q --junitxml="${{ runner.temp }}/pytest-report.xml"
 
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: harbour-pytest-${{ github.run_id }}
-          path: app/pytest-report.xml
+          path: ${{ runner.temp }}/pytest-report.xml
 
       - name: Fail if the tree was dirtied
+        working-directory: ${{ github.workspace }}
         run: |
-          cd "${{ github.workspace }}"
           if [ -n "$(git status --porcelain)" ]; then
             echo "CI must not leave uncommitted changes:"
             git status --porcelain
@@ -264,11 +260,11 @@ git commit -m "ci: add Harbour PR validation workflow"
 git push -u origin HEAD
 ```
 
-Open the Actions tab and confirm a green run on `main` (or open a no-op PR).
+Open the Actions tab and confirm a green run on `main` (including that the clean-tree step passes).
 
 ### 4.3.3 Worked example — failing check blocks merge
 
-1. In the GitHub UI (or API), require the `harbour-validate` / `test` check before merging into `main` (branch protection or rulesets).
+1. In the GitHub UI (or API), require the `harbour-validate` / `test` check before merging into `main` (branch protection or rulesets). Because the workflow runs on **every** PR (no path filter yet), docs-only PRs still get a green required check instead of a skipped one.
 2. Create a branch that deliberately breaks the unit test:
 
 ```bash
@@ -297,6 +293,69 @@ git branch -D demo/ci-gate-failure  # after you are done; delete remote branch t
 **Verify:** Another engineer can see that a red required check prevents merge (or can read your documented plan limitation).
 
 **Reflect:** Who owns fixing a red main branch within your platform’s working agreement?
+
+### 4.3.4 Path filters vs required checks (monorepo trap)
+
+Path filters (`paths: [app/**, …]`) save minutes in a monorepo — and create a classic Platform Engineering failure mode:
+
+| Setup | Docs-only PR | App PR |
+| --- | --- | --- |
+| Required check + **no** path filter | Workflow runs (fast no-op or full tests) → check completes | Check runs |
+| Required check + path filter on `app/**` only | Workflow **skipped** → required check never reports success → **merge blocked** | Check runs |
+
+GitHub does not treat “skipped because paths did not match” as a passing required status unless you add an explicit always-pass companion job or use rulesets/path-aware required checks carefully.
+
+**Worked example — prove the trap (optional, disposable):**
+
+1. Add a temporary `paths:` filter that only matches `app/**`.
+2. Open a PR that changes only `README.md`.
+3. Observe that `harbour-validate` does not run and merge stays blocked if the check is required.
+4. Revert the filter (return to Section 4.3.2) **or** introduce a deliberate pattern such as:
+
+```yaml
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'app/**'
+              - '.github/workflows/harbour-validate.yml'
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    # … same test steps as before …
+
+  # Required check name this job if you use path filters:
+  gate:
+    needs: [changes, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve required gate
+        run: |
+          if [ "${{ needs.changes.outputs.app }}" != "true" ]; then
+            echo "No app changes — validate gate satisfied without app tests"
+            exit 0
+          fi
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "App tests did not succeed: ${{ needs.test.result }}"
+            exit 1
+          fi
+```
+
+Require the **`gate`** job (not `test`) when you adopt path filters. Until you need monorepo savings, keep the simple always-run workflow from 4.3.2.
+
+**Practice:** Document in an ADR whether Harbour’s training repo uses always-run validation or a path-aware gate — and name the required check exactly.
+
+**Challenge:** Explain how a second service (`services/harbour-ping/**`) should join the filter matrix without creating more skipped-check deadlocks.
 
 ---
 
@@ -352,11 +411,11 @@ After checks pass on protected `main`:
 4. Generate SBOM / scan that digest (or the image ID you pushed)
 5. Do **not** rebuild the same commit separately for “staging” and “prod”
 
-### 4.5.2 Worked example — release workflow (GHCR)
+### 4.5.2 Worked example — simple, executable release (do this first)
 
-Store these GitHub Actions secrets/variables only if needed (GHCR often works with `GITHUB_TOKEN` + `permissions: packages: write`):
+Ship a **single job** that tests, builds and pushes. Do not call reusable workflows yet — that refactor comes in Section 4.7 after this path works.
 
-Create `.github/workflows/harbour-release.yml`:
+GHCR usually works with `GITHUB_TOKEN` and `permissions: packages: write`. Create `.github/workflows/harbour-release.yml`:
 
 ```yaml
 name: harbour-release
@@ -364,126 +423,30 @@ name: harbour-release
 on:
   push:
     branches: ["main"]
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-release.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
-  attestations: write
-  id-token: write
 
 concurrency:
   group: harbour-release-main
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/harbour-validate.yml
-    # If "workflow_call" is not added to validate, duplicate a short pytest job here instead.
-    # Prefer making validate callable — see Section 4.7.
-
   release:
-    needs: [validate]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
-      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Image name
+      - name: Image name (GHCR requires lowercase owner)
         id: meta
         run: |
           OWNER_LC='${{ github.repository_owner }}'
           OWNER_LC="${OWNER_LC,,}"
           IMAGE="ghcr.io/${OWNER_LC}/harbour-api"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        id: push
-        uses: docker/build-push-action@v6
-        with:
-          context: app
-          file: app/Dockerfile
-          push: true
-          tags: |
-            ${{ steps.meta.outputs.image }}:main
-            ${{ steps.meta.outputs.image }}:${{ github.sha }}
-          build-args: |
-            HARBOUR_COMMIT=${{ github.sha }}
-          provenance: true
-          sbom: true
-
-      - name: Record provenance locally
-        run: |
-          mkdir -p docs/releases
-          {
-            echo "commit=${{ github.sha }}"
-            echo "image=${{ steps.meta.outputs.image }}"
-            echo "digest=${{ steps.push.outputs.digest }}"
-            echo "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } > "docs/releases/${{ github.sha }}.txt"
-          cat "docs/releases/${{ github.sha }}.txt"
-
-      - name: Upload provenance note
-        uses: actions/upload-artifact@v4
-        with:
-          name: harbour-release-${{ github.sha }}
-          path: docs/releases/${{ github.sha }}.txt
-```
-
-**Important wiring notes (read before you rely on this YAML):**
-
-1. `uses: ./.github/workflows/harbour-validate.yml` only works after you add `workflow_call:` to that workflow’s `on:` block (Section 4.7 shows the pattern). Until then, inline a pytest job under `release.needs` or rename `needs` away.
-2. `steps.push.outputs.digest` is the digest from `build-push-action` when push succeeds — that is the **registry digest** to promote.
-3. Writing under `docs/releases/` in CI does **not** commit to the repo unless you add a controlled bot commit. For training, the **Actions artifact** plus the job summary is enough evidence; committing release notes can be a later, deliberate choice.
-
-**Simpler first publish if reusable workflows feel heavy:** keep a single `release` job that runs pytest, then build-push, without `workflow_call`. Add reuse in Section 4.7.
-
-### 4.5.3 Worked example — simpler release job (recommended first implementation)
-
-Replace the split with one trustworthy job while learning:
-
-```yaml
-name: harbour-release
-
-on:
-  push:
-    branches: ["main"]
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-release.yml"
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  packages: write
-
-concurrency:
-  group: harbour-release-main
-  cancel-in-progress: false
-
-jobs:
-  release:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -496,7 +459,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pytest -q
+          pytest -q --junitxml="${{ runner.temp }}/pytest-report.xml"
 
       - uses: docker/login-action@v3
         with:
@@ -514,7 +477,7 @@ jobs:
           file: app/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/harbour-api:${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
           build-args: |
             HARBOUR_COMMIT=${{ github.sha }}
 
@@ -522,10 +485,17 @@ jobs:
         run: |
           echo "commit=${{ github.sha }}"
           echo "digest=${{ steps.push.outputs.digest }}"
-          echo "ref=ghcr.io/${{ github.repository_owner }}/harbour-api@${{ steps.push.outputs.digest }}"
+          echo "ref=${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}"
+
+      - name: Upload provenance note
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbour-release-${{ github.sha }}
+          path: ${{ runner.temp }}/pytest-report.xml
+          if-no-files-found: ignore
 ```
 
-GitHub lowercases owner names for GHCR; if push fails on case, set an explicit lowercase image name as in the earlier `OWNER_LC` snippet.
+`steps.push.outputs.digest` from `build-push-action` (after a successful push) is the **registry digest** you will promote. Prefer that over guessing `RepoDigests` locally.
 
 Push the workflow, merge to `main`, and open the run. Copy:
 
@@ -537,7 +507,18 @@ Push the workflow, merge to `main`, and open the run. Copy:
 
 **Challenge:** Run Trivy/Grype against that digest; write a three-line policy note: what would block release, what needs approval, what is accepted risk.
 
-**Verify:** You can show one merge commit, one digest, one workflow run URL.
+**Verify:** You can show one merge commit, one digest, one workflow run URL. Only after this works should you introduce reusable workflows (Section 4.7) or optional provenance/SBOM flags on the build.
+
+### 4.5.3 Later enhancement — provenance and SBOM on the same push
+
+Once 4.5.2 is green, you may extend the build-push step (same job, still no reusable-workflow dependency):
+
+```yaml
+          provenance: true
+          sbom: true
+```
+
+Also tag `:main` if you want a moving label for humans — **never** promote `:main` into `deploy/`; promote the digest from the job output.
 
 ---
 
@@ -586,7 +567,123 @@ echo "current=ghcr.io/...@sha256:new" >> docs/releases/promotion-log.md
 
 **Promotion PR demo:** change *only* `image-ref.txt` to a known-good older digest on a branch, open PR titled `promote(staging): roll back harbour-api to <short-sha>`, merge after review. No Docker build in that PR.
 
-Optional workflow `.github/workflows/harbour-promote-guard.yml`:
+### 4.6.3 Worked example — promotion guard script (with tests)
+
+Inline one-liners in workflows are easy to get wrong. This broken pattern looks clever and fails on the example file:
+
+```bash
+# BROKEN — do not use
+# tr removes newlines first, so the comment and reference become one line;
+# sed '/^#/d' then deletes everything and REF is empty.
+REF="$(tr -d '[:space:]' < deploy/harbour-api/image-ref.txt | sed '/^#/d' | tail -n 1)"
+```
+
+**Fix:** strip comments and blanks **first**, then take the first remaining reference, then validate the full digest form.
+
+Create `deploy/harbour-api/check-image-ref.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Usage: check-image-ref.sh <image-ref-file>
+set -euo pipefail
+
+FILE="${1:?usage: check-image-ref.sh <file>}"
+if [[ ! -f "$FILE" ]]; then
+  echo "error: file not found: $FILE" >&2
+  exit 2
+fi
+
+# Drop comment lines and blanks; keep the first reference line.
+REF="$(
+  sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' "$FILE" \
+    | grep -v '^#' \
+    | grep -v '^$' \
+    | head -n 1 || true
+)"
+
+if [[ -z "$REF" ]]; then
+  echo "error: no image reference found in $FILE" >&2
+  exit 1
+fi
+
+echo "ref=${REF}"
+
+# Require registry/name@sha256:<64 hex>
+if [[ "$REF" =~ ^[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+  echo "OK: digest pin"
+  exit 0
+fi
+
+echo "error: refuse promotion ref (need name@sha256:<64-hex>): ${REF}" >&2
+exit 1
+```
+
+```bash
+chmod +x deploy/harbour-api/check-image-ref.sh
+```
+
+**Worked example — run it locally on good and bad files:**
+
+```bash
+cd "$HARBOUR_ROOT"
+
+# Good (comment + digest)
+cat > /tmp/harbour-ref-good.txt <<'EOF'
+# Format: repository@digest
+ghcr.io/example/harbour-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+EOF
+./deploy/harbour-api/check-image-ref.sh /tmp/harbour-ref-good.txt
+
+# Bad: mutable tag
+echo 'ghcr.io/example/harbour-api:latest' > /tmp/harbour-ref-tag.txt
+./deploy/harbour-api/check-image-ref.sh /tmp/harbour-ref-tag.txt && echo "UNEXPECTED SUCCESS" || echo "rejected as expected"
+
+# Bad: truncated digest
+echo 'ghcr.io/example/harbour-api@sha256:abcd' > /tmp/harbour-ref-short.txt
+./deploy/harbour-api/check-image-ref.sh /tmp/harbour-ref-short.txt && echo "UNEXPECTED SUCCESS" || echo "rejected as expected"
+```
+
+**Automated tests for the policy script** — delivery guards deserve CI of their own. Create `deploy/harbour-api/test_check_image_ref.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+CHECK="$ROOT/check-image-ref.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+pass() { echo "PASS: $1"; }
+fail() { echo "FAIL: $1" >&2; exit 1; }
+
+# comment + valid digest must succeed
+cat > "$TMP/good.txt" <<'EOF'
+# comment
+ghcr.io/example/harbour-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+EOF
+"$CHECK" "$TMP/good.txt" >/dev/null || fail "good digest"
+
+# mutable tag must fail
+echo 'ghcr.io/example/harbour-api:latest' > "$TMP/tag.txt"
+"$CHECK" "$TMP/tag.txt" >/dev/null 2>&1 && fail "tag should be rejected" || pass "tag rejected"
+
+# short digest must fail
+echo 'ghcr.io/example/harbour-api@sha256:abcd' > "$TMP/short.txt"
+"$CHECK" "$TMP/short.txt" >/dev/null 2>&1 && fail "short digest should be rejected" || pass "short digest rejected"
+
+# comment-only must fail
+echo '# only a comment' > "$TMP/empty.txt"
+"$CHECK" "$TMP/empty.txt" >/dev/null 2>&1 && fail "comment-only should be rejected" || pass "comment-only rejected"
+
+pass "all check-image-ref tests"
+```
+
+```bash
+chmod +x deploy/harbour-api/test_check_image_ref.sh
+./deploy/harbour-api/test_check_image_ref.sh
+```
+
+Wire the same script into CI — `.github/workflows/harbour-promote-guard.yml`:
 
 ```yaml
 name: harbour-promote-guard
@@ -594,7 +691,8 @@ name: harbour-promote-guard
 on:
   pull_request:
     paths:
-      - "deploy/harbour-api/image-ref.txt"
+      - "deploy/harbour-api/**"
+      - ".github/workflows/harbour-promote-guard.yml"
 
 permissions:
   contents: read
@@ -604,21 +702,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Require digest reference
-        run: |
-          REF="$(tr -d '[:space:]' < deploy/harbour-api/image-ref.txt | sed '/^#/d' | tail -n 1)"
-          echo "ref=${REF}"
-          case "$REF" in
-            *@sha256:*) echo "OK: digest pin" ;;
-            *) echo "Refuse mutable tag promotion: ${REF}"; exit 1 ;;
-          esac
+      - name: Unit-test the promotion policy script
+        run: ./deploy/harbour-api/test_check_image_ref.sh
+      - name: Validate image-ref.txt
+        run: ./deploy/harbour-api/check-image-ref.sh deploy/harbour-api/image-ref.txt
 ```
 
-**Practice — reproduce:** Create a PR that tries to promote `.../harbour-api:latest` and show the guard failing; fix to `@sha256:…` and show success.
+If this workflow is a **required** check, remember Section 4.3.4: path filters can skip it on unrelated PRs. Either keep it non-required, always-run the script tests on every PR, or use an explicit resolving `gate` job.
 
-**Challenge:** Document the rule for failed promotion (freeze / alert / roll back) in one paragraph tied to Harbour.
+**Practice — reproduce:** Create a PR that tries to promote `.../harbour-api:latest` and show the guard failing; fix to a full `@sha256:` + 64 hex and show success.
 
-**Verify:** Staging pointer equals a digest that exists in the registry; rolling back is another pointer change, not a rebuild.
+**Challenge:** Extend the regex to allow optional registry ports or digests recorded as `name:tag@sha256:…` (OCI) — only if you add tests first.
+
+**Verify:** Staging pointer equals a digest that exists in the registry; rolling back is another pointer change, not a rebuild; `test_check_image_ref.sh` is green.
 
 ---
 
@@ -701,7 +797,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r "${{ inputs.requirements-file }}"
-          pytest -q
+          pytest -q --junitxml="${{ runner.temp }}/pytest-report.xml"
       - name: Fail if the tree was dirtied
         working-directory: ${{ github.workspace }}
         run: |
@@ -711,23 +807,15 @@ jobs:
           fi
 ```
 
-**2. Caller for Harbour API** — replace the job body of `harbour-validate.yml` with:
+**2. Caller for Harbour API** — replace the inline job body of `harbour-validate.yml` (keep **no path filters** until you add a resolving gate from 4.3.4):
 
 ```yaml
 name: harbour-validate
 
 on:
   pull_request:
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-validate.yml"
-      - ".github/workflows/python-validate.yml"
   push:
     branches: ["main"]
-    paths:
-      - "app/**"
-      - ".github/workflows/harbour-validate.yml"
-      - ".github/workflows/python-validate.yml"
 
 permissions:
   contents: read
@@ -739,23 +827,15 @@ jobs:
       working-directory: app
 ```
 
-**3. Caller for harbour-ping** — `.github/workflows/harbour-ping-validate.yml`:
+**3. Caller for harbour-ping** — `.github/workflows/harbour-ping-validate.yml` (same always-run rule, or a dedicated gate if you later add path filters):
 
 ```yaml
 name: harbour-ping-validate
 
 on:
   pull_request:
-    paths:
-      - "services/harbour-ping/**"
-      - ".github/workflows/harbour-ping-validate.yml"
-      - ".github/workflows/python-validate.yml"
   push:
     branches: ["main"]
-    paths:
-      - "services/harbour-ping/**"
-      - ".github/workflows/harbour-ping-validate.yml"
-      - ".github/workflows/python-validate.yml"
 
 permissions:
   contents: read
@@ -767,13 +847,15 @@ jobs:
       working-directory: services/harbour-ping
 ```
 
+**4. Optional refactor of release** — only after Section 4.5.2 has published a digest successfully, you may add a `workflow_call` entry point or `needs:` a callable validate job. Do not invent that wiring until the simple release path is proven.
+
 Document ownership and breaking-change policy in `docs/decisions/0004-reusable-validate.md` (who may change `python-validate.yml`, how consumers are notified).
 
-**Practice — reproduce:** Make ping fail a test on a PR and show `harbour-ping-validate` goes red while Harbour API stays green if untouched.
+**Practice — reproduce:** Make ping fail a test on a PR and show `harbour-ping-validate` goes red while Harbour API stays green if you temporarily use path filters *with* a resolving gate (4.3.4); otherwise both callers may still run.
 
 **Challenge:** Add a third caller with a different requirements filename via `requirements-file` input.
 
-**Verify:** Two services share one policy (pinned installs, `contents: read`); changing the reusable workflow affects both callers by design.
+**Verify:** Two services share one policy (pinned installs, `contents: read`, reports outside the checkout); changing the reusable workflow affects both callers by design.
 
 ---
 
@@ -835,7 +917,7 @@ Align with [D04 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD
 
 ### Example assessment conclusion (evidence still required)
 
-> harbour-validate is required on `main`. A deliberate failing PR stayed unmergeable. harbour-release publishes `ghcr.io/…/harbour-api@sha256:…` for commit `abc123`. `deploy/harbour-api/image-ref.txt` pins that digest; a rollback PR pointed at the previous digest without rebuilding. harbour-ping uses the same validate pattern. Validate jobs have `contents: read` only.
+> harbour-validate is required on `main` and runs on every PR (path-aware gates documented separately). A deliberate failing PR stayed unmergeable. harbour-release (single job) publishes `ghcr.io/…/harbour-api@sha256:…` for commit `abc123`. `check-image-ref.sh` rejects `:latest` and accepts a 64-hex digest; its shell tests are green. `deploy/harbour-api/image-ref.txt` pins that digest; a rollback PR pointed at the previous digest without rebuilding. harbour-ping calls the reusable validate workflow. Validate jobs have `contents: read` only.
 
 ---
 
@@ -843,12 +925,13 @@ Align with [D04 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD
 
 | You need to… | Start by… | Avoid… |
 | --- | --- | --- |
-| Gate merges | Required check on validate workflow | Optional checks nobody looks at |
+| Gate merges | Always-run required check first | Path filters without a resolving gate |
+| Keep clean-tree checks honest | Write reports under `${{ runner.temp }}` | JUnit XML inside the checkout |
 | Trust an image | Registry digest + commit SHA + run URL | `:latest` or rebuild-per-env |
 | Handle fork PRs | read-only validate, no secrets | `pull_request_target` + build untrusted code |
-| Promote | Edit desired-state digest pointer | `docker build` again for staging |
+| Promote | Script + tests; full `@sha256:` + 64 hex | `tr`-then-`sed` comment stripping; `:latest` |
 | Debug CI | Classify fault with logs | Infinite re-run |
-| Reuse | Callable workflow / template + inputs | Divergent copy-paste per team |
+| Reuse | Working simple pipeline, then callable workflow | Reusable `workflow_call` before anything publishes |
 
 ## Glossary
 
