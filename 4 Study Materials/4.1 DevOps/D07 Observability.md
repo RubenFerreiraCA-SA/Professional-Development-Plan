@@ -559,8 +559,9 @@ Confirm the API process is instrumented before generating traffic:
 
 ```bash
 cd "$HARBOUR_ROOT/observability"
-docker compose exec api ps aux | head
-# Expect opentelemetry-instrument / otel in the process tree, not bare uvicorn alone
+docker compose exec api sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+# Expect: opentelemetry-instrument … uvicorn … — not bare uvicorn alone
+# (Python slim images often lack `ps`; /proc/1/cmdline is portable.)
 docker compose logs api --tail=30 | grep -iE 'instrument|otel|exporter' || true
 ```
 
@@ -975,4 +976,4 @@ Align with [D07 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D07%20Obse
 - [Google SRE — Service level objectives](https://sre.google/sre-book/service-level-objectives/)
 - [SRE Workbook — Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/)
 
-**Previous chapter:** [Chapter 6 — GitOps, Automation and Operations](D06%20GitOps%20Automation%20and%20Operations.md) · **Course detail:** [D07 — Observability](../../3%20Course%20Detail/3.1%20DevOps/D07%20Observability.md) · **Next chapter:** Chapter 8 — Datadog (not yet authored) · **Checklist:** [Final Project Checklist · D07](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
+**Previous chapter:** [Chapter 6 — GitOps, Automation and Operations](D06%20GitOps%20Automation%20and%20Operations.md) · **Course detail:** [D07 — Observability](../../3%20Course%20Detail/3.1%20DevOps/D07%20Observability.md) · **Next chapter:** [Chapter 8 — Datadog](D08%20Datadog.md) · **Checklist:** [Final Project Checklist · D07](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

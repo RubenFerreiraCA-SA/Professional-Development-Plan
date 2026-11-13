@@ -17,10 +17,10 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 | 5 · D05 | Infrastructure as Code and Terraform | [Read Chapter 5](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) |
 | 6 · D06 | GitOps, Automation and Operations | [Read Chapter 6](D06%20GitOps%20Automation%20and%20Operations.md) |
 | 7 · D07 | Observability | [Read Chapter 7](D07%20Observability.md) |
-| 8 · D08 | Datadog | Not yet authored |
+| 8 · D08 | Datadog | [Read Chapter 8](D08%20Datadog.md) |
 
 ## How to study
 
 Start with Chapter 1 and continue in order. Chapters introduce a subject from its own fundamentals and build towards challenging engineering decisions, progressively harder exercises and a **Practical Assessment**. Work on the same Final Project wherever practical; use disposable repositories for destructive experiments.
 
-Chapter 8 will be added as its textbook material is developed. The chapter numbers are fixed even when a file has not yet been written. Study-hour estimates belong to the course detail and should not dictate the depth of the teaching.
+Study-hour estimates belong to the course detail and should not dictate the depth of the teaching. D08 remains part of the full DevOps curriculum even when the Final Project checklist allows a vendor `N/A` substitution for personalised IDP acceptance.

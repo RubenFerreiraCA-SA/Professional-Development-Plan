@@ -141,4 +141,6 @@ Create an onboarding package for another demo service:
 - [Datadog Terraform Provider](https://registry.terraform.io/providers/DataDog/datadog/latest/docs)
 - [OpenTelemetry Documentation](https://opentelemetry.io/docs/)
 
+**Textbook:** [Chapter 8 — Datadog](../../4%20Study%20Materials/4.1%20DevOps/D08%20Datadog.md)
+
 **Previous:** [D07 — Observability](D07%20Observability.md) · **Next:** [Cloud Engineering overview](../3.2%20Cloud%20Engineering/CLOUD%20Overview.md)
