@@ -185,35 +185,9 @@ services:
         condition: service_healthy
       datadog-agent:
         condition: service_started
-
-  worker:
-    image: harbour-api:otel
-    working_dir: /work/app
-    volumes:
-      - ../app:/work/app:ro
-    environment:
-      PYTHONPATH: /work/app
-      OTEL_SERVICE_NAME: harbour-worker
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
-      OTEL_METRIC_EXPORT_INTERVAL: "5000"
-      DD_SERVICE: harbour-worker
-      DD_ENV: local
-      DD_VERSION: dev
-    entrypoint: ["opentelemetry-instrument"]
-    command:
-      - uvicorn
-      - harbour_worker.main:app
-      - --app-dir
-      - /work/app
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8001"
-    ports:
-      - "8001:8001"
-    depends_on:
-      - datadog-agent
 ```
+
+Do **not** add `worker` yet — that service is onboarded in §8.7.3 after its source exists. Starting it here would fail with `ModuleNotFoundError: harbour_worker`.
 
 `DD_API_KEY` and `DD_SITE` must appear in `datadog/datadog.env` (from the example). The Agent reads them via `env_file` only.
 
@@ -228,13 +202,17 @@ test -f docker-compose.datadog.yml
 # Tear down the D07 stack so nothing holds/reclaims host 4317:
 docker compose -f docker-compose.yml down 2>/dev/null || true
 
-# Start ONLY the D08 file — do not merge with docker-compose.yml:
-docker compose -f docker-compose.datadog.yml up -d
+# Start ONLY the D08 file — and ONLY the first three services (no worker yet):
+docker compose -f docker-compose.datadog.yml up -d db datadog-agent api
 docker compose -f docker-compose.datadog.yml ps
 
 # Prove Collector is not in this project:
 docker compose -f docker-compose.datadog.yml config --services | grep -E 'otel-collector|jaeger' \
   && echo "FAIL: collector still defined" && exit 1 || echo "ok: no collector services"
+
+# Worker must not be running yet (onboarded in §8.7.3):
+docker compose -f docker-compose.datadog.yml ps worker 2>/dev/null | grep -q Up \
+  && echo "FAIL: worker started before harbour_worker source exists" && exit 1 || echo "ok: worker not started"
 
 # Who owns host 4317?
 ss -ltnp | grep ':4317' || netstat -ltnp 2>/dev/null | grep ':4317' || true
@@ -248,7 +226,7 @@ docker compose -f docker-compose.datadog.yml exec datadog-agent agent status \
   | grep -iE 'API Key|OTLP|APM|Reporter|Forwarder' || true
 ```
 
-**Expected:** Only `db`, `datadog-agent`, `api`, `worker` run. Agent reports a valid API key / forwarder success. OTLP listening. No auth failures in `docker compose -f docker-compose.datadog.yml logs datadog-agent --tail=50`.
+**Expected:** Only `db`, `datadog-agent`, and `api` run. Agent reports a valid API key / forwarder success. OTLP listening. No auth failures in `docker compose -f docker-compose.datadog.yml logs datadog-agent --tail=50`.
 
 In the Datadog UI: **Infrastructure → Host Map** (or Fleet) → host `harbour-local` within a few minutes.
 
@@ -437,8 +415,8 @@ Document target (e.g. 99%), window and what burns the budget — same arithmetic
 
 **Monitor 2 — missing telemetry**:
 
-- Query: Agent / host not reporting, or no APM hits for `service:harbour-api` when you expect traffic (choose a signal Datadog exposes for Agent downtime).  
-- Validation: `docker compose stop datadog-agent` until the monitor alerts; restart Agent; confirm recovery.  
+- Prefer the Terraform monitor in §8.7.1 (`system.cpu.user` + `notify_no_data`).  
+- Validation: seed metric data first → stop Agent → wait for status **No Data** (not “Alert”) → start Agent → **OK**. Confirm notify if configured.  
 - Runbook: `docs/observability/datadog/runbook-missing-telemetry.md` — distinguish “app down” vs “blind.”
 
 **Validation protocol (both monitors):**
@@ -448,7 +426,7 @@ Document target (e.g. 99%), window and what burns the budget — same arithmetic
 2. Induce condition ( /v1/fail loop  OR  stop Agent )
 3. Wait until Datadog shows Alert (poll UI — do not claim Alert after a fixed sleep alone)
 4. Mitigate (stop faults / start Agent)
-5. Confirm recovery (OK / No Data → OK as designed)
+5. Confirm recovery (**OK → No Data → OK** for missing-telemetry; threshold **Alert** only for the error-rate monitor)
 ```
 
 | Claim | Evidence |
@@ -558,7 +536,9 @@ provider "datadog" {
 # Expect a non-empty timeseries while the Agent is up.
 ```
 
-If `datadog.agent.running` is empty on your site/plan, use `system.cpu.user` (always present when infra monitoring works) for the monitor below — still proves “host telemetry missing” when the Agent is stopped.
+If `datadog.agent.running` is empty on your site/plan, use `system.cpu.user` (always present when infra monitoring works) for the monitor below.
+
+**Important:** Datadog’s **No Data** status is distinct from a threshold **Alert**. With `notify_no_data = true`, stopping the Agent should move the monitor to **No Data** (and can notify). That is **not** the same as the metric crossing `< 0`. Do not write “No Data → Alert” unless you actually observe the Alert state for a different reason.
 
 `terraform/datadog/monitor_missing_telemetry.tf`:
 
@@ -569,11 +549,11 @@ resource "datadog_monitor" "harbour_missing_telemetry" {
   query = <<-EOT
     avg(last_10m):avg:system.cpu.user{host:${var.harbour_host}} < 0
   EOT
-  # system.cpu.user is >= 0 when reporting. Combined with notify_no_data, stopping
-  # the Agent produces No Data → Alert. The "< 0" threshold never matches live CPU;
-  # No Data is the training signal for "Agent blind spot".
+  # system.cpu.user is >= 0 when reporting, so the critical threshold should not fire
+  # on live CPU. The training signal is notify_no_data → status **No Data** when the
+  # Agent stops reporting (after the monitor has already seen data at least once).
   message = <<-EOT
-    Missing telemetry for ${var.harbour_host}.
+    Missing telemetry for ${var.harbour_host} (expect monitor status: No Data).
     Distinguish: app may still be healthy (curl /health) while Datadog is blind.
     Runbook: docs/observability/datadog/runbook-missing-telemetry.md
     @${var.training_notify}
@@ -608,9 +588,17 @@ terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
-**Validate (required):** with Agent running, monitor OK / no alert; `docker compose -f …/docker-compose.datadog.yml stop datadog-agent`; wait until Datadog shows **No Data / Alert**; start Agent; confirm recovery. Terraform apply alone is not validation.
+**Validate (required) — order matters:**
 
-**Expected:** second `terraform plan` is empty (or intentional drift); Alert observed for the missing-telemetry drill.
+1. **Seed data first.** With the Agent running, confirm `system.cpu.user{host:harbour-local}` returns points in Metrics Explorer (Datadog needs prior data before missing-telemetry evaluation is reliable).  
+2. Confirm the monitor is **OK**.  
+3. `docker compose -f "$HARBOUR_ROOT/observability/docker-compose.datadog.yml" stop datadog-agent` while `curl -sf http://127.0.0.1:8000/health` still succeeds.  
+4. Wait until the monitor status is explicitly **No Data** (screenshot or status text — not a guessed “Alert”). If you configured `@training_notify`, confirm that notification arrived for the No Data condition.  
+5. Start the Agent again; wait until the monitor returns to **OK**.  
+
+Terraform apply alone is not validation.
+
+**Expected:** second `terraform plan` is empty (or intentional drift); evidence shows **OK → No Data → OK**, plus notification proof if notify was configured.
 
 ### 8.7.2 Worked example — onboarding package
 
@@ -640,11 +628,18 @@ service, env, version (match OTel resource attributes)
 - Log exclusion defaults: …
 ```
 
-### 8.7.3 Worked example — second service (`harbour-worker`)
+### 8.7.3 Worked example — onboard a second service (`harbour-worker`)
 
-The `worker` service is already defined in `docker-compose.datadog.yml` (§8.2.2) with `working_dir: /work/app`, `PYTHONPATH=/work/app`, and `uvicorn --app-dir /work/app` so `harbour_worker.main:app` imports reliably.
+This is the onboarding moment: **create source first**, then add and start the Compose service. Do not have started `worker` in §8.2.
 
-Create `app/harbour_worker/main.py` (and empty `app/harbour_worker/__init__.py` if needed):
+**1. Create the module**
+
+```bash
+mkdir -p "$HARBOUR_ROOT/app/harbour_worker"
+touch "$HARBOUR_ROOT/app/harbour_worker/__init__.py"
+```
+
+`app/harbour_worker/main.py`:
 
 ```python
 from fastapi import FastAPI
@@ -657,18 +652,56 @@ def health():
     return {"status": "ok", "service": "harbour-worker"}
 ```
 
-```bash
-curl -sS http://127.0.0.1:8001/health
-# Expect JSON status ok — if ModuleNotFoundError, confirm --app-dir /work/app and the volume mount
-docker compose -f "$HARBOUR_ROOT/observability/docker-compose.datadog.yml" logs worker --tail=40
-# Datadog APM: service harbour-worker appears after traffic
+**2. Append the `worker` service** to `observability/docker-compose.datadog.yml`:
+
+```yaml
+  worker:
+    image: harbour-api:otel
+    working_dir: /work/app
+    volumes:
+      - ../app:/work/app:ro
+    environment:
+      PYTHONPATH: /work/app
+      OTEL_SERVICE_NAME: harbour-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      DD_SERVICE: harbour-worker
+      DD_ENV: local
+      DD_VERSION: dev
+    entrypoint: ["opentelemetry-instrument"]
+    command:
+      - uvicorn
+      - harbour_worker.main:app
+      - --app-dir
+      - /work/app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - datadog-agent
 ```
+
+**3. Start only the new service** (db/agent/api already running):
+
+```bash
+cd "$HARBOUR_ROOT/observability"
+docker compose -f docker-compose.datadog.yml up -d worker
+docker compose -f docker-compose.datadog.yml ps worker
+docker compose -f docker-compose.datadog.yml logs worker --tail=40
+curl -sS http://127.0.0.1:8001/health
+# Expect JSON status ok — if ModuleNotFoundError, confirm source exists and --app-dir /work/app
+```
+
+**4. Platform package steps**
 
 1. Clone dashboard/monitors with `service:harbour-worker` (or Terraform `for_each`).  
 2. Record which steps were self-service vs needed platform help.  
 3. List one automation to add next (module variable `service_name`).
 
-**Verify:** `/health` on `:8001` works; worker visible in APM; onboarding doc alone almost sufficient for a colleague.
+**Verify:** Worker was absent in §8.2; source existed before `up -d worker`; `/health` on `:8001` works; worker visible in APM; onboarding doc reflects this sequence.
 
 ---
 
@@ -739,12 +772,13 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 - Did you start **only** `docker-compose.datadog.yml` (Collector not defined; D07 stack `down`)?  
 - Can you click Trace → Log and Log → Trace for the same `trace_id`?  
 - Can you show Alert → recover for **both** monitors?  
-- Does `curl :8001/health` work without import errors?  
+- Was `worker` started only after `harbour_worker` source existed (§8.7.3)?  
+- Does missing-telemetry evidence show **No Data** (not mislabeled Alert)?  
 - Are keys absent from Git and not blanked by Compose `${DD_API_KEY}`?
 
 ### Example assessment conclusion (evidence still required)
 
-> Used `docker-compose.datadog.yml` only (`docker-compose.yml down` first; no Collector). API key via `env_file` only. OTLP→Agent; `/proc/1/cmdline` showed `opentelemetry-instrument`. Log pipeline JSON + Trace ID remapper: APM↔Logs click-through for `/v1/info`. Terraform `variables.tf` complete; `system.cpu.user` + `notify_no_data` monitor Alerted when Agent stopped. Worker on `:8001` with `--app-dir /work/app`. ONBOARDING.md + governance filed. Keys not in Git.
+> Used `docker-compose.datadog.yml` only (`down` D07 first). Started `db`/`datadog-agent`/`api` in §8.2; onboarded `harbour-worker` in §8.7 after creating source, then `up -d worker`. API key via `env_file` only. Trace↔log remapper click-through proven. Missing-telemetry monitor: seeded `system.cpu.user`, then **OK → No Data → OK** with Agent stop/start (not confused with threshold Alert). Error-rate monitor validated to Alert separately. ONBOARDING.md + governance filed. Keys not in Git.
 
 ---
 
