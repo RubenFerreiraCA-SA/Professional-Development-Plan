@@ -2,7 +2,7 @@
 
 | | Details |
 | --- | --- |
-| **Estimated study time** | 4–5 hours |
+| **Estimated study time** | 7–10 hours |
 | **Prerequisites** | [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md), routine branching and merging experience, and comfort using Git in a terminal. |
 
 ## Objective
@@ -21,10 +21,10 @@ Diagnose and recover difficult Git states, reason about commit history and desig
 
 | Activity | Estimated hours |
 | --- | ---: |
-| Git internals and history engineering | 1.5–2 |
-| Conflicts, recovery and regression diagnosis | 1.5–2 |
-| Practical Assessment and evidence | 1–1 |
-| **Total** | **4–5** |
+| Git internals and history engineering | 2–3 |
+| Conflicts, recovery and regression diagnosis | 2.5–3.5 |
+| Practical Assessment and evidence | 2.5–3.5 |
+| **Total** | **7–10** |
 
 ## 1. Git internals and history engineering
 

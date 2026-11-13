@@ -2,7 +2,7 @@
 
 | | Details |
 | --- | --- |
-| **Estimated study time** | 4–5 hours |
+| **Estimated study time** | 6–9 hours |
 | **Prerequisites** | Confident everyday use of Git, pull/merge requests and a hosted source-control platform. |
 
 ## Objective
@@ -23,10 +23,10 @@ The repository becomes the starting point for the [programme Final Project](../.
 
 | Activity | Estimated hours |
 | --- | ---: |
-| Repository architecture, structure and ownership | 1.5 |
-| Governance, access and supply-chain controls | 2 |
-| Practical Assessment and evidence | 0.5–1.5 |
-| **Total** | **4–5** |
+| Repository architecture, structure and ownership | 1.5–2.5 |
+| Governance, access and supply-chain controls | 2–3 |
+| Practical Assessment and evidence | 2.5–3.5 |
+| **Total** | **6–9** |
 
 ## 1. Repository architecture and code ownership
 
@@ -105,4 +105,4 @@ In a test repository (or an isolated Final Project repository):
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 - [Git documentation — gitignore](https://git-scm.com/docs/gitignore)
 
-**Previous:** [DevOps Syllabus](DevOps%20Syllabus.md) · **Next:** [D02 — Advanced Git](D02%20Advanced%20Git.md)
+**Previous:** [DevOps Syllabus](D00%20DevOps%20Syllabus.md) · **Next:** [D02 — Advanced Git](D02%20Advanced%20Git.md)
