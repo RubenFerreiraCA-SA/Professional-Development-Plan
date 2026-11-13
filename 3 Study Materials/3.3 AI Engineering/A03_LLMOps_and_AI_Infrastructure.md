@@ -1,17 +1,17 @@
 # A03 — LLMOps and AI Infrastructure
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 32–40 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 32–40 hours  
 **Purpose:** Deployment, monitoring, security and evaluation of AI services.
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

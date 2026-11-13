@@ -1,17 +1,17 @@
 # P02 — Kubernetes Administration and Operations
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 48–60 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 48–60 hours  
 **Purpose:** Administration, RBAC, troubleshooting and recovery.
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

@@ -1,17 +1,17 @@
 # C01 — Linux, Networking and Cloud Fundamentals
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 32–40 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 32–40 hours  
 **Purpose:** Systems administration, connectivity and cloud concepts.
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

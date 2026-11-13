@@ -1,17 +1,17 @@
 # P03 — Internal Developer Platforms and Developer Experience
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 32–40 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 32–40 hours  
 **Purpose:** Golden paths, developer portals, catalogues and self-service.
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

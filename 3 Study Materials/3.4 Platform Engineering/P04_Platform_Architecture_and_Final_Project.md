@@ -1,17 +1,17 @@
 # P04 — Platform Architecture and Final Project
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 40–50 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 40–50 hours  
 **Purpose:** Integration, platform product goals, technical defence and the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md).
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

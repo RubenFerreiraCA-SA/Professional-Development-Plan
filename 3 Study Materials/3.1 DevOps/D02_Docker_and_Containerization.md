@@ -1,8 +1,12 @@
 # D02 — Docker & Containerization
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 24–30 hours |
+| **Prerequisites** | To be defined. |
+
 > **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
-**Estimated study time:** 24–30 hours  
 **Assessment weighting in source syllabus:** 20%  
 **Focus:** Dockerfiles, storage, networking, Compose and image registries.
 

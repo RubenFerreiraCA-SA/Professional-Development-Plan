@@ -1,8 +1,12 @@
 # D04 — Infrastructure as Code & Terraform
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 32–40 hours |
+| **Prerequisites** | To be defined. |
+
 > **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
-**Estimated study time:** 32–40 hours  
 **Assessment weighting in source syllabus:** 27%  
 **Focus:** Terraform lifecycle, state, modules and cloud provisioning.
 

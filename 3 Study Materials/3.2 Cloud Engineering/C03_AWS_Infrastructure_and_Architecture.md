@@ -1,17 +1,17 @@
 # C03 — AWS Infrastructure and Architecture
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 64–80 hours |
+| **Prerequisites** | To be defined. |
+
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Estimated study time:** 64–80 hours  
 **Purpose:** Secure, resilient and cost-conscious AWS solution design.
 
 ## Module overview
 
 _TODO: Define professional relevance and scope._
-
-## Prerequisites
-
-_TODO: Identify required prior knowledge._
 
 ## Learning outcomes
 

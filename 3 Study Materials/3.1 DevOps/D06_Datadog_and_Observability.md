@@ -1,8 +1,12 @@
 # D06 — Datadog & Observability
 
+| | Details |
+| --- | --- |
+| **Estimated study time** | 16–20 hours |
+| **Prerequisites** | To be defined. |
+
 > **Source of truth:** [DevOps Engineering Syllabus](DevOps_Syllabus.md). This page is an index for the module, not a replacement or redesign.
 
-**Estimated study time:** 16–20 hours  
 **Assessment weighting in source syllabus:** 13%  
 **Focus:** Datadog monitoring, metrics, logs, tracing, dashboards and alerting.
 

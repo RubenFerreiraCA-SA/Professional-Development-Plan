@@ -1,7 +1,9 @@
 # D01 — Git & Repository Foundations
 
-**Estimated study time:** 8–10 hours  
-**Prerequisites:** Confident daily use of Git, branching, commits, pull/merge requests and command-line tools.
+| | Details |
+| --- | --- |
+| **Estimated study time** | 8–10 hours |
+| **Prerequisites** | Confident daily use of Git, branching, commits, pull/merge requests and command-line tools. |
 
 ## Objective
 
