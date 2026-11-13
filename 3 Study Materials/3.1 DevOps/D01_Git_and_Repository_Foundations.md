@@ -1,228 +1,191 @@
 # D01 — Git & Repository Foundations
 
+**Level:** Upper-intermediate to senior software developers  
 **Estimated study time:** 8–10 hours  
 **DevOps syllabus weighting:** 7%  
-**Prerequisites:** Git installed, a terminal and an account on GitHub or GitLab. Basic command-line familiarity is helpful.
+**Prerequisites:** Confident daily use of Git, branching, commits, pull/merge requests and command-line tools.
 
 ## Objective
 
-Build a **secure, reviewable Git repository** that becomes the foundation of the continuous practical project used throughout the [DevOps syllabus](DevOps_Syllabus.md). You will work with Git locally, authenticate to a remote repository, protect the main branch and merge a change through a pull or merge request.
+**Design, secure and operate a repository workflow suitable for a production engineering team.** Go beyond basic commands to understand Git's object model, maintain a trustworthy history, recover from failures and enforce review and release controls without making delivery unnecessarily difficult.
 
-## Learning outcomes
+The resulting repository becomes the foundation for the [DevOps capstone](DevOps_Syllabus.md). This module deepens the D01 syllabus objectives; it does not replace them.
 
-On completion, you should be able to:
+## Outcomes
 
-1. Explain repositories, commits, branches, remotes and the differences between working tree, staging area and commit history.
-2. Configure Git identity and secure SSH authentication to a remote host.
-3. Structure a repository with separate application, infrastructure and deployment directories.
-4. Exclude credentials and generated files using `.gitignore` and recognise that ignoring a file does not remove it from existing history.
-5. Create feature branches, make readable commits, open and review a pull/merge request, and merge without bypassing repository rules.
-6. Demonstrate that the default branch is protected and the remote history reflects the reviewed changes.
+After completing the module, you should be able to:
 
-## Suggested learning plan
+1. Interpret Git's commit graph, object references and three-tree model to diagnose unexpected repository states.
+2. Choose and defend a branching, merging and history policy appropriate for continuous delivery and a multi-developer team.
+3. Resolve non-trivial conflicts, recover lost or incorrect work and safely investigate regressions.
+4. Design a repository layout that separates application, infrastructure and deployment concerns while defining clear ownership boundaries.
+5. Implement enforceable repository governance: least-privilege access, protected branches, approval rules, ownership and automated policy checks.
+6. Identify and mitigate source-control supply-chain risks, including exposed secrets, untrusted automation and unauthorised changes.
+7. Demonstrate the workflow and its failure modes with reproducible evidence.
 
-| Activity | Estimated time | Outcome |
-| --- | ---: | --- |
-| Git fundamentals and local practice | 2 hours | Understand and inspect repository history |
-| Identity and SSH authentication | 1–1.5 hours | Authenticated remote access |
-| Repository structure and ignore rules | 1–1.5 hours | Clean, safe capstone repository |
-| Branching and pull/merge requests | 2–2.5 hours | Reviewed, merged feature |
-| Branch protection, verification and evidence | 2–2.5 hours | Demonstrable, repeatable workflow |
-| **Total** | **8–10 hours** | |
+## Time budget
 
-These are estimates, not deadlines. Familiar users can move faster; newcomers may need more practice.
+| Activity | Estimated hours |
+| --- | ---: |
+| Git internals and history engineering | 2 |
+| Conflict resolution, recovery and debugging | 2 |
+| Repository architecture and ownership | 1.5 |
+| Governance, identity and supply-chain controls | 2 |
+| Integrated scenario, validation and technical decisions | 1.5–2.5 |
+| **Total** | **9–10** |
 
-## 1. Git fundamentals
+Use an isolated repository for destructive experiments. Advanced extensions are optional and sit outside the estimated core hours.
 
-Learn the purpose of each part of the workflow:
+## 1. Git internals and history engineering
 
-| Concept | What to know |
-| --- | --- |
-| Working tree | Files currently being edited |
-| Staging area | Changes selected for the next commit |
-| Commit | A recorded snapshot with a message and parent history |
-| Branch | A movable pointer to a sequence of commits |
-| Remote | A named connection to a repository hosted elsewhere |
-| Pull/merge request | A proposed change that can be inspected and reviewed before merging |
+**Concepts:** blobs, trees, commits, annotated tags, refs, `HEAD`, the index, detached HEAD, unreachable objects, reflogs and the difference between author and committer metadata.
 
-**Practice in a disposable local repository:**
+Explain how the following operations alter the commit graph, and why a team might choose one over another:
+
+- **Merge commit:** preserves the topology and branch context.
+- **Squash merge:** gives a linear mainline but discards individual feature commits on that branch's merged result.
+- **Rebase:** replays commits with new identities; useful before integration, risky when rewriting others' shared history.
+- **Cherry-pick:** replays selected changes, useful for controlled backports but introduces duplicate commit identities.
+
+**Inspect a real repository:**
 
 ```bash
-mkdir git-practice && cd git-practice
-git init -b main
+git log --graph --decorate --oneline --all
+git cat-file -t HEAD
+git cat-file -p HEAD
+git ls-tree -r --name-only HEAD
+git reflog --date=iso
+git merge-base main feature/example
+git diff main...feature/example
+```
+
+Use an existing branch in place of `feature/example`. Explain why the three-dot comparison is appropriate for reviewing changes since a common ancestor, and how it differs from comparing two endpoints.
+
+**Exercise:** In a disposable repository, create two branches with divergent commits. Merge one using a merge commit and the other using a squash merge. Compare `git log --graph`, the resulting file trees and traceability. Write a short decision on which policy you would adopt and why.
+
+## 2. Conflict resolution, recovery and regression diagnosis
+
+**Scenario A — concurrent development:** Use **two clones** of a disposable repository to model developers changing the same line. Fetch and integrate the competing change, inspect the conflict stages and resolve it deliberately:
+
+```bash
+git fetch origin
 git status
-echo "# Git Practice" > README.md
-git add README.md
-git commit -m "docs: initialise practice repository"
-git log --oneline --decorate
-git switch -c practice/readme-update
-echo "Learning Git fundamentals." >> README.md
-git diff
-git add README.md
-git diff --cached
-git commit -m "docs: expand practice readme"
-git log --oneline --graph --all
+git ls-files -u
+git diff --cc
+# Resolve conflicted files, run appropriate checks, then:
+git add <resolved-file>
+git rebase --continue
 ```
 
-If Git requests your identity, complete the next section and retry the commit. Use `git status` before and after staging to explain what changed.
+The continuation command applies **only if you chose rebase**. For a merge conflict, complete the merge using `git commit` or `git merge --continue`. Explain when aborting (`git rebase --abort` or `git merge --abort`) is preferable.
 
-## 2. Git identity and SSH authentication
+**Scenario B — lost work:** In a disposable branch, create a commit, record its hash, then move the branch backwards. Use `git reflog` to find and restore the commit on a **new recovery branch**. Do not reset or rewrite the shared `main` branch. Compare:
 
-Configure an identity that you want attached to your commits:
+- `git revert` for undoing a published change without rewriting public history.
+- `git reset` for moving local refs and, optionally, changing index and working-tree state.
+- `git restore` for recovering selected file content.
+- `git reflog` for finding previously referenced commits; recovery depends on retention and garbage collection.
 
-```bash
-git config --global user.name "Your Name"
-git config --global user.email "you@example.com"
-git config --global --list
-```
+**Scenario C — regression:** Deliberately introduce a failing change among several good commits. Use `git bisect start`, `git bisect good` and `git bisect bad` with an existing test or reproducible manual check to identify the first bad commit. Finish with `git bisect reset`.
 
-For SSH, **check for an existing key before creating another**. If you need a new key, use an Ed25519 key with a passphrase:
+**Deliverable:** A brief incident note showing the divergent graph, conflict resolution, recovered commit and regression culprit. Explain the safe recovery option you would use for a production branch.
 
-```bash
-ssh-keygen -t ed25519 -C "you@example.com"
-```
+## 3. Repository architecture and code ownership
 
-Add the **public** key (`.pub` file) to your Git hosting account. Follow your operating system's instructions to load the private key into the SSH agent, then test authentication:
-
-```bash
-ssh -T git@github.com
-# Or, for GitLab:
-ssh -T git@gitlab.com
-```
-
-A successful authentication test does not necessarily grant access to every repository. **Never upload, paste or commit your private SSH key.**
-
-## 3. Create the capstone repository
-
-Create a new remote repository for the ongoing application delivery project, then clone it locally. Use GitHub or GitLab; the lesson is platform-independent where possible.
-
-Create this starting layout:
+Create or refactor the ongoing capstone repository:
 
 ```text
 capstone/
-├── app/          # Application source code (added in later modules)
-├── infra/        # Terraform and infrastructure definitions
-├── deploy/       # Deployment manifests and GitOps configuration
+├── app/                   # Application code and tests
+├── infra/                 # Infrastructure as code
+├── deploy/                # Deployment and GitOps configuration
+├── docs/
+│   └── decisions/         # Architecture decision records
+├── .github/ or .gitlab/   # Hosting-specific automation/configuration
+├── .gitignore
 ├── README.md
-└── .gitignore
+└── CONTRIBUTING.md
 ```
 
-Git does not track empty directories; add a small `.gitkeep` file inside `app/`, `infra/` and `deploy/` until they contain real source files.
+Keep the structure intentionally small; avoid creating empty directories without a reason. The same architecture can be implemented on GitHub or GitLab, with platform-specific controls clearly documented.
 
-Your `README.md` should explain what the capstone is, what each directory contains and how to contribute changes.
+**Design exercise:** Decide whether the project should remain a monorepo, split into application/infrastructure repositories, or evolve into a separate deployment-config repository. Evaluate change coupling, permissions, ownership, release cadence, auditability and GitOps reconciliation. Record the decision in a one-page ADR with alternatives and trade-offs.
 
-**Example `.gitignore`:**
+Define code ownership at least for `app/`, `infra/` and `deploy/`. On GitHub, an example `.github/CODEOWNERS` is:
 
-```gitignore
-# Secrets and local configuration
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-
-# Build and local dependencies
-node_modules/
-dist/
-build/
-
-# Terraform local state and provider data
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
-crash.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
+```text
+/app/       @your-org/app-maintainers
+/infra/     @your-org/platform-maintainers
+/deploy/    @your-org/platform-maintainers
 ```
 
-You may need additional ignore rules for your chosen technology. Commit a safe `.env.example` containing placeholder variable names, never real credentials. Terraform dependency lockfiles (such as `.terraform.lock.hcl`) are generally committed, not ignored.
+Replace placeholders with real, eligible teams. A CODEOWNERS file alone does **not** enforce approvals; combine it with review rules and verify that the required reviewers can actually access the repository. For GitLab, use its supported code-owner syntax and approval settings.
 
-**Verify the rules:**
+**Repository hygiene:** Implement a suitable `.gitignore` for your chosen stack, excluding local secrets, build products and Terraform state while retaining intentional dependency lockfiles. Demonstrate `git check-ignore -v` and `git ls-files`. Discuss the limitations of `.gitignore` once a secret is already tracked.
 
-```bash
-git status --short
-git check-ignore -v .env
-git check-ignore -v infra/example.tfstate
-```
+## 4. Governance, identity and software supply-chain security
 
-The last two commands test patterns even if the example files do not exist. If a secret was *already committed*, adding it to `.gitignore` is insufficient: remove it from tracking and rotate exposed credentials as appropriate.
+Treat the repository as a **security boundary**, not merely a storage location.
 
-## 4. Branch, review and merge a change
-
-Starting from `main`, create a small documentation change in a feature branch:
-
-```bash
-git switch main
-git pull --ff-only
-git switch -c feature/document-repository-layout
-# Edit README.md
-git status
-git diff
-git add README.md
-git commit -m "docs: describe repository layout"
-git push -u origin feature/document-repository-layout
-```
-
-Open a **pull request** (GitHub) or **merge request** (GitLab) targeting `main`. Include:
-
-- What changed and why.
-- How you checked it.
-- Any open questions or risks.
-
-Inspect the diff in the hosting platform and leave at least one meaningful review comment. If a second reviewer is available, request their review; otherwise document a self-review and note that it is **not equivalent to independent approval**.
-
-Merge through the pull/merge request. Then:
-
-```bash
-git switch main
-git pull --ff-only
-git log --oneline --graph --decorate -n 8
-```
-
-Confirm your change appears in `main` and that the request records the merge.
-
-## 5. Protect the default branch
-
-In your hosting platform's repository settings, configure a branch protection rule or ruleset for `main` where your account permissions and plan allow it.
-
-Aim to:
-
-- Prevent accidental deletion or force-pushing to `main`.
-- Require changes to arrive through pull/merge requests.
-- Require at least one independent approval **when collaborators are available**.
-- Enable checks before merging once a CI workflow exists (introduced in D03).
-
-**Test it:** attempt a harmless direct push to `main` only after protection is configured, and record whether it is rejected. Do not overwrite history or try to bypass the rule. Some platforms and repository plans restrict enforcement features, especially for solo or private repositories: record what you could actually configure and what remains a limitation.
-
-## Capstone lab — required deliverable
-
-Create a **structured, branch-protected project repository** and merge one feature through a documented review workflow.
-
-| Check | Evidence of completion |
+| Control | Design question / evidence |
 | --- | --- |
-| Remote access | SSH authentication test works; remote URL is configured |
-| Repository layout | `app/`, `infra/`, `deploy/`, `README.md` and `.gitignore` present |
-| Safe file handling | Ignore checks demonstrate exclusion of local credentials and Terraform state |
-| Branch workflow | Feature branch contains a focused commit with an understandable message |
-| Code review | Pull/merge request contains a description, review evidence and merge record |
-| Branch protection | Rule/settings visible; enforcement demonstrated or limitations documented |
-| History | The merged change is visible on `main` |
+| Permissions | Who may read, push, approve, administer and publish? Are service accounts scoped narrowly? |
+| Protected default branch | Are direct pushes, force pushes and deletion restricted? Are bypasses audited or limited? |
+| Reviews | Are independent approvals and code-owner reviews required for sensitive paths? |
+| Automated checks | Which tests, scans and policies must pass before merge? D03 will build the actual CI pipeline. |
+| Identity and provenance | Which authentication methods, MFA policies and commit/tag signing options are available? |
+| Secrets | How are tokens issued, stored, rotated and prevented from entering history? |
+| Dependencies and automation | Can untrusted pull requests access credentials? Are actions/runners/dependencies reviewed and pinned where appropriate? |
+| Releases | How are tags protected and how can the team trace an artifact back to reviewed source? |
 
-**Completion standard:** You can reproduce the feature-branch → review → merge workflow and explain each check. A functioning repository and its history are more important than a written assessment.
+**Implement and demonstrate**, where supported by your hosting plan and permissions:
 
-## Evidence to retain
+1. Protect `main`, disable force-pushing and deletion, and require changes through pull/merge requests.
+2. Configure an approval rule and code-owner review for sensitive paths. Where a solo or private-repo plan cannot enforce this, document the gap rather than claiming it works.
+3. Use a feature branch to propose a change in `infra/` or `deploy/`; capture the review and merge record.
+4. Verify that an unauthorised direct update is rejected or document why enforcement cannot be tested.
+5. Add a lightweight secret-detection safeguard, such as an approved local pre-commit scanner or repository-native secret scanning. **Use fabricated test strings only**; never plant real credentials for the exercise.
 
-Record the repository URL, pull/merge request URL, a short note about branch protection, and the commands or screenshots used to verify ignore rules and the final history. **Do not include authentication secrets, private keys or confidential repository content.**
+Review SSH keys, scoped tokens and signed commits/tags as options rather than mandatory setup steps. A valid signature proves possession of a key, not that the change is safe. Understand how compromised credentials, unsafe workflow triggers and excessive CI token permissions can undermine an otherwise protected repository.
 
-## Further learning
+## 5. Integrated senior-level capstone scenario
 
-- [Pro Git — Getting Started](https://git-scm.com/book/en/v2/Getting-Started-About-Version-Control)
-- [Pro Git — Git Branching](https://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell)
-- [Git documentation — gitignore](https://git-scm.com/docs/gitignore)
-- [GitHub — Connect with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
-- [GitHub — About protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+**Situation:** Two developers make conflicting changes while an infrastructure change needs additional review. A bad commit is then merged to the test branch, and an accidentally discarded local commit must be recovered.
 
-**Next module:** [D02 — Docker & Containerization](D02_Docker_and_Containerization.md)
+Complete this in a **disposable test repository or sandbox branch**, not a production project:
+
+1. Create the repository layout, contribution guide, ownership rules and a concise architecture decision.
+2. Produce a conflicting change with two clones; choose and justify merge versus rebase.
+3. Recover a discarded commit using its object ID or reflog, without rewriting shared history.
+4. Identify the introduced regression using `git bisect`.
+5. Open a pull/merge request affecting a sensitive path and demonstrate the configured approval or protection behaviour.
+6. Explain how you would revert a faulty deployment-related change safely, and how GitOps would reconcile the result later in D05.
+
+### Completion criteria
+
+| Evidence | Standard |
+| --- | --- |
+| Git history | Correctly explain branches, merge bases, rewritten commits and the resulting graph |
+| Recovery | Restore lost local work and identify a bad commit reproducibly |
+| Repository design | Layout, `CONTRIBUTING.md`, CODEOWNERS or equivalent, and an ADR with trade-offs |
+| Security | Ignore rules, secret-prevention controls and least-privilege decisions |
+| Governance | Branch/review settings tested, with any enforcement limitations stated explicitly |
+| Collaboration | A reviewed pull/merge request demonstrating the chosen integration policy |
+
+**Pass standard:** You can explain **why** the controls and workflows were chosen, demonstrate they work (or clearly identify provider limits), and diagnose the consequences when they fail. Merely listing Git commands or uploading screenshots is insufficient.
+
+## Optional deep dives
+
+For developers already comfortable with the core work: `git worktree` for concurrent branches; `git rerere` for repeat conflict resolutions; `git range-diff` for assessing rebased series; signed commits and release tags; partial clone and sparse checkout; and policies for submodules versus monorepos. Explore these only where relevant to your own PDP.
+
+## References
+
+- [Pro Git — Git Internals](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain)
+- [Pro Git — Branching](https://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell)
+- [Git documentation — gitreflog](https://git-scm.com/docs/git-reflog)
+- [Git documentation — git-bisect](https://git-scm.com/docs/git-bisect)
+- [GitHub — Protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+- [GitHub — CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
+- [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
+
+**Previous:** [DevOps Syllabus](DevOps_Syllabus.md) · **Next:** [D02 — Docker & Containerization](D02_Docker_and_Containerization.md)
