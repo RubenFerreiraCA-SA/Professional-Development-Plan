@@ -38,7 +38,12 @@ test -f app/harbour_api/main.py || echo "Need Harbour API from D03"
 docker compose version
 python3 --version
 mkdir -p observability/otel docs/observability
+
+# After §7.3.3 creates harbour.env.example, copy it once:
+#   cp observability/otel/harbour.env.example observability/otel/harbour.env
 ```
+
+Ensure `.gitignore` includes `observability/otel/harbour.env`. The example file is committed; the local `harbour.env` copy is not.
 
 ---
 
@@ -146,17 +151,44 @@ Differentiate **diagnostic** events (debug an incident) from **audit** events (w
 ### 7.3.1 Target architecture (vendor-neutral)
 
 ```text
-Harbour API ──OTLP──► OpenTelemetry Collector ──► Prometheus (metrics)
-                     │
-                     └──► Jaeger (traces)
-App stdout logs (structured) ──► (optional) Collector filelog / keep in Docker logs for training
+[Compose network harbour-obs]
+  Harbour API ──OTLP──► OpenTelemetry Collector ──► Prometheus (metrics)
+       │                │
+       └── Postgres     └──► Jaeger (traces)
+App stdout (structured JSON with trace_id) ──► docker compose logs
 ```
 
-D08 may swap the right-hand side for Datadog; keep OTLP + resource attributes stable.
+D03’s Compose deliberately **does not publish** Postgres to the host. This chapter’s working topology therefore runs **Harbour and Postgres on the same Compose network** (`DATABASE_HOST=db`). Do not assume `127.0.0.1:5432` works against an unpublished D03 database.
 
-### 7.3.2 Worked example — dependencies
+D08 may swap the right-hand backends for Datadog; keep OTLP + resource attributes stable.
 
-From `app/` (or repo root with your existing venv from D03):
+### 7.3.2 Worked example — pinned dependencies
+
+Create `observability/otel/requirements-otel.txt` with this **pinned** set (install from the file — do not freestyle `pip install` unpinned packages):
+
+```text
+# observability/otel/requirements-otel.txt
+# Pinned for D07 training reproducibility (API 1.28 / instrumentation 0.49b2 line).
+fastapi==0.115.5
+uvicorn==0.32.1
+psycopg[binary]==3.2.3
+opentelemetry-api==1.28.2
+opentelemetry-sdk==1.28.2
+opentelemetry-semantic-conventions==0.49b2
+opentelemetry-distro==0.49b2
+opentelemetry-exporter-otlp==1.28.2
+opentelemetry-exporter-otlp-proto-grpc==1.28.2
+opentelemetry-exporter-otlp-proto-http==1.28.2
+opentelemetry-instrumentation==0.49b2
+opentelemetry-instrumentation-asgi==0.49b2
+opentelemetry-instrumentation-fastapi==0.49b2
+opentelemetry-instrumentation-logging==0.49b2
+opentelemetry-instrumentation-psycopg==0.49b2
+opentelemetry-instrumentation-dbapi==0.49b2
+opentelemetry-util-http==0.49b2
+```
+
+Install into the project venv (failures must be visible — no `|| true`):
 
 ```bash
 cd "$HARBOUR_ROOT"
@@ -164,20 +196,18 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install -U pip
-pip install \
-  "fastapi" "uvicorn" "psycopg[binary]" \
-  "opentelemetry-distro" \
-  "opentelemetry-exporter-otlp" \
-  "opentelemetry-instrumentation-fastapi" \
-  "opentelemetry-instrumentation-asgi" \
-  "opentelemetry-instrumentation-logging" \
-  "opentelemetry-instrumentation-psycopg"
-opentelemetry-bootstrap -a install || true
+pip install -r observability/otel/requirements-otel.txt
+# Failures must be visible (no || true, no piping away exit codes):
+python -c "import opentelemetry, fastapi, psycopg; print('otel-imports-ok')"
+opentelemetry-bootstrap -a requirements > /tmp/otel-bootstrap-reqs.txt
+wc -l /tmp/otel-bootstrap-reqs.txt
+# Instrumentation packages are already pinned above — bootstrap output is a cross-check,
+# not a second install source. If bootstrap exits non-zero, stop and fix the environment.
 ```
 
-Pin versions in `app/requirements.txt` when you settle on a working set — do not leave “whatever pip resolved today” undocumented.
+If `pip install -r`, the import check, or `opentelemetry-bootstrap` fails, stop and fix versions — do not continue with a partial environment. Commit `requirements-otel.txt` so others reproduce the same set.
 
-### 7.3.3 Worked example — resource attributes and OTLP export
+### 7.3.3 Worked example — env file from example
 
 Prefer explicit resource attributes (Unified Service Tagging / OTel semantic conventions):
 
@@ -187,111 +217,213 @@ Prefer explicit resource attributes (Unified Service Tagging / OTel semantic con
 | `service.version` | git SHA or image digest short form |
 | `deployment.environment.name` | `local` / `staging` / `prod` |
 
-`observability/otel/harbour.env.example` (copy to a **gitignored** local env file):
+Write `observability/otel/harbour.env.example`:
 
 ```bash
 OTEL_SERVICE_NAME=harbour-api
 OTEL_RESOURCE_ATTRIBUTES=service.version=dev,deployment.environment.name=local
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+# Inside Compose, the API uses the collector hostname (see compose). For rare host-run
+# debugging only, you would point at http://127.0.0.1:4317 — not the default path here.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_TRACES_EXPORTER=otlp
 OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=none
-# Fail soft: do not crash requests if the collector is down (batch exporter defaults)
 OTEL_BSP_SCHEDULE_DELAY=5000
+DATABASE_HOST=db
+DATABASE_PORT=5432
+DATABASE_USER=harbour
+DATABASE_PASSWORD=harbour-training-only
+DATABASE_NAME=harbour
 ```
 
-### 7.3.4 Worked example — run with auto-instrumentation
+**Create the local file explicitly:**
 
-With Postgres from D03 Compose **or** DB-free (readiness `unconfigured`):
+```bash
+cp observability/otel/harbour.env.example observability/otel/harbour.env
+# Adjust service.version if you like; keep harbour.env out of git
+```
+
+### 7.3.4 Worked example — instrument `/v1/info` (log + counter + optional fail)
+
+Edit `app/harbour_api/main.py`. Add imports and meter/counter near the top (after existing imports), then replace the `/v1/info` handler (and add a training fail route) as follows.
+
+**Imports / meter** (add once):
+
+```python
+import json
+import logging
+
+from opentelemetry import metrics, trace
+
+logger = logging.getLogger("harbour_api")
+logging.basicConfig(level=logging.INFO)
+
+meter = metrics.get_meter("harbour-api")
+info_requests = meter.create_counter(
+    "harbour.info.requests",
+    unit="1",
+    description="Count of /v1/info requests by outcome",
+)
+```
+
+**Replace / extend handlers** (keep your existing `/health` and `/ready`):
+
+```python
+@app.get("/v1/info")
+def info():
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    trace_id = format(ctx.trace_id, "032x") if ctx.is_valid else ""
+    span_id = format(ctx.span_id, "016x") if ctx.is_valid else ""
+    # Structured log line — same trace_id you will search in Jaeger
+    logger.info(
+        json.dumps(
+            {
+                "msg": "info_request",
+                "service": "harbour-api",
+                "http.route": "/v1/info",
+                "trace_id": trace_id,
+                "span_id": span_id,
+            }
+        )
+    )
+    info_requests.add(1, {"http.route": "/v1/info", "outcome": "success"})
+    return {
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "trace_id": trace_id,
+    }
+
+
+@app.get("/v1/fail")
+def fail_training():
+    """Training-only: increments error counter and returns 500 for alert drills."""
+    info_requests.add(1, {"http.route": "/v1/fail", "outcome": "error"})
+    # Re-use the same counter name with outcome=error so alert ratios have a denominator
+    return Response(content='{"status":"fail"}', media_type="application/json", status_code=500)
+```
+
+Ensure `Response` is imported from FastAPI (D03 already uses it for `/ready`). Remove `/v1/fail` before any shared environment beyond training.
+
+**Prometheus name:** the OTLP → Prometheus exporter exposes this as **`harbour_info_requests_total`** (dots → underscores, `_total` for counters). That name is the success criterion in §7.4.2.
+
+### 7.3.5 Worked example — two-component Compose topology (API + DB + collector)
+
+D03 does **not** publish Postgres to the host. Use this **working** topology: API and DB share the Compose network; only API `:8000`, Collector OTLP, Jaeger UI and Prometheus are published.
+
+Extend `observability/docker-compose.yml` (full file in §7.4.1 includes `db` + `api`). Build an image that includes the pinned OTel deps (repo root as context so the requirements file is reachable):
 
 ```bash
 cd "$HARBOUR_ROOT"
-set -a && source observability/otel/harbour.env && set +a
-# If using D03 db:
-# export DATABASE_HOST=127.0.0.1 DATABASE_PORT=5432 DATABASE_USER=harbour \
-#   DATABASE_PASSWORD=harbour-training-only DATABASE_NAME=harbour
+# Base app image from D03 first:
+docker build -t harbour-api:local \
+  --build-arg HARBOUR_COMMIT="$(git rev-parse HEAD)" \
+  -f app/Dockerfile app
 
-opentelemetry-instrument \
-  uvicorn harbour_api.main:app --app-dir app --host 127.0.0.1 --port 8000
+# Layer pinned OTel deps (context = repo root):
+docker build -t harbour-api:otel -f- . <<'DOCKERFILE'
+FROM harbour-api:local
+USER root
+COPY observability/otel/requirements-otel.txt /tmp/requirements-otel.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-otel.txt
+# Keep the same non-root user your D03 image defines (adjust if named differently):
+USER harbour
+DOCKERFILE
+
+docker run --rm harbour-api:otel python -c "import opentelemetry; print('otel-in-image-ok')"
 ```
 
-In another terminal (collector must be up — §7.4):
+Ensure the image CMD/ENTRYPOINT runs under `opentelemetry-instrument` (wrap the existing uvicorn command) **or** set `command:` on the Compose `api` service as shown in §7.4.1.
+
+**Optional escape hatch (temporary only):** a disposable Compose override that adds `"5432:5432"` on `db` so a **host-run** uvicorn can use `DATABASE_HOST=127.0.0.1` — then remove the publish. Prefer the in-compose API so you do not fight D03’s networking design.
+
+### 7.3.6 Worked example — prove log ↔ trace correlation end-to-end
+
+With the stack up (§7.4.1):
 
 ```bash
-curl -sS http://127.0.0.1:8000/health
+# Hit info; response body includes trace_id
+RESP="$(curl -sS http://127.0.0.1:8000/v1/info)"
+echo "$RESP"
+TID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["trace_id"])' <<<"$RESP")"
+test -n "$TID" && echo "trace_id=${TID}"
+
+# Same ID in API logs:
+docker compose -f "$HARBOUR_ROOT/observability/docker-compose.yml" logs api --tail=50 | grep "$TID"
+
+# Same ID in Jaeger UI: http://127.0.0.1:16686 → Search → paste trace id
+# or:
+xdg-open "http://127.0.0.1:16686/trace/${TID}" 2>/dev/null || echo "Open Jaeger and search ${TID}"
+```
+
+**Expected:** One JSON log line with `"trace_id":"<TID>"`, Jaeger shows that trace for `harbour-api`, and the HTTP response `trace_id` matches both.
+
+### 7.3.7 Worked example — DB spans on the same network
+
+```bash
 curl -sS http://127.0.0.1:8000/ready
-curl -sS http://127.0.0.1:8000/v1/info
+# Jaeger: find a /ready (or info) trace; confirm a DB/client span when readiness queries Postgres
 ```
 
-**Expected:** App answers; after collector is running, spans appear for HTTP server (and DB client spans when `DATABASE_HOST` is set and instrumentation is active).
+**Slow handler vs slow dependency:** add a temporary `time.sleep(2)` in `/v1/info` once; compare span shape to a training route that runs `SELECT pg_sleep(2)` via psycopg. Remove both after the exercise.
 
-### 7.3.5 Worked example — structured log ↔ trace correlation
-
-Ensure logging instrumentation injects trace context (auto-instrumentation often does). Verify one log line during a request contains a trace id, **or** add a tiny helper that logs correlation fields — without logging bodies:
-
-```python
-# Training snippet — call from a request handler; do not log secrets or payloads
-from opentelemetry import trace
-
-span = trace.get_current_span()
-ctx = span.get_span_context()
-if ctx.is_valid:
-    print(
-        {"msg": "request_handled", "trace_id": format(ctx.trace_id, "032x"),
-         "span_id": format(ctx.span_id, "016x"), "service": "harbour-api"}
-    )
-```
-
-```bash
-curl -sS http://127.0.0.1:8000/v1/info >/dev/null
-# Match the printed trace_id to a Jaeger trace
-```
-
-**Practice — reproduce:** Capture one trace id from Jaeger and show the matching log line (or document if logs stay local-only for training).
-
-### 7.3.5b Two-component request path (API + database)
-
-Checklist and course detail require a path across **two components**. Harbour API + Postgres (D03 Compose) is the default:
-
-1. Start Postgres via your D03 Compose file; set `DATABASE_*` as in D03.  
-2. Confirm `/ready` returns `database` not `unconfigured`.  
-3. Generate traffic that touches the DB (readiness already does an authenticated check in the improved D03 code — use that, or a small read endpoint).  
-4. In Jaeger, open a trace and identify **server** span vs **db** client span (or equivalent psycopg spans).  
-
-If you cannot run Postgres, add a tiny second HTTP service (`harbour-deps`) that sleeps or returns JSON and call it from Harbour with an instrumented HTTP client — still two components, still one trace. Document which option you used.
-
-### 7.3.6 Worked example — slow handler vs slow dependency
-
-1. Temporarily add a training-only route or use an existing path; inject `time.sleep(2)` in the handler once, hit it, find the span that is long **inside** the app.
-2. Remove the sleep. With DB configured, run a deliberately slow query (e.g. `SELECT pg_sleep(2)`) behind a training-only endpoint **or** pause Postgres briefly and watch client spans / readiness — prefer a controlled `pg_sleep` so you do not confuse outage with slowness.
-3. Record screenshots/notes: same “slow request” symptom; different span shapes.
-
-**Verify:** You can explain the difference without looking at host CPU alone.
-
-### 7.3.7 Challenge — cardinality mistake
+### 7.3.8 Challenge — cardinality mistake
 
 Add a **bad** metric label (raw URL with an id) in a throwaway experiment; observe series explosion or document why you refused to merge it. Revert.
+
+**Verify:** Pinned `pip install -r` succeeded; API reaches DB as `db` (not host `127.0.0.1`); one request produced matching response / log / Jaeger `trace_id`; `harbour_info_requests_total` will be queried in §7.4.2.
 
 ---
 
 ## Section 7.4 — Telemetry pipeline (Collector + backends)
 
-### 7.4.1 Worked example — Compose reference stack
+### 7.4.1 Worked example — Compose reference stack (API + DB + pipeline)
 
 `observability/docker-compose.yml`:
 
 ```yaml
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: harbour
+      POSTGRES_PASSWORD: harbour-training-only
+      POSTGRES_DB: harbour
+    # No host ports — same design as D03; only reachable as hostname "db"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbour -d harbour"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: harbour-api:otel
+    env_file:
+      - ./otel/harbour.env
+    environment:
+      # Compose DNS names win over any host-oriented mistakes:
+      DATABASE_HOST: db
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    # If the image CMD is not uvicorn, set:
+    # command: ["opentelemetry-instrument", "uvicorn", "harbour_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.114.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "8889:8889"   # Prometheus exporter scrape (collector metrics bridge)
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
     depends_on:
       - jaeger
       - prometheus
@@ -301,18 +433,25 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686" # UI
-      - "4317"        # internal — app talks to collector, not Jaeger directly
+      - "16686:16686"
 
   prometheus:
     image: prom/prometheus:v2.55.0
     volumes:
       - ./otel/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./otel/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
     ports:
       - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
 ```
 
-> **Image tags:** Pin versions as above or newer known-good pins; if a tag moves, update deliberately and record it. Jaeger’s all-in-one accepts OTLP; the **app still exports to the Collector**, which forwards — that matches the platform shape (central pipeline).
+Build `harbour-api:otel` before `compose up` (§7.3.5). Create env:
+
+```bash
+cp observability/otel/harbour.env.example observability/otel/harbour.env
+```
 
 `observability/otel/collector-config.yaml`:
 
@@ -354,13 +493,18 @@ service:
       exporters: [prometheus, debug]
 ```
 
-> **Collector/Jaeger wiring note:** Contrib collector + Jaeger OTLP ports have shifted across versions. If traces do not appear, fix the exporter endpoint against **your** pinned images (Jaeger OTLP gRPC often on `4317` inside the compose network) before changing application code. Keep the app → Collector contract stable (`4317`/`4318` on localhost). Only the Collector should publish `4317`/`4318` to the host so Harbour never bypasses the pipeline “just to make the demo work.”
+> **Collector/Jaeger wiring note:** If traces do not appear, fix the exporter endpoint against **your** pinned images before changing application code. App → Collector only (`otel-collector:4317` on the Compose network).
 
 `observability/otel/prometheus.yml`:
 
 ```yaml
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
 scrape_configs:
   - job_name: otel-collector
     static_configs:
@@ -373,39 +517,52 @@ Start:
 cd "$HARBOUR_ROOT/observability"
 docker compose up -d
 docker compose ps
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:16686
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9090
 ```
 
-### 7.4.2 Worked example — see a trace and a metric
+### 7.4.2 Worked example — guaranteed metric + a trace
+
+**Success criterion (required):** after traffic, Prometheus returns a non-empty vector for the **explicit** counter from §7.3.4.
 
 ```bash
-# App exporting to collector (§7.3), then:
 for i in 1 2 3 4 5; do curl -sS http://127.0.0.1:8000/v1/info >/dev/null; done
+sleep 20   # scrape interval
+
+# Exact query — expect a value >= 5 (or cumulative since process start):
+curl -sG 'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=harbour_info_requests_total{http_route="/v1/info",outcome="success"}' \
+  | python3 -m json.tool | head -n 40
 ```
 
-Open Jaeger UI → service `harbour-api` → Find Traces. Open Prometheus → query for HTTP metrics your instrumentation exposes (names depend on OTel semconv version — search `http_server` / `http.server` style metrics; document the **exact** names you see).
+In the Prometheus UI (Graph): paste
 
-**Expected:** At least one trace with a server span; Prometheus shows a non-empty series related to Harbour traffic **or** you document the metric name gap and export a custom counter — honesty over fake screenshots.
+```promql
+harbour_info_requests_total{http_route="/v1/info",outcome="success"}
+```
+
+**Expected:** `status":"success"` and at least one result with a numeric `value`. If the series is missing, check Collector metrics pipeline and that the API process actually ran the instrumented handler (not an old image without §7.3.4).
+
+**Also required:** Jaeger shows a trace for one of those `/v1/info` calls (§7.3.6 correlation).
+
+**Additional exercise (optional):** explore auto-instrumented HTTP metric names (`http_server_*` / semconv variants) and record whatever your pin exposes — do **not** treat those as the primary pass/fail signal.
 
 ### 7.4.3 Worked example — collector outage (application must not die)
 
 ```bash
 cd "$HARBOUR_ROOT/observability"
-# Baseline: app healthy
 curl -sf http://127.0.0.1:8000/ready
 
 docker compose stop otel-collector
-# Generate traffic while collector is down
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:8000/health || echo APP_DOWN; done
 
 docker compose start otel-collector
 sleep 5
 curl -sf http://127.0.0.1:8000/ready
-# Note: some in-flight export buffers may drop — that is OK if requests succeeded
 ```
 
-**Expected:** Application HTTP stays up (`APP_DOWN` should not appear). Telemetry may have **gaps**. Record: request success vs dropped spans/metrics. If the app hangs or crashes on export, fix exporter settings (timeouts, batch processor) — telemetry must **degrade**, not take the user path down.
+**Expected:** Application HTTP stays up (`APP_DOWN` should not appear). Telemetry may have **gaps**. If the app hangs or crashes on export, fix exporter settings — telemetry must **degrade**, not take the user path down.
 
 ### 7.4.4 Security and cost controls (minimum)
 
@@ -474,42 +631,107 @@ For a 99% SLO over 1000 synthetic requests, budget = 10 failed SLI events.
 
 Burn-rate alerts (SRE workbook) are Advanced — document qualitatively if you do not automate them yet.
 
-### 7.5.4 Worked example — alert + runbook (user-impacting)
+### 7.5.4 Worked example — Prometheus alert rule (firing ≠ paging)
+
+**Distinguish three layers:**
+
+| Layer | What it means | This section |
+| --- | --- | --- |
+| Metric | `harbour_info_requests_total` exists | §7.4.2 |
+| **Alert rule firing** | Prometheus evaluated the expr true for `for:` duration | **Required** |
+| Paging integration | Alertmanager → email/Slack/PagerDuty to a human | **Not claimed** unless you build it |
+
+Create `observability/otel/alert-rules.yml` (already mounted in §7.4.1):
+
+```yaml
+groups:
+  - name: harbour-sli
+    rules:
+      - alert: HarbourInfoErrorRatioHigh
+        expr: |
+          (
+            sum(rate(harbour_info_requests_total{outcome="error"}[2m]))
+            /
+            clamp_min(sum(rate(harbour_info_requests_total[2m])), 1e-9)
+          ) > 0.1
+        for: 1m
+        labels:
+          severity: page
+          service: harbour-api
+        annotations:
+          summary: "Harbour error outcome ratio > 10% (2m rate, sustained 1m)"
+          description: "Synthetic or real faults elevated outcome=error on harbour.info.requests."
+          runbook_url: "docs/observability/runbook-latency-errors.md"
+```
+
+Reload Prometheus after writing the file (compose already mounts it; if you edit live):
+
+```bash
+curl -sS -X POST http://127.0.0.1:9090/-/reload
+# Or: docker compose restart prometheus
+```
+
+**Evaluate against synthetic failures:**
+
+```bash
+# Baseline — should NOT fire (success traffic only)
+for i in $(seq 1 10); do curl -sS -o /dev/null http://127.0.0.1:8000/v1/info; done
+sleep 15
+curl -sG 'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh"}' \
+  | python3 -m json.tool | head -n 30
+
+# Sustain errors >10% of traffic for >1m (training):
+for i in $(seq 1 80); do
+  curl -sS -o /dev/null http://127.0.0.1:8000/v1/fail
+  curl -sS -o /dev/null http://127.0.0.1:8000/v1/info
+  sleep 1
+done
+```
+
+Open Prometheus → **Alerts** → `HarbourInfoErrorRatioHigh`. States: **Inactive** → **Pending** (`for:` not yet elapsed) → **Firing**.
+
+```bash
+# When firing, expect alertstate="firing":
+curl -sG 'http://127.0.0.1:9090/api/v1/query' \
+  --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh",alertstate="firing"}' \
+  | python3 -m json.tool | head -n 40
+```
+
+**Expected:** You can show a screenshot or API JSON of `alertstate="firing"` after synthetic errors, and inactive/pending when only successes run. Stopping the fail loop and waiting should clear the alert after the rate window empties.
+
+**Paging:** Wiring Alertmanager receivers is optional Advanced work. Recording “alert fired in Prometheus” is **Competent**. Saying “on-call was paged” without Alertmanager/notification proof is not.
 
 `docs/observability/runbook-latency-errors.md`:
 
 ```markdown
-# Runbook — Harbour critical read errors / latency
+# Runbook — HarbourInfoErrorRatioHigh
 
 ## When this fires
-Error ratio or p95 latency on critical route exceeds threshold for N minutes.
+Prometheus alert HarbourInfoErrorRatioHigh is **firing** (error outcome ratio > 10% for 1m).
 
 ## Urgency / owner
-- Urgency: page if burn/sustained user impact; ticket if brief spike under budget
+- Urgency: treat as page-worthy *if* this were production + Alertmanager routed
 - Owner: platform-oncall (training: you)
+- Training note: firing in Prometheus ≠ a human was notified
 
 ## Verify
-1. Prometheus / metrics: error ratio by route
-2. Jaeger: slow or error spans — app vs DB
-3. Recent deploy digest (D04/D06) vs `service.version`
-4. Collector health — rule out “missing telemetry” false alarm
+1. Query harbour_info_requests_total by outcome
+2. Jaeger: error/slow spans — app vs DB
+3. Recent deploy digest vs service.version
+4. Collector health — missing telemetry can hide recovery
 
 ## Mitigate
-- Revert bad desired-state / digest (D06) if evidence implicates deploy
-- Restore dependency if DB spans show failure
+- Stop fault injection / revert bad digest (D06)
+- Restore DB if dependency spans fail
 - Do not restart pods as the first superstition
-
-## Escalate
-…
 ```
-
-Wire a **simple** alert in Prometheus Alertmanager **or** document a manual threshold check you performed on synthetic bad traffic — do not claim a paging integration you did not build.
 
 ### 7.5.5 Practice — reproduce
 
-Generate a short spike of 500s (temporary fault injection) vs sustained faults; write which one you would page and why, with budget math.
+Generate a **short** spike of `/v1/fail` (under 1m) and confirm the alert stays **Pending** or never fires; then a **sustained** mix that reaches **Firing**. Write which pattern you would page and why, with budget math from §7.5.3.
 
-**Verify:** SLIs have precise numerators/denominators; alerts point at user impact + first diagnostic step.
+**Verify:** SLIs have precise numerators/denominators; you have JSON or UI evidence of a firing alert; you did not claim a paging channel you did not configure.
 
 ---
 
@@ -655,7 +877,7 @@ Align with [D07 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D07%20Obse
 
 ### Example assessment conclusion (evidence still required)
 
-> Harbour exports OTLP to a Compose Collector → Prometheus/Jaeger. Traces show HTTP vs DB time. Collector stop: `/ready` stayed OK; spans gapped. SLIs A/B/C documented with budget math. Planted slow-DB incident: hypotheses listed; handler-sleep theory contradicted by span shape; fix verified. CONTRACT.md used as onboarding checklist. No Datadog required for D07.
+> Harbour + Postgres on Compose network `db` (no host DB publish). Pinned `requirements-otel.txt` installed in `harbour-api:otel`. `/v1/info` emits JSON log + `harbour_info_requests_total`; response `trace_id` matched Jaeger and `compose logs`. PromQL query returned success series ≥5. `HarbourInfoErrorRatioHigh` went Pending→Firing under `/v1/fail` mix; cleared after. Collector stop: app OK, telemetry gapped. SLIs/budgets + runbook filed. CONTRACT.md written. No paging vendor claimed; no Datadog required for D07.
 
 ---
 
