@@ -1,10 +1,9 @@
 # DevOps Engineering — Part I
 
-> **Status:** Author-designed 15-week teaching syllabus adopted as the source of truth. DVT sign-off remains pending.
+> **Source:** Original 15-week syllabus; module sequence, labs and weighting are preserved.
 
 **Programme weeks:** 1–15  
-**Instruction:** Weeks 1–15 (23 November 2026 – 28 March 2027)  
-**Formal review and sign-off:** Outside the 64 instructional weeks, according to the separate review budget.
+**Instruction:** Weeks 1–15
 
 ## Authoritative curriculum
 
@@ -28,12 +27,8 @@ All original learning objectives, lab assignments, module names, weekly order an
 
 The syllabus develops one organisation-neutral application delivery demonstration across Git, Docker, CI/CD, Terraform, GitOps and Datadog. The work and lab details are defined in the [authoritative syllabus](DevOps_15_Week_Syllabus.md), not duplicated here.
 
-## Individual PDP schedule — Datadog Fundamentals
-
-**Datadog Fundamentals certification is required for an individual DVT PDP by 31 March 2027.** The detailed Datadog teaching module remains in Weeks 14–15 as authored. Certification preparation and exam booking may need to run in parallel earlier to protect the deadline; this would be an individual scheduling overlay, not a change to the course syllabus. See [PDP plan](Programme-Documents/03_Certifications_and_PDP.md).
-
-## Notes for DVT review
+## Notes
 
 - The 15 instructional weeks and their weights are taken from the author's syllabus.
-- No extra DevOps teaching or review week is counted. Week 16 begins Cloud Engineering.
+- All 15 weeks are instructional. Week 16 begins Cloud Engineering.
 - Completion of the course does not imply the external certification has been earned.
