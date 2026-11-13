@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 37–40 of 64  
+**Weeks:** 36–39 of 64  
 **Purpose:** Tool calling, agent orchestration, permissions and guardrails.
 
 ## Module overview
