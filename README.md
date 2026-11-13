@@ -1,8 +1,31 @@
 # Professional Development Plan
 
-**64-week proposed programme:** DevOps Engineering → Cloud Engineering → AI Engineering → Platform Engineering.
+### Building from software development towards Platform Engineering
 
-> **Status:** Draft for review. This is an independently developed upskilling programme; DVT approval, funding, examination bookings and placement outcomes are not presumed.
+**A structured, practical and certification-oriented 64-week professional development programme spanning DevOps, Cloud, AI and Platform Engineering.**
+
+Software engineering does not end when an application compiles or a feature is merged. Delivering reliable software also depends on the systems that build it, the infrastructure that runs it, the processes that secure and monitor it, and the tools that allow development teams to work efficiently. As those responsibilities become more interconnected, software developers increasingly benefit from understanding the full journey from source code to production operations.
+
+This repository documents a deliberate programme to develop those broader capabilities. Its aim is to build on existing application-development experience and progress towards the design and operation of **reliable, secure, automated and developer-friendly engineering platforms**. Rather than pursuing technologies as isolated interests, the curriculum follows a planned sequence of learning objectives, hands-on exercises, practical deliverables and selected professional certifications.
+
+The programme moves through four complementary disciplines. **DevOps Engineering** develops the delivery and automation foundation, beginning with skills that can be applied immediately in software development. **Cloud Engineering** builds deeper infrastructure, networking, identity and architectural competence. **AI Engineering** introduces the design and operation of intelligent software capabilities. Finally, **Platform Engineering** brings these foundations together to create reusable internal services, golden paths and self-service experiences for developers.
+
+An important feature is the emphasis on **evidence of practical competence**. The programme is not intended to be a list of completed videos or certificates. Throughout the 64 weeks, learning is applied to a cumulative, organisation-neutral **Internal Developer Platform** project, supported by reproducible labs, documented design decisions, working implementations and a growing technical portfolio. Independent industry certifications complement that evidence where they are relevant and attainable; they are not substitutes for being able to build, explain and troubleshoot the systems studied.
+
+The repository serves three purposes: a **syllabus** defining what will be learned; a **working study guide** linking modules, practical work and resources; and a **professional development record** supporting transparent review of progress and demonstrated capability. Markdown is used so that the material remains easy to read, navigate and maintain directly in an IDE, while formal review and sign-off documents can be produced when needed.
+
+> **Programme at a glance**
+>
+> - **Duration:** 64 instructional weeks, from **23 November 2026 to 26 March 2028**.
+> - **Study commitment:** Approximately **8–10 hours per instructional week**.
+> - **Learning sequence:** **DevOps (15 weeks) → Cloud (16 weeks) → AI (12 weeks) → Platform Engineering (21 weeks)**.
+> - **Delivery:** Self-directed study, guided learning, independent engineering labs and a cumulative practical project.
+> - **Preparation and reviews:** Week 0, scheduled December leave and formal reviews are **outside** the 64 instructional weeks.
+> - **End goal:** Demonstrable cross-disciplinary engineering capability, with a particular emphasis on Platform Engineering.
+
+**Begin with the [Programme Foundation & Charter](00_Programme_Foundation.md)** for the programme's rationale, objectives, governance, learning outcomes and approval framework. The [full programme calendar](05_Programme_Structure_and_Calendar.md) provides the dated 64-week sequence.
+
+> **Status — Draft for DVT review:** This programme is an independently developed professional development initiative, not an accredited qualification. It is presented for stakeholder discussion and potential support. No DVT approval, sponsorship, certification award, placement or future role is implied unless separately confirmed.
 
 ## Programme documents
 
