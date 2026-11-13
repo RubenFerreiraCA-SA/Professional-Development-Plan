@@ -11,22 +11,19 @@
 | Commitment | 8–10 hours per instructional week |
 | Prepared by | Ruben Ferreira |
 | Submitted to | DVT |
-| Status | Draft for review · v0.3 |
+| Status | Draft for review · v0.4 |
 
 > **Document purpose:** Define what the programme is, why it exists, how it works and how achievement will be demonstrated. Weekly lessons and technical specifications belong in the linked module documents.
 
 ## 01. Background and Rationale
 
-
 The programme builds on existing software development skills to meet broader engineering demands. It is a structured learning pathway, not a collection of unrelated courses.
 
 ## 02. Programme Purpose
 
-
 The goal is to design, build, deploy, operate and improve software systems and the tools developers use to deliver them.
 
 ## 03. Programme Philosophy
-
 
 | Discipline | What it contributes |
 | --- | --- |
@@ -41,7 +38,6 @@ DevOps comes first because its skills offer immediate value to a software develo
 
 ## 04. Platform Engineering Specialisations
 
-
 | Specialisation | Focus |
 | --- | --- |
 | Infrastructure | Cloud, Kubernetes and provisioning |
@@ -53,14 +49,12 @@ DevOps comes first because its skills offer immediate value to a software develo
 
 ## 05. Programme Objectives
 
-
 - Develop practical DevOps, Cloud, AI and Platform Engineering skills.
 - Apply appropriate security, reliability, maintainability and cost controls.
 - Pursue relevant recognised certifications.
 - Build a portfolio of working systems and documented technical decisions.
 
 ## 06. Programme Learning Outcomes
-
 
 Participants should be able to:
 
@@ -74,7 +68,6 @@ Participants should be able to:
 Detailed, assessable outcomes are maintained in [Programme Learning Outcomes](04_Programme_Learning_Outcomes.md) and module specifications.
 
 ## 07. Programme Structure
-
 
 | Discipline | Weeks | Duration |
 | --- | --- | ---: |
@@ -90,7 +83,6 @@ Week 0 is for planning. The December 2026 and December 2027 leave periods are ex
 
 ## 08. Certification Strategy
 
-
 Certifications are selected for relevance, industry recognition and alignment with the curriculum. Official exam objectives, bookings, costs and results are recorded in the [Certification Roadmap](06_Certification_Roadmap.md) and [Evidence Tracker](03_Certification_and_Evidence_Tracker.md).
 
 > **INDIVIDUAL PDP / DVT ALIGNMENT — PERSONAL REQUIREMENT**
@@ -99,18 +91,15 @@ Certifications are selected for relevance, industry recognition and alignment wi
 
 ## 09. Teaching and Learning Methodology
 
-
 Allow approximately **8–10 hours per instructional week** for concepts, guided learning, independent labs, troubleshooting and documentation. Use non-confidential environments and comply with employer/client security requirements.
 
 ## 10. Assessment Philosophy
-
 
 Evidence may include code, infrastructure definitions, CI/CD pipelines, monitoring dashboards, labs, architecture decisions and demonstrations. Assessments should consider correctness, security, repeatability, reliability and technical reasoning.
 
 Detailed rubrics belong in the [Assessment Framework](07_Assessment_Framework.md). Formal reviews and sign-off occur outside the 64 teaching weeks.
 
 ## 11. Practical Project Framework
-
 
 The organisation-neutral project grows through four stages:
 
@@ -123,7 +112,6 @@ The project must not depend on confidential employer or client systems. Scope an
 
 ## 12. Professional Development and Organisational Alignment
 
-
 The programme offers a framework for upskilling and professional review. It does not guarantee a particular position, promotion or client assignment.
 
 > **INDIVIDUAL PDP / DVT ALIGNMENT — PERSONAL CONTEXT**
@@ -132,13 +120,11 @@ The programme offers a framework for upskilling and professional review. It does
 
 ## 13. Programme Governance
 
-
 The **[Programme Foundation](00_Programme_Foundation.md)** defines overall purpose and policy; the [calendar](05_Programme_Structure_and_Calendar.md), module syllabi, [assessment framework](07_Assessment_Framework.md) and [certification roadmap](06_Certification_Roadmap.md) contain operational details.
 
 Material changes should be recorded in version history. The author's DevOps syllabus remains authoritative unless explicitly revised. Keep confidential performance records, credentials and client material out of this public repository.
 
 ## 14. Programme Approval
-
 
 | Reviewer | Name | Signature | Date |
 | --- | --- | --- | --- |
@@ -152,4 +138,4 @@ Material changes should be recorded in version history. The author's DevOps syll
 
 ---
 
-**Document:** PDP-00 · **Version:** 0.3 · **Status:** Draft for DVT review
+**Document:** PDP-00 · **Version:** 0.4 · **Status:** Draft for DVT review
