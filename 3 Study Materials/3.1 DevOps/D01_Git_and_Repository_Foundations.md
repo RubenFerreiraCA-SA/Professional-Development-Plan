@@ -23,11 +23,11 @@ On completion, you should be able to:
 
 | Activity | Estimated time | Outcome |
 | --- | ---: | --- |
-| Git fundamentals and local practice | 1.5–2 hours | Understand and inspect repository history |
+| Git fundamentals and local practice | 2 hours | Understand and inspect repository history |
 | Identity and SSH authentication | 1–1.5 hours | Authenticated remote access |
 | Repository structure and ignore rules | 1–1.5 hours | Clean, safe capstone repository |
 | Branching and pull/merge requests | 2–2.5 hours | Reviewed, merged feature |
-| Branch protection, verification and evidence | 1.5–2.5 hours | Demonstrable, repeatable workflow |
+| Branch protection, verification and evidence | 2–2.5 hours | Demonstrable, repeatable workflow |
 | **Total** | **8–10 hours** | |
 
 These are estimates, not deadlines. Familiar users can move faster; newcomers may need more practice.
