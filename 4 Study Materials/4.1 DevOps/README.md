@@ -15,7 +15,7 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 | 3 · D03 | Docker and Containerization | [Read Chapter 3](D03%20Docker%20and%20Containerization.md) |
 | 4 · D04 | CI/CD and Build Automation | [Read Chapter 4](D04%20CICD%20and%20Build%20Automation.md) |
 | 5 · D05 | Infrastructure as Code and Terraform | [Read Chapter 5](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) |
-| 6 · D06 | GitOps, Automation and Operations | Not yet authored |
+| 6 · D06 | GitOps, Automation and Operations | [Read Chapter 6](D06%20GitOps%20Automation%20and%20Operations.md) |
 | 7 · D07 | Observability | Not yet authored |
 | 8 · D08 | Datadog | Not yet authored |
 
@@ -23,4 +23,4 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 
 Start with Chapter 1 and continue in order. Chapters introduce a subject from its own fundamentals and build towards challenging engineering decisions, progressively harder exercises and a **Practical Assessment**. Work on the same Final Project wherever practical; use disposable repositories for destructive experiments.
 
-Chapters 6–8 will be added as their textbook material is developed. The chapter numbers are fixed even when a file has not yet been written. Study-hour estimates belong to the course detail and should not dictate the depth of the teaching.
+Chapters 7–8 will be added as their textbook material is developed. The chapter numbers are fixed even when a file has not yet been written. Study-hour estimates belong to the course detail and should not dictate the depth of the teaching.

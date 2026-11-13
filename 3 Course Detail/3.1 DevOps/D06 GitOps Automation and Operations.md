@@ -107,4 +107,6 @@ Connect D05 and D06 with a clear contract: Terraform provisions clusters and fou
 - [Kubernetes — Configure liveness, readiness and startup probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 - [Kubernetes — Horizontal Pod Autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
 
+**Textbook:** [Chapter 6 — GitOps, Automation and Operations](../../4%20Study%20Materials/4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md)
+
 **Previous:** [D05 — Infrastructure as Code and Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · **Next:** [D07 — Observability](D07%20Observability.md)
