@@ -17,7 +17,7 @@ The [original 15-week DevOps Engineering syllabus](DevOps_15_Week_Syllabus.md) d
 | Required proof | Official certification credential or proof accepted by DVT |
 | Booking | Pending |
 
-**Scheduling note:** An early, parallel Datadog certification-preparation track may be necessary. This does not modify the six instructional modules or their weightings.
+**Scheduling note:** The Datadog teaching weeks are 15–21 March 2027 (Week 14) and 22–28 March 2027 (Week 15). The official 31 March 2027 PDP deadline falls three days after Week 15 finishes, so early, parallel certification preparation and an examination booking before the deadline are strongly advisable. This does not modify the six instructional modules or their weightings.
 
 ## Additional certification targets
 
