@@ -9,12 +9,13 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 - [Programme Overview](1%20Foundational%20Documents/1.1%20Programme%20Overview.md) — what the programme aims to achieve
 - [Course Outline](1%20Foundational%20Documents/1.2%20Course%20Outline.md) — modules and estimated study hours
 - [How To Guide](1%20Foundational%20Documents/1.3%20How%20To%20Guide.md) — how to personalise and follow it
+- [PDP Templates](2%20PDP%20templates/) — hours/week → timeline and detailed plan
 - [Final Project](1%20Foundational%20Documents/1.4%20Final%20Project.md) — practical application of the learning
 
 ## Repository
 
 - **[Foundational Documents](1%20Foundational%20Documents/)** — purpose, pathway and guide
-- **[PDP Templates](2%20PDP%20templates/)** — planned reusable templates
+- **[PDP Templates](2%20PDP%20templates/)** — personal profile, capacity planner and progress log
 - **[Course Detail](3%20Course%20Detail/)** — syllabuses, module outlines, outcomes and assessments
 - **[Study Materials](4%20Study%20Materials/)** — progressively written, textbook-style teaching chapters
 
