@@ -570,7 +570,7 @@ terraform test
 
 **Expected:** `rejects_bad_prefix` passes because `BAD` is rejected by the variable validation.
 
-**Practice — reproduce:** Add validation that rejects `allowed_ingress_cidr = "0.0.0.0/0"` on the runtime module; write a matching `expect_failures` test; show red then green.
+**Practice — reproduce:** Extend the runtime module’s existing `allowed_cidrs` list variable so that any element equal to `0.0.0.0/0` is rejected (keep the “at least one CIDR” rule). Write a `terraform test` with `expect_failures` that sets `allowed_cidrs = ["0.0.0.0/0"]`. Show the test failing before the validation exists, then passing after you add it.
 
 **Verify:** Another engineer can read module inputs and know invalid values fail before apply.
 
@@ -608,6 +608,10 @@ variable "allowed_cidrs" {
   validation {
     condition     = length(var.allowed_cidrs) > 0
     error_message = "Provide at least one CIDR."
+  }
+  validation {
+    condition     = alltrue([for c in var.allowed_cidrs : c != "0.0.0.0/0"])
+    error_message = "allowed_cidrs must not include 0.0.0.0/0 in this training module."
   }
 }
 ```
@@ -965,34 +969,55 @@ echo "ECR_REPO=$ECR_REPO"
 
 **Expected:** VPC/subnets/ECR exist; `alb_dns_name` is `null`; no ECS yet.
 
-### 5.4.4 Stage B — publish image and resolve digest
+### 5.4.4 Stage B — obtain an image, publish to ECR, resolve digest
+
+A clean clone does **not** include `harbour-api:local`. Obtain the image first (pick one path), then push.
+
+**Option 1 — build from Chapter 3 (works offline once dependencies exist):**
 
 ```bash
-# Establish identity for ECR login (same account/region as Terraform)
+cd "$HARBOUR_ROOT/app"
+export HARBOUR_COMMIT="$(git rev-parse HEAD)"
+docker build --build-arg HARBOUR_COMMIT="$HARBOUR_COMMIT" -t harbour-api:local .
+export DIGEST_SRC="harbour-api:local"
+```
+
+**Option 2 — pull the digest you published in Chapter 4 (GHCR):**
+
+```bash
+# Replace owner/digest with your D04 release evidence
+docker pull "ghcr.io/<owner-lowercase>/harbour-api@sha256:<digest-from-d04>"
+export DIGEST_SRC="ghcr.io/<owner-lowercase>/harbour-api@sha256:<digest-from-d04>"
+```
+
+Then authenticate to **this account’s** ECR and push. Because the repository uses `image_tag_mutability = "IMMUTABLE"`, **do not reuse a tag that already exists** — choose a new tag per push (commit SHA is ideal):
+
+```bash
 export AWS_REGION="${AWS_REGION:-eu-west-1}"
 export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
 export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+export IMAGE_TAG="${HARBOUR_COMMIT:-$(git -C "$HARBOUR_ROOT" rev-parse HEAD)}"
 
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-# Prefer the digest you published in D04; local tag also works for training
-export DIGEST_SRC="${DIGEST_SRC:-harbour-api:local}"
 docker image inspect "$DIGEST_SRC" >/dev/null
-
-docker tag "$DIGEST_SRC" "${ECR_REPO}:training"
-docker push "${ECR_REPO}:training"
+docker tag "$DIGEST_SRC" "${ECR_REPO}:${IMAGE_TAG}"
+docker push "${ECR_REPO}:${IMAGE_TAG}"
 
 export CONTAINER_IMAGE="$(
   aws ecr describe-images \
     --repository-name "${ECR_REPO##*/}" \
-    --image-ids imageTag=training \
+    --image-ids imageTag="${IMAGE_TAG}" \
     --query 'imageDetails[0].imageDigest' \
     --output text \
     | awk -v repo="$ECR_REPO" '{print repo "@" $0}'
 )"
+echo "IMAGE_TAG=$IMAGE_TAG"
 echo "CONTAINER_IMAGE=$CONTAINER_IMAGE"
 ```
+
+**Immutable tags:** a second push of the same `${IMAGE_TAG}` will fail once that tag exists. For later exercises, use a new commit SHA tag, or `training-$(date +%Y%m%d%H%M%S)`, then update `container_image` to the new `@sha256:…` (the digest is what ECS pins; the tag is only a publish label).
 
 **Expected:** `CONTAINER_IMAGE` looks like `…amazonaws.com/harbour-stg-api@sha256:` followed by 64 hex characters.
 
@@ -1105,17 +1130,21 @@ Never destroy bootstrap while envs remain. Set budget alarms before leaving reso
 
 ### 5.6.1 Concept (extends D04)
 
-| Trigger | Terraform action | Credentials |
+A pull request in your own repository can still contain **untrusted code**. Fork guards are necessary but not sufficient. Separate:
+
+| Lane | What runs | Cloud access |
 | --- | --- | --- |
-| Pull request from the **base repo** | `fmt`, `validate`, module `test`, **plan** | OIDC → **plan** role (read state + read APIs; no apply) |
-| Fork pull request | Same static checks; **no** cloud plan / **no** OIDC role | None (or read-only GitHub token only) |
-| Protected environment / main | Fresh **plan + apply** | OIDC → **apply** role |
+| **Untrusted validation** | `fmt`, `validate`, module `terraform test` on every PR (including forks / same-repo feature branches) | **None** — no OIDC, no state read |
+| **Trusted plan** | `terraform plan` against remote state | OIDC → **plan** role, only from a **named trusted workflow** on allowed refs |
+| **Trusted apply** | Fresh plan + apply | OIDC → **apply** role, GitHub Environment protection |
 
-Never paste long-lived AKIA keys into the repo. Never apply from fork PRs.
+Never paste long-lived AKIA keys into the repo. Never let PR-authored workflow files freely assume roles that can read state.
 
-### 5.6.2 Worked example — IAM trust and least privilege
+### 5.6.2 Worked example — IAM trust scoped to trusted workflows
 
-Create two roles in the training account (console or a small IAM Terraform root). Trust policy for both (GitHub OIDC). Replace `OWNER`, `REPO`, and account id:
+Create two roles (plan / apply). **Do not** use `repo:OWNER/REPO:*` — that allows many refs and job identities to assume the role.
+
+**Plan role trust** (example — require the exact workflow file and `main` or a protected environment job). Replace `AWS_ACCOUNT_ID`, `OWNER`, `REPO`:
 
 ```json
 {
@@ -1132,7 +1161,10 @@ Create two roles in the training account (console or a small IAM Terraform root)
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:OWNER/REPO:*"
+          "token.actions.githubusercontent.com:sub": [
+            "repo:OWNER/REPO:ref:refs/heads/main",
+            "repo:OWNER/REPO:environment:staging-plan"
+          ]
         }
       }
     }
@@ -1140,20 +1172,61 @@ Create two roles in the training account (console or a small IAM Terraform root)
 }
 ```
 
-Tighten `sub` further for apply (`repo:OWNER/REPO:environment:staging` or `ref:refs/heads/main`) once Environments are configured.
+Prefer also constraining with `token.actions.githubusercontent.com:job_workflow_ref` (or your org’s equivalent claims) to **`OWNER/REPO/.github/workflows/harbour-terraform-plan.yml@refs/heads/main`** so a PR that modifies workflows cannot mint a new workflow file and inherit the plan role until that change is merged through review.
 
-**Plan role** permissions (illustrative — prefer IAM Access Analyzer / least privilege reviews):
+**Apply role trust:** narrower still — e.g. only `repo:OWNER/REPO:environment:staging` after required reviewers approve.
+
+**Plan role** permissions (illustrative — review with IAM Access Analyzer):
 
 - `s3:ListBucket`, `s3:GetObject` on the state bucket/prefix `harbour/staging/*`
-- `dynamodb:GetItem`, `PutItem`, `DeleteItem`, `DescribeTable` on the lock table (needed to plan with locking)
-- Read-only EC2/ECS/ECR/ELB/IAM get/list for refresh
-- **No** `ecs:Create*`, `ec2:Terminate*`, `s3:DeleteObject` on state, etc.
+- DynamoDB lock table items needed for plan
+- Read-only describe/list for refresh
+- **No** mutate/create/delete on compute/network; **no** deleting state objects
 
-**Apply role:** plan permissions plus create/update/delete on the training resources, still scoped by tags/prefixes where possible. Humans use a third role; CI apply is not account admin.
+**Apply role:** plan permissions plus create/update/delete on training resources, scoped by prefix/tags where possible. Humans use a separate role; CI apply is not account admin.
 
 Store ARNs as GitHub **Actions secrets** (`AWS_PLAN_ROLE_ARN`, `AWS_APPLY_ROLE_ARN`) — not in git.
 
-### 5.6.3 Worked example — PR plan workflow with fork guard and redaction
+**Operational split:** keep `harbour-terraform-validate.yml` (no `id-token`, no AWS) required on all PRs. Run `harbour-terraform-plan.yml` only after merge to `main`, or from a protected `staging-plan` environment that untrusted PR authors cannot satisfy. If you insist on PR plans for same-repo branches, treat state as sensitive data: use a disposable plan workspace, never the production state key, and accept that this is a weaker training compromise — document it in the ADR.
+
+### 5.6.3 Worked example — untrusted validate (every PR, no AWS)
+
+`.github/workflows/harbour-terraform-validate.yml` — **required check** for all PRs:
+
+```yaml
+name: harbour-terraform-validate
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/harbour-terraform-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Fmt and validate modules (no backend / no credentials)
+        working-directory: infra/modules/network
+        run: |
+          terraform init -backend=false -input=false
+          terraform fmt -check -recursive
+          terraform validate
+          terraform test
+```
+
+No `id-token: write`. No state. Safe for forks and same-repo PRs that may contain hostile HCL/scripts in other paths — this job only exercises local module validation.
+
+### 5.6.4 Worked example — trusted plan (after merge / protected environment)
+
+Run cloud plan only from a **trusted** context that matches the IAM `sub` / `job_workflow_ref` conditions (e.g. push to `main`, or `environment: staging-plan` with reviewers).
 
 `.github/workflows/harbour-terraform-plan.yml`:
 
@@ -1161,21 +1234,21 @@ Store ARNs as GitHub **Actions secrets** (`AWS_PLAN_ROLE_ARN`, `AWS_APPLY_ROLE_A
 name: harbour-terraform-plan
 
 on:
-  pull_request:
+  push:
+    branches: ["main"]
     paths:
       - "infra/**"
       - ".github/workflows/harbour-terraform-plan.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: read
   id-token: write
 
 jobs:
   plan-staging:
     runs-on: ubuntu-latest
-    # Fork PRs: do not assume the plan role (no secrets / no account access).
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    environment: staging-plan
     defaults:
       run:
         working-directory: infra/envs/staging
@@ -1195,55 +1268,51 @@ jobs:
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
             -backend-config="region=eu-west-1"
-      - run: terraform fmt -check -recursive
-      - run: terraform validate
       - name: Plan
         run: |
           terraform plan -input=false -no-color -out="${{ runner.temp }}/stg.tfplan"
           terraform show -no-color "${{ runner.temp }}/stg.tfplan" > "${{ runner.temp }}/stg.plan.txt"
-      - name: Redact likely secrets before upload
+      - name: Publish a limited reviewer summary (not a full plan dump)
         run: |
-          # Training redaction — not a substitute for proper secret scanning.
-          sed -E \
-            -e 's/(AKIA[0-9A-Z]{16})/[REDACTED_ACCESS_KEY]/g' \
-            -e 's/(secret[_-]?key["[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
-            -e 's/(password["[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
-            "${{ runner.temp }}/stg.plan.txt" > "${{ runner.temp }}/stg.plan.redacted.txt"
-          if grep -Eiq 'AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY' "${{ runner.temp }}/stg.plan.redacted.txt"; then
-            echo "Plan still looks sensitive after redaction — refusing upload" >&2
-            exit 1
-          fi
+          # Count-oriented summary for humans. Full plan stays on the runner temp disk
+          # for this job only unless your org has a private, ACL-controlled store.
+          {
+            echo "## Harbour staging plan summary"
+            echo
+            echo "- commit: ${{ github.sha }}"
+            echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            grep -E '^Plan:|  # |  \+|  ~|  -' "${{ runner.temp }}/stg.plan.txt" | head -n 80 || true
+          } > "${{ runner.temp }}/stg.summary.md"
+          cat "${{ runner.temp }}/stg.summary.md"
       - uses: actions/upload-artifact@v4
         with:
-          name: harbour-stg-plan-${{ github.sha }}
-          path: ${{ runner.temp }}/stg.plan.redacted.txt
-          # Restrict retention; keep artifacts private to the repository
+          name: harbour-stg-plan-summary-${{ github.sha }}
+          path: ${{ runner.temp }}/stg.summary.md
           retention-days: 5
-
-  # Visible check on fork PRs so required gates are not mysteriously skipped
-  fork-notice:
-    if: github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "Fork PR: cloud plan skipped by design. Run static terraform fmt/validate in a separate non-OIDC job if you require it."
 ```
 
-Add a non-OIDC `fmt`/`validate` job that runs for **all** PRs (including forks) if branch protection requires a named check on every PR.
+**About “redacting” full plans:** regex scrubbing of `terraform show` output is **illustrative only** and **not a security boundary**. Plans can expose sensitive values under many attribute names and encodings. Prefer:
 
-**Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, `if:` limited to the home repository and protected ref, OIDC **apply** role, **fresh** `plan` then `apply` in the same job (do not reuse a PR plan artifact as the apply binary plan across time/state changes).
+1. Restrict who can read workflow logs/artifacts (private repo, limited retention, environment protection).
+2. Share a **summary** (resource counts / addresses) with reviewers.
+3. Keep full plan binaries/text off shared channels unless you have a controlled review system designed for them.
 
-### 5.6.4 Threat drill — public SG in a PR
+Do not claim that `sed` makes a plan safe to distribute.
 
-Open a PR that changes `allowed_cidrs` to `["0.0.0.0/0"]`. Show:
+**Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, OIDC **apply** role whose trust matches that environment, **fresh** `plan` then `apply` in the same job (never reuse a stale plan artifact across time/state changes).
 
-1. Plan output calling out SG ingress change.
+### 5.6.5 Threat drill — public SG change
+
+Propose a change that sets `allowed_cidrs = ["0.0.0.0/0"]` (should already fail module validation if you completed the practice in 5.3.3). If validation were absent, show:
+
+1. Plan summary calling out SG ingress widening.
 2. Human review rejecting it, **or**
-3. A policy check (OPA/Conftest/Checkov) failing — if you lack automation, document the gap honestly.
+3. Policy-as-code failing — document gaps honestly.
 
-**Practice — reproduce:** From the redacted plan artifact alone, a second person summarises blast radius.
+**Practice — reproduce:** From the **summary artifact** alone, a second person describes blast radius without needing the full plan text.
 
-**Verify:** Fork PRs cannot assume the plan role; staging apply is auditable (who/what/when); uploaded plans are redacted and retention-limited.
+**Verify:** Untrusted PRs get validate-only; plan/apply OIDC is scoped to trusted workflow/ref/environment; full plans are not treated as safely shareable via redaction.
 
 ---
 
@@ -1292,7 +1361,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 | State | Local state | Remote + lock + access story | Tested recovery from versioned state |
 | Modules | Copied folders | Clear inputs/outputs/validation; two envs | Tests + versioning/upgrade notes |
 | Security | Open SG for convenience | Least privilege, restricted ingress, documented trade-offs | Policy-as-code gates |
-| Delivery | Manual only | Plan-in-CI, trusted apply | OIDC, environments, no stale plans |
+| Delivery | Manual only | Validate on PR; scoped OIDC plan/apply | `job_workflow_ref` / env trust; summary-not-full-plan sharing |
 | Operability | “It applied” | Second engineer succeeds from README | Cost alarms + destroy discipline |
 
 **Completion standard:** **Competent** on every row. Success is not merely `terraform apply` exiting zero.
@@ -1307,7 +1376,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 
 ### Example assessment conclusion (evidence still required)
 
-> Bootstrap S3/DynamoDB backends host env state. A lock-drill root with `time_sleep` demonstrated deterministic lock contention. Staging used stages A→B→C (ECR, push digest, then ECS). `/health` serves Harbour from an ECR digest behind an IP-restricted ALB (no NAT; ADR explains why). PR plans use a plan-only OIDC role, skip fork PRs for cloud access, and upload redacted artifacts only. Apply uses a reviewed GitHub Environment. A second engineer completed staging from the README.
+> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Reviewers get a plan summary; full plans are not treated as safe via regex redaction. A second engineer completed staging from the README.
 
 ---
 
@@ -1319,7 +1388,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 | Share state | S3 + DynamoDB lock + IAM | Laptop `terraform.tfstate` in Dropbox |
 | Isolate envs | Separate state keys + CIDR/name prefixes | One state for all worlds |
 | Cut training cost | No NAT; tiny Fargate; destroy often | Always-on NAT + open ALB |
-| CI | Plan on PR to temp artifact | Committing plans; apply on fork PRs |
+| CI | Validate on every PR (no AWS); plan via scoped OIDC | `repo:…:*` trust; PR code assuming plan role; “redaction = safe” |
 | Drift | Fresh plan; decide revert/import/accept | Manual console forever |
 | Lock error | Wait / find active apply | `force-unlock` by reflex |
 
