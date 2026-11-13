@@ -2,7 +2,7 @@
 
 > **Status:** Draft scaffold — unapproved.
 
-**Programme period:** Weeks 45–64  
+**Programme period:** Weeks 44–63  
 **Scope:** Kubernetes, internal developer platforms, DevEx, reliability and platform architecture.
 
 ## Discipline objectives
