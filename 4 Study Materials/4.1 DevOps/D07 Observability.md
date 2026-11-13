@@ -229,7 +229,10 @@ OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_TRACES_EXPORTER=otlp
 OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=none
-OTEL_BSP_SCHEDULE_DELAY=5000
+# Training: short export intervals so metrics appear without multi-minute waits.
+# (Defaults can be 60s for periodic metric export — too slow for the §7.4.2 drill.)
+OTEL_BSP_SCHEDULE_DELAY=1000
+OTEL_METRIC_EXPORT_INTERVAL=5000
 DATABASE_HOST=db
 DATABASE_PORT=5432
 DATABASE_USER=harbour
@@ -334,7 +337,7 @@ DOCKERFILE
 docker run --rm harbour-api:otel python -c "import opentelemetry; print('otel-in-image-ok')"
 ```
 
-Ensure the image CMD/ENTRYPOINT runs under `opentelemetry-instrument` (wrap the existing uvicorn command) **or** set `command:` on the Compose `api` service as shown in §7.4.1.
+The D03 image `ENTRYPOINT` is bare `uvicorn`. A Compose `command:` alone does **not** wrap it — Compose replaces `CMD`, not `ENTRYPOINT`. Section 7.4.1 **must** set `entrypoint: ["opentelemetry-instrument"]` plus an explicit `command:` list for uvicorn (mandatory).
 
 **Optional escape hatch (temporary only):** a disposable Compose override that adds `"5432:5432"` on `db` so a **host-run** uvicorn can use `DATABASE_HOST=127.0.0.1` — then remove the publish. Prefer the in-compose API so you do not fight D03’s networking design.
 
@@ -405,6 +408,8 @@ services:
       # Compose DNS names win over any host-oriented mistakes:
       DATABASE_HOST: db
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
     ports:
       - "8000:8000"
     depends_on:
@@ -412,8 +417,16 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
-    # If the image CMD is not uvicorn, set:
-    # command: ["opentelemetry-instrument", "uvicorn", "harbour_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Mandatory: D03 ENTRYPOINT is uvicorn — command: alone does NOT wrap it.
+    # entrypoint replaces ENTRYPOINT; command supplies the instrumented argv.
+    entrypoint: ["opentelemetry-instrument"]
+    command:
+      - uvicorn
+      - harbour_api.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.114.0
@@ -447,10 +460,22 @@ services:
       - --web.enable-lifecycle
 ```
 
-Build `harbour-api:otel` before `compose up` (§7.3.5). Create env:
+Build `harbour-api:otel` before `compose up` (§7.3.5). Create env **and** a valid alert-rules file **before** the first `docker compose up` (Prometheus mounts this path immediately — §7.5.4 replaces the placeholder with the real rule):
 
 ```bash
 cp observability/otel/harbour.env.example observability/otel/harbour.env
+
+# Valid empty rule file so Compose/Prometheus can start in chapter order:
+cat > observability/otel/alert-rules.yml <<'EOF'
+groups: []
+EOF
+```
+
+Verify instrumentation is actually wrapping uvicorn (not the D03 entrypoint alone):
+
+```bash
+docker compose -f observability/docker-compose.yml config | grep -A6 'entrypoint:'
+# Expect: entrypoint pointing at opentelemetry-instrument, command listing uvicorn …
 ```
 
 `observability/otel/collector-config.yaml`:
@@ -515,8 +540,12 @@ Start:
 
 ```bash
 cd "$HARBOUR_ROOT/observability"
+test -f otel/alert-rules.yml   # must exist (placeholder groups: [] is fine)
 docker compose up -d
 docker compose ps
+# Prove instrumentation wrapper is active (not bare D03 ENTRYPOINT):
+docker compose exec api sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+# Expect cmdline to start with opentelemetry-instrument … uvicorn …
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:16686
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9090
@@ -524,16 +553,37 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9090
 
 ### 7.4.2 Worked example — guaranteed metric + a trace
 
-**Success criterion (required):** after traffic, Prometheus returns a non-empty vector for the **explicit** counter from §7.3.4.
+**Success criterion (required):** Prometheus returns a non-empty vector for the **explicit** counter from §7.3.4. Do not rely on a single fixed `sleep` — poll until the series appears (or time out and debug).
+
+Confirm the API process is instrumented before generating traffic:
 
 ```bash
-for i in 1 2 3 4 5; do curl -sS http://127.0.0.1:8000/v1/info >/dev/null; done
-sleep 20   # scrape interval
+cd "$HARBOUR_ROOT/observability"
+docker compose exec api ps aux | head
+# Expect opentelemetry-instrument / otel in the process tree, not bare uvicorn alone
+docker compose logs api --tail=30 | grep -iE 'instrument|otel|exporter' || true
+```
 
-# Exact query — expect a value >= 5 (or cumulative since process start):
-curl -sG 'http://127.0.0.1:9090/api/v1/query' \
-  --data-urlencode 'query=harbour_info_requests_total{http_route="/v1/info",outcome="success"}' \
-  | python3 -m json.tool | head -n 40
+```bash
+QUERY='harbour_info_requests_total{http_route="/v1/info",outcome="success"}'
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  curl -sS http://127.0.0.1:8000/v1/info >/dev/null
+done
+
+# Poll up to ~90s: metric export interval (5s) + scrape (15s) + slack
+deadline=$((SECONDS + 90))
+while (( SECONDS < deadline )); do
+  body="$(curl -sG 'http://127.0.0.1:9090/api/v1/query' --data-urlencode "query=${QUERY}")"
+  if echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("data",{}).get("result",[]); sys.exit(0 if r else 1)'; then
+    echo "$body" | python3 -m json.tool | head -n 40
+    echo "metric-ok"
+    break
+  fi
+  echo "waiting for series…"
+  sleep 5
+done
+echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("data",{}).get("result",[]); assert r, "TIMEOUT: harbour_info_requests_total not scraped — check entrypoint, OTEL_METRIC_EXPORT_INTERVAL, collector metrics pipeline"'
 ```
 
 In the Prometheus UI (Graph): paste
@@ -542,7 +592,7 @@ In the Prometheus UI (Graph): paste
 harbour_info_requests_total{http_route="/v1/info",outcome="success"}
 ```
 
-**Expected:** `status":"success"` and at least one result with a numeric `value`. If the series is missing, check Collector metrics pipeline and that the API process actually ran the instrumented handler (not an old image without §7.3.4).
+**Expected:** poll loop prints `metric-ok` with a numeric `value`. If you hit the timeout assertion: (1) `entrypoint`/`command` as in §7.4.1, (2) `OTEL_METRIC_EXPORT_INTERVAL=5000` in the running container env, (3) Collector metrics pipeline + Prometheus scrape target UP.
 
 **Also required:** Jaeger shows a trace for one of those `/v1/info` calls (§7.3.6 correlation).
 
@@ -641,7 +691,7 @@ Burn-rate alerts (SRE workbook) are Advanced — document qualitatively if you d
 | **Alert rule firing** | Prometheus evaluated the expr true for `for:` duration | **Required** |
 | Paging integration | Alertmanager → email/Slack/PagerDuty to a human | **Not claimed** unless you build it |
 
-Create `observability/otel/alert-rules.yml` (already mounted in §7.4.1):
+Replace the placeholder from §7.4.1 (`groups: []`) with the real rule in `observability/otel/alert-rules.yml`:
 
 ```yaml
 groups:
@@ -650,55 +700,66 @@ groups:
       - alert: HarbourInfoErrorRatioHigh
         expr: |
           (
-            sum(rate(harbour_info_requests_total{outcome="error"}[2m]))
+            sum(rate(harbour_info_requests_total{outcome="error"}[1m]))
             /
-            clamp_min(sum(rate(harbour_info_requests_total[2m])), 1e-9)
+            clamp_min(sum(rate(harbour_info_requests_total[1m])), 1e-9)
           ) > 0.1
-        for: 1m
+        for: 30s
         labels:
           severity: page
           service: harbour-api
         annotations:
-          summary: "Harbour error outcome ratio > 10% (2m rate, sustained 1m)"
+          summary: "Harbour error outcome ratio > 10% (1m rate, sustained 30s)"
           description: "Synthetic or real faults elevated outcome=error on harbour.info.requests."
           runbook_url: "docs/observability/runbook-latency-errors.md"
 ```
 
-Reload Prometheus after writing the file (compose already mounts it; if you edit live):
+Training windows are intentionally short (`[1m]` + `for: 30s`) so Firing is observable without a multi-minute wait. Production alerts would use longer windows.
+
+Reload Prometheus after replacing the file:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:9090/-/reload
-# Or: docker compose restart prometheus
+# If reload fails (file change not visible), restart: docker compose restart prometheus
 ```
 
-**Evaluate against synthetic failures:**
+**Evaluate against synthetic failures — sustain until Firing is observed:**
 
 ```bash
 # Baseline — should NOT fire (success traffic only)
 for i in $(seq 1 10); do curl -sS -o /dev/null http://127.0.0.1:8000/v1/info; done
-sleep 15
+sleep 20
 curl -sG 'http://127.0.0.1:9090/api/v1/query' \
   --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh"}' \
   | python3 -m json.tool | head -n 30
 
-# Sustain errors >10% of traffic for >1m (training):
-for i in $(seq 1 80); do
+# Keep error ratio high and poll until alertstate=firing (or timeout)
+deadline=$((SECONDS + 180))
+fired=0
+while (( SECONDS < deadline )); do
+  curl -sS -o /dev/null http://127.0.0.1:8000/v1/fail
   curl -sS -o /dev/null http://127.0.0.1:8000/v1/fail
   curl -sS -o /dev/null http://127.0.0.1:8000/v1/info
-  sleep 1
+  body="$(curl -sG 'http://127.0.0.1:9090/api/v1/query' \
+    --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh",alertstate="firing"}')"
+  if echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("data",{}).get("result") else 1)'; then
+    echo "$body" | python3 -m json.tool | head -n 40
+    echo "alert-firing-ok"
+    fired=1
+    break
+  fi
+  # Show pending progression occasionally:
+  curl -sG 'http://127.0.0.1:9090/api/v1/query' \
+    --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh"}' \
+    | python3 -c 'import json,sys; r=json.load(sys.stdin).get("data",{}).get("result",[]); print("alerts:", r or "none")'
+  sleep 2
 done
+test "$fired" = 1 || { echo "TIMEOUT: alert never fired — check rule reload, metric outcomes, evaluation_interval"; exit 1; }
 ```
 
 Open Prometheus → **Alerts** → `HarbourInfoErrorRatioHigh`. States: **Inactive** → **Pending** (`for:` not yet elapsed) → **Firing**.
 
-```bash
-# When firing, expect alertstate="firing":
-curl -sG 'http://127.0.0.1:9090/api/v1/query' \
-  --data-urlencode 'query=ALERTS{alertname="HarbourInfoErrorRatioHigh",alertstate="firing"}' \
-  | python3 -m json.tool | head -n 40
-```
-
-**Expected:** You can show a screenshot or API JSON of `alertstate="firing"` after synthetic errors, and inactive/pending when only successes run. Stopping the fail loop and waiting should clear the alert after the rate window empties.
+**Expected:** the loop prints `alert-firing-ok` with `alertstate="firing"` JSON — not a fixed 80-second hope. Stopping fault injection and waiting for the rate window to empty should clear the alert.
 
 **Paging:** Wiring Alertmanager receivers is optional Advanced work. Recording “alert fired in Prometheus” is **Competent**. Saying “on-call was paged” without Alertmanager/notification proof is not.
 
@@ -708,7 +769,7 @@ curl -sG 'http://127.0.0.1:9090/api/v1/query' \
 # Runbook — HarbourInfoErrorRatioHigh
 
 ## When this fires
-Prometheus alert HarbourInfoErrorRatioHigh is **firing** (error outcome ratio > 10% for 1m).
+Prometheus alert HarbourInfoErrorRatioHigh is **firing** (error outcome ratio > 10% for 30s).
 
 ## Urgency / owner
 - Urgency: treat as page-worthy *if* this were production + Alertmanager routed
@@ -729,7 +790,7 @@ Prometheus alert HarbourInfoErrorRatioHigh is **firing** (error outcome ratio > 
 
 ### 7.5.5 Practice — reproduce
 
-Generate a **short** spike of `/v1/fail` (under 1m) and confirm the alert stays **Pending** or never fires; then a **sustained** mix that reaches **Firing**. Write which pattern you would page and why, with budget math from §7.5.3.
+Generate a **short** spike of `/v1/fail` (under the `for: 30s` window) and confirm the alert stays **Pending** or never fires; then run the sustained poll loop until **Firing** is actually observed. Write which pattern you would page and why, with budget math from §7.5.3.
 
 **Verify:** SLIs have precise numerators/denominators; you have JSON or UI evidence of a firing alert; you did not claim a paging channel you did not configure.
 
@@ -877,7 +938,7 @@ Align with [D07 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D07%20Obse
 
 ### Example assessment conclusion (evidence still required)
 
-> Harbour + Postgres on Compose network `db` (no host DB publish). Pinned `requirements-otel.txt` installed in `harbour-api:otel`. `/v1/info` emits JSON log + `harbour_info_requests_total`; response `trace_id` matched Jaeger and `compose logs`. PromQL query returned success series ≥5. `HarbourInfoErrorRatioHigh` went Pending→Firing under `/v1/fail` mix; cleared after. Collector stop: app OK, telemetry gapped. SLIs/budgets + runbook filed. CONTRACT.md written. No paging vendor claimed; no Datadog required for D07.
+> Harbour + Postgres on Compose network `db`. API `entrypoint: opentelemetry-instrument` (PID 1 cmdline verified). Pinned deps in `harbour-api:otel`. Placeholder `alert-rules.yml` before first `up`; real rule loaded in §7.5. `/v1/info` log/Jaeger `trace_id` matched. Polled until `harbour_info_requests_total` appeared (`OTEL_METRIC_EXPORT_INTERVAL=5000`). Sustained `/v1/fail` until `HarbourInfoErrorRatioHigh` firing JSON observed. Collector stop: app OK. CONTRACT.md written. No paging vendor claimed.
 
 ---
 
