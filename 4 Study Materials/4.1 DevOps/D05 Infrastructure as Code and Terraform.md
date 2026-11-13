@@ -183,19 +183,74 @@ Local state on a laptop is not a platform. Use an access-controlled **remote bac
 
 `sensitive` outputs still often land in state. Treat state access like production secret access.
 
-### 5.2.2 Worked example — bootstrap backend once
+### 5.2.2 Worked example — complete bootstrap root
 
-Chicken-and-egg: the backend must exist before environment roots use it. Keep a **separate** bootstrap root that you apply rarely.
+Chicken-and-egg: the backend must exist before environment roots use it. Keep a **separate** bootstrap root that you apply rarely. Every file below is required.
 
 ```bash
+export HARBOUR_ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
+export AWS_REGION="${AWS_REGION:-eu-west-1}"
 cd "$HARBOUR_ROOT"
 mkdir -p infra/bootstrap
 cd infra/bootstrap
 ```
 
-`versions.tf` / provider as in 5.1 (region variable). `main.tf`:
+`versions.tf`:
 
 ```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+  default_tags {
+    tags = {
+      Project = "harbour-training"
+      Module  = "bootstrap"
+    }
+  }
+}
+```
+
+`variables.tf`:
+
+```hcl
+variable "aws_region" {
+  type        = string
+  description = "AWS region for state backend resources."
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Short prefix for bucket/table names (lowercase alphanumeric and hyphen)."
+  default     = "harbour"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]{2,16}$", var.name_prefix))
+    error_message = "name_prefix must be 2-16 chars of [a-z0-9-]."
+  }
+}
+```
+
+`terraform.tfvars`:
+
+```hcl
+aws_region  = "eu-west-1"
+name_prefix = "harbour"
+```
+
+`main.tf`:
+
+```hcl
+data "aws_caller_identity" "current" {}
+
 resource "aws_s3_bucket" "tf_state" {
   bucket = "${var.name_prefix}-tfstate-${data.aws_caller_identity.current.account_id}"
 
@@ -203,8 +258,6 @@ resource "aws_s3_bucket" "tf_state" {
     Purpose = "terraform-state"
   }
 }
-
-data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket_versioning" "tf_state" {
   bucket = aws_s3_bucket.tf_state.id
@@ -252,68 +305,119 @@ output "state_bucket" {
 output "lock_table" {
   value = aws_dynamodb_table.tf_locks.name
 }
+
+output "aws_region" {
+  value = var.aws_region
+}
+
+output "aws_account_id" {
+  value = data.aws_caller_identity.current.account_id
+}
 ```
 
 ```bash
 terraform init
 terraform plan -out=/tmp/harbour-bootstrap.tfplan
 terraform apply /tmp/harbour-bootstrap.tfplan
-terraform output
+
+export STATE_BUCKET="$(terraform output -raw state_bucket)"
+export LOCK_TABLE="$(terraform output -raw lock_table)"
+export AWS_REGION="$(terraform output -raw aws_region)"
+export AWS_ACCOUNT_ID="$(terraform output -raw aws_account_id)"
+echo "STATE_BUCKET=$STATE_BUCKET"
+echo "LOCK_TABLE=$LOCK_TABLE"
+echo "AWS_REGION=$AWS_REGION"
+echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
 ```
 
-Record `state_bucket` and `lock_table` in your Progress Log. **Do not destroy bootstrap** while environments still use it.
+Record those four values in your Progress Log. **Do not destroy bootstrap** while environments still use it.
 
-### 5.2.3 Worked example — environment root with remote backend
+### 5.2.3 Worked example — lock-drill root (deterministic contention)
+
+Do **not** race two ordinary `plan` commands — they often finish too quickly. Use a dedicated root whose apply holds the lock for a known duration.
 
 ```bash
-mkdir -p "$HARBOUR_ROOT/infra/envs/staging"
-cd "$HARBOUR_ROOT/infra/envs/staging"
+mkdir -p "$HARBOUR_ROOT/infra/lock-drill"
+cd "$HARBOUR_ROOT/infra/lock-drill"
 ```
 
-`backend.tf` (fill bucket/table/region from bootstrap outputs):
+`versions.tf`:
 
 ```hcl
 terraform {
-  backend "s3" {
-    bucket         = "REPLACE_STATE_BUCKET"
-    key            = "harbour/staging/terraform.tfstate"
-    region         = "eu-west-1"
-    dynamodb_table = "REPLACE_LOCK_TABLE"
-    encrypt        = true
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
+
+  backend "s3" {
+    # filled by -backend-config on init (same bucket/table as bootstrap)
+    key      = "harbour/lock-drill/terraform.tfstate"
+    encrypt  = true
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
 }
 ```
 
-Add provider `versions.tf` as before. Run:
+`variables.tf`:
 
-```bash
-terraform init
+```hcl
+variable "aws_region" {
+  type = string
+}
 ```
 
-**Expected:** backend initialises; subsequent plans lock via DynamoDB.
+`main.tf`:
 
-### 5.2.4 Worked example — see locking (two terminals)
-
-Terminal A:
-
-```bash
-cd "$HARBOUR_ROOT/infra/envs/staging"
-# create a long-running apply later; for now start a plan that you pause with a deliberate hold:
-terraform plan
-# leave this shell open during apply of a real change when you have resources
+```hcl
+resource "time_sleep" "hold_lock" {
+  create_duration = "90s"
+}
 ```
 
-Better drill once you have resources in Section 5.4:
+`terraform.tfvars`:
 
-1. Terminal A: `terraform apply` (or plan) that holds the lock.
-2. Terminal B: `terraform plan` → expect a lock error naming the lock ID.
-3. **Never** `force-unlock` while A is genuinely active. Only unlock stale locks after you prove no apply is running.
+```hcl
+aws_region = "eu-west-1"
+```
 
-**Practice — reproduce:** Document the exact lock error text in your evidence notes.
+**Terminal A** (holds the lock for ~90 seconds):
 
-**Challenge:** Enable bucket versioning recovery notes: how you would restore a previous state object after a bad apply *without* overwriting blindly (read AWS console/CLI object versions, compare, decide).
+```bash
+cd "$HARBOUR_ROOT/infra/lock-drill"
+terraform init \
+  -backend-config="bucket=${STATE_BUCKET}" \
+  -backend-config="dynamodb_table=${LOCK_TABLE}" \
+  -backend-config="region=${AWS_REGION}"
+terraform apply -auto-approve
+```
 
-**Verify:** State for staging lives in S3 under the `harbour/staging/…` key; laptop has no long-term `terraform.tfstate` for that root (only local backend config).
+**Terminal B** (run within a few seconds of starting A):
+
+```bash
+cd "$HARBOUR_ROOT/infra/lock-drill"
+terraform plan -lock-timeout=0s
+```
+
+**Expected:** Terminal B fails immediately with a state lock error (lock ID present). Do **not** `force-unlock` while A is still applying. After A finishes, B’s plan succeeds.
+
+Destroy when done: `terraform destroy -auto-approve` in the lock-drill root.
+
+**Practice — reproduce:** Capture the lock error text in your evidence notes.
+
+**Challenge:** Write the recovery steps for a *stale* lock after a crashed CI runner (prove no apply is running, then unlock) — separate from “active apply in another terminal.”
+
+**Verify:** Staging/prod will use the same bucket/table with **different state keys**; lock-drill proved locking works before you build expensive resources.
 
 ---
 
@@ -327,20 +431,26 @@ Harbour needs at least:
 
 | Module | Responsibility |
 | --- | --- |
-| `modules/network` | VPC, subnets, routing, basic flow for ALB + tasks |
-| `modules/runtime` | Security groups, ALB, ECS cluster/service for Harbour API image |
+| `modules/network` | VPC, subnets, routing for ALB + tasks |
+| `modules/runtime` | Security groups, ALB, ECS cluster/service for Harbour API |
 
-### 5.3.2 Worked example — network module (training-sized)
+### 5.3.2 Worked example — network module with validation
 
 ```bash
 mkdir -p "$HARBOUR_ROOT/infra/modules/network"
 ```
 
-`infra/modules/network/variables.tf`:
+`infra/modules/network/variables.tf` — **include validation before writing tests**:
 
 ```hcl
 variable "name_prefix" {
-  type = string
+  type        = string
+  description = "Lowercase name prefix for network resources."
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]{2,24}$", var.name_prefix))
+    error_message = "name_prefix must be 2-24 chars of [a-z0-9-] (uppercase rejected)."
+  }
 }
 
 variable "vpc_cidr" {
@@ -358,7 +468,7 @@ variable "az_count" {
 }
 ```
 
-`infra/modules/network/main.tf` (abridged but complete enough to apply):
+`infra/modules/network/main.tf`:
 
 ```hcl
 data "aws_availability_zones" "available" {
@@ -421,7 +531,50 @@ output "public_subnet_ids" {
 }
 ```
 
-### 5.3.3 Worked example — runtime module (ALB + ECS Fargate public)
+### 5.3.3 Worked example — `terraform test` (fail first, then pass)
+
+Write the test **before** you trust the validation. First demonstrate a broken module (no validation), then restore the validation block from 5.3.2.
+
+`infra/modules/network/tests/name.tftest.hcl`:
+
+```hcl
+run "rejects_bad_prefix" {
+  command = plan
+
+  variables {
+    name_prefix = "BAD"
+    vpc_cidr    = "10.40.0.0/16"
+  }
+
+  expect_failures = [
+    var.name_prefix,
+  ]
+}
+```
+
+**Step A — show the test failing for the right reason (optional teaching branch):** temporarily remove the `validation` block from `name_prefix`, run:
+
+```bash
+cd "$HARBOUR_ROOT/infra/modules/network"
+terraform init
+terraform test
+```
+
+**Expected without validation:** the run does **not** meet `expect_failures` (plan may proceed to provider errors or succeed incorrectly). That proves the test is asserting real validation.
+
+**Step B — restore the validation block from 5.3.2**, then:
+
+```bash
+terraform test
+```
+
+**Expected:** `rejects_bad_prefix` passes because `BAD` is rejected by the variable validation.
+
+**Practice — reproduce:** Add validation that rejects `allowed_ingress_cidr = "0.0.0.0/0"` on the runtime module; write a matching `expect_failures` test; show red then green.
+
+**Verify:** Another engineer can read module inputs and know invalid values fail before apply.
+
+### 5.3.4 Worked example — runtime module (ALB + ECS Fargate)
 
 ```bash
 mkdir -p "$HARBOUR_ROOT/infra/modules/runtime"
@@ -431,16 +584,12 @@ mkdir -p "$HARBOUR_ROOT/infra/modules/runtime"
 
 ```hcl
 variable "name_prefix" { type = string }
-
 variable "vpc_id" { type = string }
-
-variable "subnet_ids" {
-  type = list(string)
-}
+variable "subnet_ids" { type = list(string) }
 
 variable "container_image" {
   type        = string
-  description = "Immutable image reference including digest, e.g. ACCOUNT.dkr.ecr.REGION.amazonaws.com/repo@sha256:…"
+  description = "Immutable image reference including digest."
 }
 
 variable "container_port" {
@@ -507,14 +656,14 @@ resource "aws_security_group" "tasks" {
 }
 
 resource "aws_lb" "this" {
-  name               = "${var.name_prefix}-alb"
+  name               = substr("${var.name_prefix}-alb", 0, 32)
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.subnet_ids
 }
 
 resource "aws_lb_target_group" "this" {
-  name        = "${var.name_prefix}-tg"
+  name        = substr("${var.name_prefix}-tg", 0, 32)
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
@@ -533,7 +682,6 @@ resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
   port              = 80
   protocol          = "HTTP"
-
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.this.arn
@@ -623,7 +771,7 @@ resource "aws_ecs_service" "api" {
   network_configuration {
     subnets          = var.subnet_ids
     security_groups  = [aws_security_group.tasks.id]
-    assign_public_ip = true # training: avoid NAT Gateway cost — document in ADR
+    assign_public_ip = true # training: avoid NAT cost — document in ADR
   }
 
   load_balancer {
@@ -646,87 +794,103 @@ output "alb_dns_name" {
 output "service_url" {
   value = "http://${aws_lb.this.dns_name}"
 }
-```
 
-**Image supply (working sequence):** create ECR in the env root (or a tiny module), push the D04 digest, pass the digest into `container_image`.
-
-```hcl
-# in envs/staging — beside the modules
-resource "aws_ecr_repository" "harbour" {
-  name                 = "${var.name_prefix}-stg-api"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true # training only
-}
-
-output "ecr_repository_url" {
-  value = aws_ecr_repository.harbour.repository_url
+output "alb_security_group_id" {
+  value = aws_security_group.alb.id
 }
 ```
-
-```bash
-# after terraform apply creates the repo:
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
-docker pull "ghcr.io/<owner>/harbour-api@sha256:<digest-from-d04>"   # or use local harbour-api:local
-DIGEST_SRC="ghcr.io/<owner>/harbour-api@sha256:<digest-from-d04>"
-ECR_REPO="$(terraform output -raw ecr_repository_url)"
-docker tag "$DIGEST_SRC" "$ECR_REPO:training"
-docker push "$ECR_REPO:training"
-# resolve the pushed digest and set container_image = "$ECR_REPO@sha256:…"
-```
-
-If Harbour is not ready yet, temporarily set `container_image` to a public image that serves HTTP 200 on `/` and adjust the target-group health check path — then switch back to Harbour `@sha256:…` before assessment.
-
-### 5.3.4 Worked example — `terraform test` for validation
-
-`infra/modules/network/tests/name.tftest.hcl`:
-
-```hcl
-run "rejects_bad_prefix" {
-  command = plan
-
-  variables {
-    name_prefix = "BAD"
-    vpc_cidr    = "10.40.0.0/16"
-  }
-
-  expect_failures = [
-    var.name_prefix,
-  ]
-}
-```
-
-Adjust to match your real validation blocks. Run from the module directory:
-
-```bash
-cd "$HARBOUR_ROOT/infra/modules/network"
-terraform init
-terraform test
-```
-
-**Practice — reproduce:** Add an input validation that rejects `0.0.0.0/0` for an `allowed_ingress_cidr` variable; prove `terraform test` or a plan failure catches it.
-
-**Verify:** Another engineer can read module `README.md` files and know required inputs without asking you.
 
 ---
 
-## Section 5.4 — Two environments, one module version
+## Section 5.4 — Staged first deployment (registry → image → ECS)
 
-### 5.4.1 Layout
+### 5.4.1 Why staging is staged
 
-```text
-infra/
-  bootstrap/
-  modules/
-    network/
-    runtime/
-  envs/
-    staging/
-    prod/
-  README.md
+ECS needs `container_image` at apply time. ECR must exist before you can push. **Do not** try to invent a digest before the registry exists. Use three explicit stages:
+
+| Stage | What you apply | Result |
+| --- | --- | --- |
+| **A** | Network + ECR only (`enable_runtime = false`) | Registry URL |
+| **B** | (no Terraform) Push image; resolve digest | `container_image` value |
+| **C** | Enable runtime (`enable_runtime = true`) with that digest | Reachable `/health` |
+
+### 5.4.2 Complete staging environment root
+
+```bash
+mkdir -p "$HARBOUR_ROOT/infra/envs/staging"
+cd "$HARBOUR_ROOT/infra/envs/staging"
 ```
 
-`infra/envs/staging/main.tf`:
+`versions.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  backend "s3" {
+    key     = "harbour/staging/terraform.tfstate"
+    encrypt = true
+    # bucket, region, dynamodb_table via -backend-config
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+  default_tags {
+    tags = {
+      Project     = "harbour-training"
+      Environment = "staging"
+    }
+  }
+}
+```
+
+`variables.tf`:
+
+```hcl
+variable "aws_region" {
+  type = string
+}
+
+variable "name_prefix" {
+  type    = string
+  default = "harbour"
+}
+
+variable "allowed_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed to reach the ALB (use your /32)."
+}
+
+variable "enable_runtime" {
+  type        = bool
+  description = "False for stage A (registry only). True for stage C (ECS/ALB)."
+  default     = false
+}
+
+variable "container_image" {
+  type        = string
+  description = "ECR image@sha256 digest. Required when enable_runtime is true."
+  default     = ""
+
+  validation {
+    condition = (
+      !var.enable_runtime || (
+        var.container_image != "" && can(regex("@sha256:[0-9a-f]{64}$", var.container_image))
+      )
+    )
+    error_message = "When enable_runtime is true, container_image must be a digest reference ending in @sha256:<64 hex>."
+  }
+}
+```
+
+`main.tf`:
 
 ```hcl
 module "network" {
@@ -735,7 +899,15 @@ module "network" {
   vpc_cidr    = "10.40.0.0/16"
 }
 
+resource "aws_ecr_repository" "harbour" {
+  name                 = "${var.name_prefix}-stg-api"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true # training only
+}
+
 module "runtime" {
+  count = var.enable_runtime ? 1 : 0
+
   source          = "../../modules/runtime"
   name_prefix     = "${var.name_prefix}-stg"
   vpc_id          = module.network.vpc_id
@@ -744,45 +916,128 @@ module "runtime" {
   allowed_cidrs   = var.allowed_cidrs
 }
 
+output "ecr_repository_url" {
+  value = aws_ecr_repository.harbour.repository_url
+}
+
 output "alb_dns_name" {
-  value = module.runtime.alb_dns_name
+  value = try(module.runtime[0].alb_dns_name, null)
 }
 
 output "service_url" {
-  value = module.runtime.service_url
+  value = try(module.runtime[0].service_url, null)
+}
+
+output "alb_security_group_id" {
+  value = try(module.runtime[0].alb_security_group_id, null)
 }
 ```
 
-Also define `variable "name_prefix"`, `variable "container_image"`, and `variable "allowed_cidrs"` in `variables.tf` for the env root. `prod` uses a **different state key** (`harbour/prod/terraform.tfstate`), different CIDR (e.g. `10.50.0.0/16`), and different `name_prefix` suffix. Same module source version.
+`terraform.tfvars` for **stage A** (no runtime yet):
 
-### 5.4.2 Worked example — apply staging until the URL answers
+```hcl
+aws_region      = "eu-west-1"
+name_prefix     = "harbour"
+allowed_cidrs   = ["203.0.113.10/32"] # REPLACE with your public IP /32
+enable_runtime  = false
+container_image = ""
+```
+
+### 5.4.3 Stage A — apply network + ECR
 
 ```bash
 cd "$HARBOUR_ROOT/infra/envs/staging"
-terraform init
-terraform plan -out=/tmp/harbour-stg.tfplan
-terraform show -no-color /tmp/harbour-stg.tfplan | less
-terraform apply /tmp/harbour-stg.tfplan
-terraform output
-curl -sS "http://$(terraform output -raw alb_dns_name)/health" || true
+# Re-export if this is a new shell:
+# source values recorded from bootstrap, or:
+# export STATE_BUCKET=... LOCK_TABLE=... AWS_REGION=... AWS_ACCOUNT_ID=...
+
+terraform init \
+  -backend-config="bucket=${STATE_BUCKET}" \
+  -backend-config="dynamodb_table=${LOCK_TABLE}" \
+  -backend-config="region=${AWS_REGION}"
+
+terraform plan -out=/tmp/harbour-stg-a.tfplan
+terraform apply /tmp/harbour-stg-a.tfplan
+
+export ECR_REPO="$(terraform output -raw ecr_repository_url)"
+echo "ECR_REPO=$ECR_REPO"
 ```
 
-Use HTTPS listener only if you attach a certificate; for training, HTTP on an IP-restricted ALB is acceptable if documented.
+**Expected:** VPC/subnets/ECR exist; `alb_dns_name` is `null`; no ECS yet.
 
-**Expected:** `/health` returns Harbour’s JSON once the task is healthy. If not: check target health, security groups, image digest, CloudWatch logs — do not “fix with open `0.0.0.0/0`” as the first move.
+### 5.4.4 Stage B — publish image and resolve digest
 
-### 5.4.3 Worked example — prove isolation
+```bash
+# Establish identity for ECR login (same account/region as Terraform)
+export AWS_REGION="${AWS_REGION:-eu-west-1}"
+export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-1. Apply staging.
-2. Init/plan **prod** with different backend key (do not apply yet if cost-sensitive).
-3. Change a staging-only tag; plan prod and show **no** unexpected staging resource addresses in the prod plan.
-4. Optionally apply prod with `desired_count = 1` and tear it down when done.
+aws ecr get-login-password --region "$AWS_REGION" \
+  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-**Practice — reproduce:** From a clean clone, provision staging using only `infra/README.md` (second-engineer test).
+# Prefer the digest you published in D04; local tag also works for training
+export DIGEST_SRC="${DIGEST_SRC:-harbour-api:local}"
+docker image inspect "$DIGEST_SRC" >/dev/null
 
-**Challenge:** Introduce a deliberate breaking module change (rename a resource without `moved`) in a branch; show a replacement plan and write the migration note you would require before merge.
+docker tag "$DIGEST_SRC" "${ECR_REPO}:training"
+docker push "${ECR_REPO}:training"
 
-**Verify:** Checklist acceptance — second engineer path works; locking still visible on concurrent plans.
+export CONTAINER_IMAGE="$(
+  aws ecr describe-images \
+    --repository-name "${ECR_REPO##*/}" \
+    --image-ids imageTag=training \
+    --query 'imageDetails[0].imageDigest' \
+    --output text \
+    | awk -v repo="$ECR_REPO" '{print repo "@" $0}'
+)"
+echo "CONTAINER_IMAGE=$CONTAINER_IMAGE"
+```
+
+**Expected:** `CONTAINER_IMAGE` looks like `…amazonaws.com/harbour-stg-api@sha256:` followed by 64 hex characters.
+
+### 5.4.5 Stage C — enable runtime with that digest
+
+Update `terraform.tfvars`:
+
+```hcl
+aws_region      = "eu-west-1"
+name_prefix     = "harbour"
+allowed_cidrs   = ["203.0.113.10/32"] # your /32
+enable_runtime  = true
+container_image = "REPLACE_WITH_CONTAINER_IMAGE_FROM_STAGE_B"
+```
+
+Or pass on the CLI without committing the digest if you prefer:
+
+```bash
+cd "$HARBOUR_ROOT/infra/envs/staging"
+terraform plan \
+  -var="enable_runtime=true" \
+  -var="container_image=${CONTAINER_IMAGE}" \
+  -out=/tmp/harbour-stg-c.tfplan
+terraform apply /tmp/harbour-stg-c.tfplan
+terraform output
+curl -sS "http://$(terraform output -raw alb_dns_name)/health"
+```
+
+**Expected:** `/health` returns Harbour JSON once the task is healthy. If not: target health, security groups, image digest, CloudWatch logs — not “open `0.0.0.0/0`” as the first fix.
+
+### 5.4.6 Prod isolation
+
+Copy the staging root to `infra/envs/prod` with:
+
+- backend key `harbour/prod/terraform.tfstate`
+- different `vpc_cidr` (e.g. `10.50.0.0/16`)
+- `name_prefix` / ECR name for prod
+
+Plan prod after changing only staging and confirm prod’s plan is empty (or unrelated). Optionally apply prod later; destroy when idle.
+
+**Practice — reproduce:** From a clean clone, run stages A→B→C using only `infra/README.md`.
+
+**Challenge:** Add a `moved` block drill for a renamed resource without replacement.
+
+**Verify:** Second engineer can provision staging; state keys remain isolated.
 
 ---
 
@@ -790,11 +1045,29 @@ Use HTTPS listener only if you attach a certificate; for training, HTTP on an IP
 
 ### 5.5.1 Worked example — benign drift
 
+After stage C, tag the ALB security group out-of-band and inspect the plan. Prefer the module output when present:
+
 ```bash
-# After staging exists — change a tag out-of-band:
-PARAM_OR_SG_ID="..."   # pick a resource you understand
-aws ec2 create-tags --resources "$SG_ID" --tags Key=DriftDrill,Value=yes
 cd "$HARBOUR_ROOT/infra/envs/staging"
+
+export SG_ID="$(terraform output -raw alb_security_group_id 2>/dev/null || true)"
+if [[ -z "$SG_ID" || "$SG_ID" == "null" ]]; then
+  export VPC_ID="$(aws ec2 describe-vpcs \
+    --filters Name=tag:Name,Values=harbour-stg-vpc \
+    --query 'Vpcs[0].VpcId' --output text)"
+  echo "Staging VPC_ID=$VPC_ID"
+  aws ec2 describe-security-groups \
+    --filters "Name=vpc-id,Values=${VPC_ID}" \
+    --query 'SecurityGroups[].{Id:GroupId,Name:GroupName}' \
+    --output table
+  # Set SG_ID to the ALB security group id from the table (name starts with harbour-stg-alb-).
+  export SG_ID="<alb-security-group-id>"
+fi
+
+echo "SG_ID=$SG_ID"
+test -n "$SG_ID" && test "$SG_ID" != "None" && test "$SG_ID" != "null"
+
+aws ec2 create-tags --resources "$SG_ID" --tags Key=DriftDrill,Value=yes
 terraform plan
 ```
 
@@ -806,7 +1079,7 @@ If apply fails mid-way:
 
 1. Read the error and the resource address.
 2. Inspect the live provider console/CLI for what actually exists.
-3. `terraform refresh` / new plan (Terraform 1.x: just plan) before blind re-apply.
+3. Run a fresh `terraform plan` before blind re-apply.
 4. Prefer fixing config over random `terraform state rm` unless you understand ownership.
 
 Keep `docs/incidents/d05-recovery-log.md` with symptoms → cause → action → prevention.
@@ -817,7 +1090,6 @@ Keep `docs/incidents/d05-recovery-log.md` with symptoms → cause → action →
 cd "$HARBOUR_ROOT/infra/envs/staging"
 terraform plan -destroy -out=/tmp/harbour-stg-destroy.tfplan
 terraform show /tmp/harbour-stg-destroy.tfplan
-# only then:
 terraform apply /tmp/harbour-stg-destroy.tfplan
 ```
 
@@ -835,12 +1107,53 @@ Never destroy bootstrap while envs remain. Set budget alarms before leaving reso
 
 | Trigger | Terraform action | Credentials |
 | --- | --- | --- |
-| Pull request | `fmt`, `validate`, `test`, **plan** | Read-only / plan role |
-| Protected main / environment approval | **apply** | Short-lived role (OIDC preferred) |
+| Pull request from the **base repo** | `fmt`, `validate`, module `test`, **plan** | OIDC → **plan** role (read state + read APIs; no apply) |
+| Fork pull request | Same static checks; **no** cloud plan / **no** OIDC role | None (or read-only GitHub token only) |
+| Protected environment / main | Fresh **plan + apply** | OIDC → **apply** role |
 
-Never apply from fork PRs. Never paste long-lived AKIA keys into the repo.
+Never paste long-lived AKIA keys into the repo. Never apply from fork PRs.
 
-### 5.6.2 Worked example — PR plan workflow (skeleton you can run)
+### 5.6.2 Worked example — IAM trust and least privilege
+
+Create two roles in the training account (console or a small IAM Terraform root). Trust policy for both (GitHub OIDC). Replace `OWNER`, `REPO`, and account id:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:OWNER/REPO:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+Tighten `sub` further for apply (`repo:OWNER/REPO:environment:staging` or `ref:refs/heads/main`) once Environments are configured.
+
+**Plan role** permissions (illustrative — prefer IAM Access Analyzer / least privilege reviews):
+
+- `s3:ListBucket`, `s3:GetObject` on the state bucket/prefix `harbour/staging/*`
+- `dynamodb:GetItem`, `PutItem`, `DeleteItem`, `DescribeTable` on the lock table (needed to plan with locking)
+- Read-only EC2/ECS/ECR/ELB/IAM get/list for refresh
+- **No** `ecs:Create*`, `ec2:Terminate*`, `s3:DeleteObject` on state, etc.
+
+**Apply role:** plan permissions plus create/update/delete on the training resources, still scoped by tags/prefixes where possible. Humans use a third role; CI apply is not account admin.
+
+Store ARNs as GitHub **Actions secrets** (`AWS_PLAN_ROLE_ARN`, `AWS_APPLY_ROLE_ARN`) — not in git.
+
+### 5.6.3 Worked example — PR plan workflow with fork guard and redaction
 
 `.github/workflows/harbour-terraform-plan.yml`:
 
@@ -856,12 +1169,13 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  id-token: write   # if using OIDC
-  # For posting plan comments you may need pull-requests: write — prefer artifacts instead.
+  id-token: write
 
 jobs:
   plan-staging:
     runs-on: ubuntu-latest
+    # Fork PRs: do not assume the plan role (no secrets / no account access).
+    if: github.event.pull_request.head.repo.full_name == github.repository
     defaults:
       run:
         working-directory: infra/envs/staging
@@ -870,29 +1184,56 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (plan role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: eu-west-1
-      - run: terraform init -input=false
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -backend-config="region=eu-west-1"
       - run: terraform fmt -check -recursive
       - run: terraform validate
       - name: Plan
         run: |
           terraform plan -input=false -no-color -out="${{ runner.temp }}/stg.tfplan"
           terraform show -no-color "${{ runner.temp }}/stg.tfplan" > "${{ runner.temp }}/stg.plan.txt"
+      - name: Redact likely secrets before upload
+        run: |
+          # Training redaction — not a substitute for proper secret scanning.
+          sed -E \
+            -e 's/(AKIA[0-9A-Z]{16})/[REDACTED_ACCESS_KEY]/g' \
+            -e 's/(secret[_-]?key["[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+            -e 's/(password["[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+            "${{ runner.temp }}/stg.plan.txt" > "${{ runner.temp }}/stg.plan.redacted.txt"
+          if grep -Eiq 'AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY' "${{ runner.temp }}/stg.plan.redacted.txt"; then
+            echo "Plan still looks sensitive after redaction — refusing upload" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: harbour-stg-plan-${{ github.sha }}
-          path: ${{ runner.temp }}/stg.plan.txt
+          path: ${{ runner.temp }}/stg.plan.redacted.txt
+          # Restrict retention; keep artifacts private to the repository
+          retention-days: 5
+
+  # Visible check on fork PRs so required gates are not mysteriously skipped
+  fork-notice:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Fork PR: cloud plan skipped by design. Run static terraform fmt/validate in a separate non-OIDC job if you require it."
 ```
 
-Store plans under `${{ runner.temp }}` (same lesson as D04 JUnit): do not dirty the checkout; do not commit plans.
+Add a non-OIDC `fmt`/`validate` job that runs for **all** PRs (including forks) if branch protection requires a named check on every PR.
 
-**Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, OIDC **apply** role narrower than human admin, `terraform apply -input=false "${{ runner.temp }}/…"` only after a **fresh** plan in that job when state may have changed.
+**Apply workflow** (trusted only): separate file, `environment: staging` with required reviewers, `if:` limited to the home repository and protected ref, OIDC **apply** role, **fresh** `plan` then `apply` in the same job (do not reuse a PR plan artifact as the apply binary plan across time/state changes).
 
-### 5.6.3 Threat drill — public SG in a PR
+### 5.6.4 Threat drill — public SG in a PR
 
 Open a PR that changes `allowed_cidrs` to `["0.0.0.0/0"]`. Show:
 
@@ -900,9 +1241,9 @@ Open a PR that changes `allowed_cidrs` to `["0.0.0.0/0"]`. Show:
 2. Human review rejecting it, **or**
 3. A policy check (OPA/Conftest/Checkov) failing — if you lack automation, document the gap honestly.
 
-**Practice — reproduce:** Post the plan artifact link on a PR and have a second person summarise blast radius from that artifact alone.
+**Practice — reproduce:** From the redacted plan artifact alone, a second person summarises blast radius.
 
-**Verify:** Untrusted PRs cannot apply; staging apply is auditable (who/what/when).
+**Verify:** Fork PRs cannot assume the plan role; staging apply is auditable (who/what/when); uploaded plans are redacted and retention-limited.
 
 ---
 
@@ -913,7 +1254,7 @@ Open a PR that changes `allowed_cidrs` to `["0.0.0.0/0"]`. Show:
 - AWS Budgets / billing alarm for the training account
 - Tags: `Project`, `Owner`, `Environment`
 - Estimate: ALB hours + Fargate vCPU/GB + S3/DynamoDB (usually small) — **NAT would dominate**; you avoided it on purpose
-- `infra/README.md`: bootstrap → staging apply → how to curl health → destroy order
+- `infra/README.md`: bootstrap → lock-drill (optional) → staging stages A→B→C → curl health → destroy order
 
 ### 5.7.2 ADR
 
@@ -935,7 +1276,8 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 ### Required deliverables
 
 1. **Two environments** (e.g. staging + prod) from versioned modules with explicit tfvars.
-2. **Remote state** with locking; evidence of a lock conflict; backup/recovery decision written down.
+2. **Remote state** with locking; evidence from the **deterministic lock-drill** (`time_sleep` + `plan -lock-timeout=0s`); backup/recovery decision written down.
+2b. **Staged staging deploy** (ECR → push/resolve digest → ECS) so `container_image` is never required before the registry exists.
 3. **CI plan** on PR + **approved apply** from a trusted context with recorded identity/revision.
 4. **Reachable Harbour endpoint** (or interim health-capable container) behind your network/IAM design.
 5. **Drift or failed-apply recovery** notes with evidence.
@@ -965,7 +1307,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 
 ### Example assessment conclusion (evidence still required)
 
-> Bootstrap S3/DynamoDB backends host `harbour/staging` and `harbour/prod` state. Network and runtime modules deploy an IP-restricted ALB + Fargate service on public subnets (no NAT; ADR explains why). Staging `/health` serves Harbour from an ECR digest. PR plans upload artifacts from `runner.temp`; apply uses a reviewed GitHub Environment. A second engineer applied staging from the README. Drift drill and lock contention are logged.
+> Bootstrap S3/DynamoDB backends host env state. A lock-drill root with `time_sleep` demonstrated deterministic lock contention. Staging used stages A→B→C (ECR, push digest, then ECS). `/health` serves Harbour from an ECR digest behind an IP-restricted ALB (no NAT; ADR explains why). PR plans use a plan-only OIDC role, skip fork PRs for cloud access, and upload redacted artifacts only. Apply uses a reviewed GitHub Environment. A second engineer completed staging from the README.
 
 ---
 
