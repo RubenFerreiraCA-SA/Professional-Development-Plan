@@ -8,17 +8,17 @@ This approximately 120–150-hour curriculum follows the end-to-end DevOps lifec
 
 | Code | Module | Estimated hours | Weight | Core milestone |
 | --- | --- | ---: | --- | --- |
-| D01 | [Repository Fundamentals](D01_Repository_Fundamentals.md) | 4–5 | 3% | Establish a secure, governed repository and protected contribution workflow. |
-| D02 | [Advanced Git](D02_Advanced_Git.md) | 4–5 | 4% | Resolve conflicts, recover commits and diagnose regressions safely. |
-| D03 | [Docker & Containerization](D03_Docker_and_Containerization.md) | 24–30 | 20% | Package and run a multi-service app locally with Docker Compose. |
-| D04 | [CI/CD & Build Automation](D04_CICD_and_Build_Automation.md) | 16–20 | 13% | Automate code testing, image scanning, and registry pushes. |
-| D05 | [Infrastructure as Code & Terraform](D05_Infrastructure_as_Code_and_Terraform.md) | 32–40 | 27% | Provision cloud networking and container clusters via code. |
-| D06 | [GitOps, Automation & Operations](D06_GitOps_Automation_and_Operations.md) | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
-| D07 | [Datadog & Observability](D07_Datadog_and_Observability.md) | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
+| D01 | [Repository Fundamentals](D01%20Repository%20Fundamentals.md) | 4–5 | 3% | Establish a secure, governed repository and protected contribution workflow. |
+| D02 | [Advanced Git](D02%20Advanced%20Git.md) | 4–5 | 4% | Resolve conflicts, recover commits and diagnose regressions safely. |
+| D03 | [Docker & Containerization](D03%20Docker%20and%20Containerization.md) | 24–30 | 20% | Package and run a multi-service app locally with Docker Compose. |
+| D04 | [CI/CD & Build Automation](D04%20CICD%20and%20Build%20Automation.md) | 16–20 | 13% | Automate code testing, image scanning, and registry pushes. |
+| D05 | [Infrastructure as Code & Terraform](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) | 32–40 | 27% | Provision cloud networking and container clusters via code. |
+| D06 | [GitOps, Automation & Operations](D06%20GitOps%20Automation%20and%20Operations.md) | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
+| D07 | [Datadog & Observability](D07%20Datadog%20and%20Observability.md) | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
 
 ## Contribution to the Final Project
 
-The modules contribute to the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) through one reusable application delivery example across Git, Docker, CI/CD, Terraform, GitOps and Datadog. Each lesson includes a hands-on lab that builds on earlier work. The [module companion pages](D01_Repository_Fundamentals.md) can be used to collect links to completed work; the lesson objectives and labs below remain the source of truth.
+The modules contribute to the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) through one reusable application delivery example across Git, Docker, CI/CD, Terraform, GitOps and Datadog. Each lesson includes a hands-on lab that builds on earlier work. The [module companion pages](D01%20Repository%20Fundamentals.md) can be used to collect links to completed work; the lesson objectives and labs below remain the source of truth.
 
 ## Certifications
 
@@ -37,7 +37,7 @@ Completing these materials does **not** award a certification, and certification
 
 > **Hands-on lab:** Create the Final Project repository, add application/infrastructure/deployment boundaries, configure ignore rules and branch protection, then submit and review a change to a sensitive path. Verify enforcement where supported and document limitations.
 
-**Detailed practical material:** [D01 — Repository Fundamentals](D01_Repository_Fundamentals.md).
+**Detailed practical material:** [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md).
 
 ## D02: Advanced Git (4–5 hours | 4%)
 
@@ -52,7 +52,7 @@ Completing these materials does **not** award a certification, and certification
 
 > **Hands-on lab:** Create divergent commits and a merge conflict in a disposable repository, compare integration strategies, recover an intentionally lost local commit and identify a first bad commit with `git bisect`. Explain the safe production recovery route.
 
-**Detailed practical material:** [D02 — Advanced Git](D02_Advanced_Git.md).
+**Detailed practical material:** [D02 — Advanced Git](D02%20Advanced%20Git.md).
 
 ## D03: Docker & Containerization (24–30 hours | 20%)
 

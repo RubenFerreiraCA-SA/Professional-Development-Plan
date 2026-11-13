@@ -7,7 +7,7 @@
 
 ## Objective
 
-Design a **production-ready repository foundation** with clear ownership, safe contribution workflows and enforceable security controls. This module focuses on repository architecture and governance; [D02 — Advanced Git](D02_Advanced_Git.md) covers the deeper history, recovery and debugging techniques.
+Design a **production-ready repository foundation** with clear ownership, safe contribution workflows and enforceable security controls. This module focuses on repository architecture and governance; [D02 — Advanced Git](D02%20Advanced%20Git.md) covers the deeper history, recovery and debugging techniques.
 
 The repository becomes the starting point for the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md).
 
@@ -105,4 +105,4 @@ In a test repository (or an isolated Final Project repository):
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 - [Git documentation — gitignore](https://git-scm.com/docs/gitignore)
 
-**Previous:** [DevOps Syllabus](DevOps_Syllabus.md) · **Next:** [D02 — Advanced Git](D02_Advanced_Git.md)
+**Previous:** [DevOps Syllabus](DevOps%20Syllabus.md) · **Next:** [D02 — Advanced Git](D02%20Advanced%20Git.md)

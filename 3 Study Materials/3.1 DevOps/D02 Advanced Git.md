@@ -3,7 +3,7 @@
 | | Details |
 | --- | --- |
 | **Estimated study time** | 4–5 hours |
-| **Prerequisites** | [D01 — Repository Fundamentals](D01_Repository_Fundamentals.md), routine branching and merging experience, and comfort using Git in a terminal. |
+| **Prerequisites** | [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md), routine branching and merging experience, and comfort using Git in a terminal. |
 
 ## Objective
 
@@ -88,7 +88,7 @@ In a disposable repository:
 2. Produce and resolve a conflict from two separate clones; document your choice of merge or rebase.
 3. Recover an intentionally discarded **local** commit using a reflog or recorded object ID.
 4. Introduce a regression across several commits and identify the first bad commit with `git bisect`.
-5. Explain how you would revert a faulty published change safely and how GitOps reconciliation will be explored in [D06](D06_GitOps_Automation_and_Operations.md).
+5. Explain how you would revert a faulty published change safely and how GitOps reconciliation will be explored in [D06](D06%20GitOps%20Automation%20and%20Operations.md).
 
 **Completion standard:** Show the relevant commit graphs, the recovered change and the bisect result. Explain why the recovery is safe for a shared team repository.
 
@@ -106,4 +106,4 @@ Explore `git worktree`, `git rerere`, `git range-diff`, signed commits and tags,
 - [GitHub — CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 
-**Previous:** [D01 — Repository Fundamentals](D01_Repository_Fundamentals.md) · **Next:** [D03 — Docker & Containerization](D03_Docker_and_Containerization.md)
+**Previous:** [D01 — Repository Fundamentals](D01%20Repository%20Fundamentals.md) · **Next:** [D03 — Docker & Containerization](D03%20Docker%20and%20Containerization.md)

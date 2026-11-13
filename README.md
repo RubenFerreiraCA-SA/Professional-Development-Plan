@@ -17,4 +17,4 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 - **[PDP Templates](2%20PDP%20templates/)** — planned reusable templates
 - **[Study Materials](3%20Study%20Materials/)** — discipline overviews and module content
 
-The **[DevOps syllabus](3%20Study%20Materials/3.1%20DevOps/DevOps_Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.
+The **[DevOps syllabus](3%20Study%20Materials/3.1%20DevOps/DevOps%20Syllabus.md)** is detailed and ready to follow. Cloud, AI and Platform module files are currently draft outlines.
