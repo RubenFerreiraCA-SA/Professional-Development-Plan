@@ -11,7 +11,7 @@
 
 The purpose of this chapter is not to memorise Docker flags. It is to engineer a **reproducible, secure and operable container contract** that another team can build, run, troubleshoot and replace without knowing your framework internals.
 
-Work through the sections in order. Each one follows **Concept → Worked example → Practice → Verify → Reflect**. Every section adds something to the same running project: **Harbour API** inside the `harbour-platform` repository from D01.
+Work through the sections in order. Each one follows **Concept → Worked example → Practice → Verify → Reflect**. Where an exercise is easy to get wrong (memory limits, digests, readiness), the text first **demonstrates a command sequence that works**, then asks you to reproduce it, then offers a harder challenge. Every section adds something to the same running project: **Harbour API** inside the `harbour-platform` repository from D01.
 
 This text teaches the requirements in [D03 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D03%20Docker%20and%20Containerization.md). The [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) acceptance criterion for D03 is the integration bar: *someone unfamiliar with the stack builds and runs the service from repo instructions alone, gets a healthy response, and the image they run is identified by digest.*
 
@@ -106,15 +106,47 @@ Decide deliberately:
 
 **Never** mount `/var/run/docker.sock` into Harbour for convenience. That grants container breakout to host Docker control.
 
-**Practice 1:** Run a container with `--memory=64m`, then drive memory usage (for example a small stress image or a throwaway Python allocator) until it is killed. Record exit code, `docker inspect` OOM fields and whether a restart policy hid the failure.
+### 3.1.5 Worked example — force a memory (OOM) kill and inspect it
+
+A cgroup memory limit kills the process when **anonymous memory** grows past the limit. Streaming `dd if=/dev/zero of=/dev/null` does **not** do that: data passes through a small buffer and is discarded, so RSS barely grows. You need an allocator that **retains** memory.
+
+Use a disposable container **without** `--rm`, so you can inspect it after it dies:
 
 ```bash
-docker run --rm --memory=64m --memory-swap=64m busybox:1.36 sh -c 'dd if=/dev/zero of=/dev/null bs=1M'
-# or use a dedicated stress tool if available; capture inspect/events output
-docker events --since 5m --until 0s 2>/dev/null | tail -n 20 || true
+docker rm -f harbour-oom 2>/dev/null || true
+
+docker run --name harbour-oom \
+  --memory=64m \
+  --memory-swap=64m \
+  python:3.12-slim-bookworm \
+  python -c '
+chunks = []
+while True:
+    chunks.append(bytearray(8 * 1024 * 1024))  # retain 8 MiB each iteration
+    print(f"allocated≈{len(chunks) * 8} MiB", flush=True)
+'
 ```
 
-**Verify:** You can explain the difference between an application crash, a failed health check and an OOM kill using evidence.
+Expect the process to print rising allocation sizes, then stop. The `docker run` command returns a non-zero status when the container exits. Inspect **before** deleting the container:
+
+```bash
+docker inspect harbour-oom --format \
+  'Status={{.State.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}} FinishedAt={{.State.FinishedAt}}'
+
+docker events --since 10m --until 0s --filter container=harbour-oom 2>/dev/null | tail -n 30 || true
+
+docker rm harbour-oom
+```
+
+**Expected observation (typical Linux/rootful Engine):** `OOMKilled=true` and a non-zero exit. On some desktop setups (notably certain Docker Desktop / VM backends) the kill may appear as a generic exit without `OOMKilled=true`. If that happens, record what you *did* see (`ExitCode`, events, dmesg if available) and treat “limit enforced somehow” versus “flag present” as separate facts — platform engineers document evidence, they do not invent it.
+
+**What this taught:** memory limits are about retained process memory, not “busy” CPU or disk streaming. Diagnosis needs a container that still exists after death (`--rm` would erase the evidence).
+
+**Practice 1 — reproduce:** Delete any leftover container, re-run the allocator sequence from memory (or your notes), and capture `OOMKilled` / exit code again.
+
+**Challenge:** Start the same allocator with `--restart=on-failure:3` (still **without** `--rm`). Watch it restart, then explain how a restart policy can hide an OOM loop from a casual `docker ps` glance. Capture `docker inspect` restart count and stop the container when finished (`docker update --restart=no harbour-oom` or `docker rm -f`).
+
+**Verify:** You can explain the difference between an application crash (process exited itself), a failed health check (orchestrator opinion) and an OOM kill (cgroup/kernel) using inspect/events evidence.
 
 **Reflect:** If a platform offers “just add your Dockerfile,” what default memory/CPU limits and what identity model should it impose — and why?
 
@@ -145,7 +177,7 @@ mkdir -p app/harbour_api
 # Harbour API package
 ```
 
-`app/harbour_api/main.py`:
+`app/harbour_api/main.py` — start with a **shallow** readiness check. We will improve it in Section 3.4 once Postgres is running:
 
 ```python
 import os
@@ -160,7 +192,12 @@ DATABASE_HOST = os.getenv("DATABASE_HOST", "")
 DATABASE_PORT = int(os.getenv("DATABASE_PORT", "5432"))
 
 
-def database_reachable() -> bool:
+def database_tcp_reachable() -> bool:
+    """Shallow check: TCP connect only.
+
+    This proves a listener accepts connections — not that credentials work
+    or that a query can run. Section 3.4 replaces this with an authenticated query.
+    """
     if not DATABASE_HOST:
         return True
     try:
@@ -185,10 +222,18 @@ def health():
 
 @app.get("/ready")
 def ready(response: Response):
-    if not database_reachable():
+    if not database_tcp_reachable():
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {"status": "not_ready", "database": "unreachable"}
-    return {"status": "ready", "database": "ok" if DATABASE_HOST else "unconfigured"}
+        return {
+            "status": "not_ready",
+            "database": "unreachable",
+            "check": "tcp",
+        }
+    return {
+        "status": "ready",
+        "database": "tcp_ok" if DATABASE_HOST else "unconfigured",
+        "check": "tcp",
+    }
 
 
 @app.get("/v1/info")
@@ -199,6 +244,8 @@ def info():
         "commit": os.getenv("HARBOUR_COMMIT", "unknown"),
     }
 ```
+
+> **Limitation (read this):** A successful TCP connect to port 5432 can happen while auth is wrong, the database name is wrong, or the server is still rejecting queries. Treat this as a teaching scaffold, not a production-ready readiness probe.
 
 `app/requirements.txt` (pin exact versions; regenerate with your tool of choice later):
 
@@ -240,13 +287,44 @@ kill %1 2>/dev/null || true
 deactivate
 ```
 
-Commit the application source (still no Dockerfile):
+### 3.2.2 Ignore local virtualenvs before you stage `app/`
+
+`app/.venv/` is a **local install**, not source. It is large, machine-specific and must not enter Git. D01’s `.gitignore` should already list `.venv/` (and `venv/`). If you created the repo before that rule existed, add it now at the repository root:
+
+```gitignore
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+```
+
+**Worked example — prove the ignore before `git add`:**
 
 ```bash
 cd "$HARBOUR_ROOT"
-git add app
+# ensure the patterns exist in .gitignore (append if missing)
+grep -qxF '.venv/' .gitignore || printf '\n.venv/\nvenv/\n__pycache__/\n*.pyc\n.pytest_cache/\n' >> .gitignore
+
+git check-ignore -v app/.venv || true
+git check-ignore -v app/.venv/bin/python || true
+git status --short app
+```
+
+**Expected:** `git check-ignore` cites the `.venv/` rule; `git status` does **not** list thousands of files under `app/.venv/`. You should see source files such as `app/harbour_api/main.py` and `app/requirements.txt` as untracked or modified — not the virtualenv tree.
+
+Only then stage and commit application source (still no Dockerfile):
+
+```bash
+cd "$HARBOUR_ROOT"
+git add .gitignore app/harbour_api app/requirements.txt app/README.md
+git status   # confirm .venv is absent
 git commit -m "feat(app): add Harbour API health and readiness endpoints"
 ```
+
+If `.venv` was already tracked from an earlier mistake, stop and remove it from the index (`git rm -r --cached app/.venv`) before continuing — leaving it tracked defeats the ignore rule.
+
+**Practice — reproduce:** Create a fresh throwaway file `app/.venv/should-not-stage.txt`, confirm `git check-ignore -v` matches it, and that `git add app` does not stage it.
 
 ---
 
@@ -363,6 +441,9 @@ services:
     environment:
       DATABASE_HOST: db
       DATABASE_PORT: "5432"
+      DATABASE_USER: ${DATABASE_USER:-harbour}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-harbour-training-only}
+      DATABASE_NAME: ${DATABASE_NAME:-harbour}
       HARBOUR_VERSION: "0.1.0"
       HARBOUR_COMMIT: ${HARBOUR_COMMIT:-unknown}
     ports:
@@ -417,7 +498,10 @@ Create `app/.env.example` (fabricated values only):
 ```text
 HARBOUR_TAG=local
 HARBOUR_COMMIT=replace-with-git-sha
-# Compose reads POSTGRES_* from the compose file for training.
+DATABASE_USER=harbour
+DATABASE_PASSWORD=harbour-training-only
+DATABASE_NAME=harbour
+# Postgres container env is set in compose for training.
 # Real secrets belong in a secret manager — never commit .env with production values.
 ```
 
@@ -433,7 +517,131 @@ docker compose ps
 docker compose logs api --tail 50
 ```
 
-### 3.4.2 DNS, localhost and segmentation
+### 3.4.2 Improve readiness: TCP is not enough
+
+With the stack up, `/ready` still uses the **TCP-only** check from Section 3.2. Demonstrate the limitation, then fix it.
+
+**Worked example — TCP can look “ready” while auth is wrong**
+
+Temporarily break the password Postgres expects is hard without rebuilding the DB; easier: point the API at a host that accepts TCP but is not your database protocol — or show the complementary failure. Cleaner teaching path: replace the check with an authenticated `SELECT 1`, then break credentials on purpose.
+
+1. Add a real driver to `app/requirements.txt`:
+
+```text
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+psycopg[binary]==3.2.4
+```
+
+2. Replace the readiness helpers in `app/harbour_api/main.py` with:
+
+```python
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Response, status
+
+SERVICE_NAME = "harbour-api"
+SERVICE_VERSION = os.getenv("HARBOUR_VERSION", "0.1.0")
+DATABASE_HOST = os.getenv("DATABASE_HOST", "")
+DATABASE_PORT = int(os.getenv("DATABASE_PORT", "5432"))
+DATABASE_USER = os.getenv("DATABASE_USER", "")
+DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD", "")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "")
+
+
+def database_query_ok() -> tuple[bool, str]:
+    """Authenticated readiness: open a connection and run SELECT 1."""
+    if not DATABASE_HOST:
+        return True, "unconfigured"
+    try:
+        import psycopg
+    except ImportError:
+        return False, "psycopg_missing"
+
+    conninfo = (
+        f"host={DATABASE_HOST} port={DATABASE_PORT} "
+        f"user={DATABASE_USER} password={DATABASE_PASSWORD} "
+        f"dbname={DATABASE_NAME} connect_timeout=2"
+    )
+    try:
+        with psycopg.connect(conninfo) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        return True, "query_ok"
+    except Exception as exc:  # noqa: BLE001 — surface reason in readiness body for training
+        return False, f"query_failed:{type(exc).__name__}"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+
+app = FastAPI(title=SERVICE_NAME, lifespan=lifespan)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": SERVICE_NAME}
+
+
+@app.get("/ready")
+def ready(response: Response):
+    ok, detail = database_query_ok()
+    if not ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "not_ready", "database": detail, "check": "query"}
+    return {"status": "ready", "database": detail, "check": "query"}
+
+
+@app.get("/v1/info")
+def info():
+    return {
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "commit": os.getenv("HARBOUR_COMMIT", "unknown"),
+    }
+```
+
+3. Rebuild and confirm query-based readiness:
+
+```bash
+cd "$HARBOUR_ROOT/app"
+export HARBOUR_COMMIT="$(git rev-parse HEAD)"
+docker compose up --build -d
+curl -s http://127.0.0.1:8000/ready
+# expect: "check":"query" and "database":"query_ok"
+```
+
+4. **Demonstrate the improvement** — wrong password should fail readiness even if TCP to `db:5432` would still succeed:
+
+```bash
+# Override password for one recreate (Compose merge); then restore
+DATABASE_PASSWORD=wrong-training-password docker compose up -d --no-deps --force-recreate api
+curl -s http://127.0.0.1:8000/ready
+# expect HTTP 503 and query_failed:…
+
+# restore
+docker compose up -d --no-deps --force-recreate api
+curl -s http://127.0.0.1:8000/ready
+```
+
+Commit the improved readiness when it works:
+
+```bash
+cd "$HARBOUR_ROOT"
+git add app/requirements.txt app/harbour_api/main.py app/docker-compose.yml
+git status
+git commit -m "fix(app): authenticate readiness with SELECT 1"
+```
+
+**Practice — reproduce:** Stop Postgres (`docker compose stop db`), show `/health` still OK and `/ready` 503; start DB again and show `/ready` recovers.
+
+**Challenge:** Add a deliberate migration/schema check (e.g. `SELECT` from an application table that does not exist yet) and decide whether readiness should fail closed until migrations run — record the decision in an ADR note.
+
+### 3.4.3 DNS, localhost and segmentation
 
 On the Compose network, service name `db` resolves to the database container. Inside the API container, `127.0.0.1` is **the API container itself**, not your laptop and not Postgres.
 
@@ -444,7 +652,7 @@ On the Compose network, service name `db` resolves to the database container. In
 
 `depends_on` with `condition: service_healthy` waits for Postgres readiness. Clients should still retry — readiness is not a distributed lock.
 
-### 3.4.3 Volumes versus bind mounts
+### 3.4.4 Volumes versus bind mounts
 
 | Mechanism | Typical use | Survives container delete? |
 | --- | --- | --- |
@@ -475,46 +683,92 @@ docker compose down
 
 **Practice 3:** Remove the database host port if you added one while debugging. Prove the API can still reach `db` and that the host cannot connect to Postgres without `docker compose exec`.
 
-**Verify:** `/ready` returns ready when DB is healthy and 503 when DB is stopped; DB has no published host port.
+**Verify:** `/ready` uses `check=query`, returns ready when Postgres accepts `SELECT 1`, returns 503 when DB is stopped **or** credentials are wrong; DB has no published host port.
 
-**Reflect:** Which failure modes should a platform’s default Compose/Helm templates already handle for application teams?
+**Reflect:** Which failure modes should a platform’s default Compose/Helm templates already handle for application teams? When is TCP-only readiness an acceptable temporary scaffold, and when is it a production incident waiting to happen?
 
 ---
 
 ## Section 3.5 — Supply chain: SBOM, scan, digest, trust
 
-### 3.5.1 Tags lie; digests identify
+### 3.5.1 Tags lie; two different “IDs” matter
+
+Keep these separate:
+
+| Identifier | What it is | When you have it |
+| --- | --- | --- |
+| **Local image ID** | Content-addressed config/layers ID on *this* engine (`sha256:…` from `docker image inspect … {{.Id}}`) | Immediately after `docker build` |
+| **Tag** | Mutable name (`harbour-api:local`, `:0.1.0`, `:latest`) | Whenever you name an image |
+| **Registry manifest digest** | Digest of the image *as stored in a registry* (`repo@sha256:…`) | After **push** (or pull); often empty in `RepoDigests` for a never-pushed local tag |
+
+A freshly built `harbour-api:local` commonly has **no** `RepoDigests` entry. Reading `{{index .RepoDigests 0}}` first is the wrong starting point.
+
+### 3.5.2 Worked example — local ID, then publish, then registry digest
+
+**Step A — build and record the local image ID + source commit**
 
 ```bash
 cd "$HARBOUR_ROOT/app"
-DIGEST="$(docker image inspect harbour-api:local --format '{{index .RepoDigests 0}}')"
-# Local tags may lack RepoDigests until pushed. Prefer:
+COMMIT="$(git rev-parse HEAD)"
+docker build --build-arg HARBOUR_COMMIT="$COMMIT" -t harbour-api:local .
+
 IMAGE_ID="$(docker image inspect harbour-api:local --format '{{.Id}}')"
-echo "Image ID: $IMAGE_ID"
-docker build -t harbour-api:local --build-arg HARBOUR_COMMIT="$(git rev-parse HEAD)" .
-# After push to a registry:
-# docker push your-registry.example/harbour-api:0.1.0
-# docker buildx imagetools inspect your-registry.example/harbour-api:0.1.0
+REPO_DIGESTS="$(docker image inspect harbour-api:local --format '{{json .RepoDigests}}')"
+
+echo "commit=$COMMIT"
+echo "local_image_id=$IMAGE_ID"
+echo "repo_digests_before_push=$REPO_DIGESTS"
 ```
 
-Record in `docs/decisions/` or release notes:
+**Expected:** `local_image_id` is a non-empty `sha256:…`. `repo_digests_before_push` is often `[]`. That is normal — you have not published a registry manifest yet.
 
-- Source commit SHA
-- Image ID / registry digest
-- Scanner results summary
-- Who is allowed to publish
-
-Mutable tags (`:latest`, `:local`) are convenient locally and dangerous as deployment pins. Later modules (D04, D06) must promote **digests**.
-
-### 3.5.2 SBOM and vulnerabilities
-
-Install scanners as CLI tools on the host (versions change — follow current project docs):
+**Step B — run a local registry and publish the same artifact**
 
 ```bash
-# Examples — pick tools available to you:
+docker rm -f harbour-registry 2>/dev/null || true
+docker run -d --name harbour-registry -p 5000:5000 registry:2
+
+docker tag harbour-api:local localhost:5000/harbour-api:0.1.0
+docker push localhost:5000/harbour-api:0.1.0
+```
+
+**Step C — inspect the registry digest of what you pushed**
+
+```bash
+docker buildx imagetools inspect localhost:5000/harbour-api:0.1.0
+
+# Or, after push, local inspect often gains a RepoDigests entry:
+docker image inspect localhost:5000/harbour-api:0.1.0 --format '{{json .RepoDigests}}'
+```
+
+Copy the **manifest digest** from `imagetools` (a line like `Digest: sha256:…` or `localhost:5000/harbour-api@sha256:…`). That registry digest — not the floating tag `:0.1.0` — is what later promotion (D04/D06) should pin.
+
+**Step D — evidence record**
+
+In `docs/decisions/` or your Progress Log, store together:
+
+- Source commit SHA (`$COMMIT`)
+- Local image ID (from Step A)
+- Registry reference + manifest digest (from Step C)
+- Who may publish
+
+Mutable tags (`:latest`, `:local`, even `:0.1.0`) are convenient labels. **Digests** are what you deploy.
+
+**Practice — reproduce:** Rebuild, push again (optionally as `:0.1.1`), and confirm you can explain whether the local image ID changed and what digest `imagetools` reports for the new tag.
+
+**Challenge:** Pull `localhost:5000/harbour-api@sha256:<the-digest-you-recorded>` into a fresh tag name and prove you got the same digest back — without relying on `:0.1.0`.
+
+### 3.5.3 SBOM and vulnerabilities
+
+Scan the **same** artifact you would deploy. Prefer scanning by digest after push; if you scan `harbour-api:local`, record that local image ID and do not pretend a later rebuild is the same object.
+
+```bash
+# Examples — install tools per current project docs:
 # syft harbour-api:local -o syft-json > /tmp/harbour-sbom.json
-# grype harbour-api:local
+# grype "$IMAGE_ID"
 # trivy image harbour-api:local
+# After push, prefer:
+# grype localhost:5000/harbour-api@sha256:<manifest-digest>
 ```
 
 Interpret findings with judgement:
@@ -524,31 +778,17 @@ Interpret findings with judgement:
 | Is the package present in the **runtime** image? | Build-stage-only CVEs differ from runtime CVEs |
 | Is there a known exploit path for *this* workload? | Version match ≠ reachable RCE |
 | What is the compensating control? | Network policy, non-root, read-only rootfs, WAF — none are magic |
-| What digest was scanned? | Scanning `:local` then deploying another build is theatre |
+| What ID/digest was scanned? | Scanning one build then deploying another is theatre |
 
 **Exercise:** In a disposable branch, add an intentionally old vulnerable package to a throwaway image, show the scanner finding, remove it and record before/after. Do not publish that image.
 
-### 3.5.3 Signatures and what they do not prove
+### 3.5.4 Signatures and what they do not prove
 
 Image signing (e.g. Cosign/Sigstore) can prove **who signed which digest** under a given key/identity model. It does not prove the code is correct, the Dockerfile is safe or the scanner was run. Combine signing with review, CI policy and digest promotion.
 
-### 3.5.4 Publish a non-secret sample
+**Practice 4:** Write `docs/decisions/0003-container-runtime-contract.md` covering non-root execution, secrets, writable paths, signals and registry trust (include how you record commit ↔ local ID ↔ registry digest).
 
-Push to a training registry namespace you control (GHCR, Docker Hub private, or `localhost:5000`):
-
-```bash
-# Local registry example
-docker run -d --name registry -p 5000:5000 registry:2
-docker tag harbour-api:local localhost:5000/harbour-api:0.1.0
-docker push localhost:5000/harbour-api:0.1.0
-docker buildx imagetools inspect localhost:5000/harbour-api:0.1.0
-```
-
-Capture the **registry digest** from inspect output and store it beside the commit SHA in your evidence notes.
-
-**Practice 4:** Write `docs/decisions/0003-container-runtime-contract.md` covering non-root execution, secrets, writable paths, signals and registry trust.
-
-**Verify:** You can point to one digest that was scanned and would be the digest you deploy.
+**Verify:** You can point to one **registry digest** that was inspected (and ideally scanned) and would be the digest you deploy, plus the commit that produced it.
 
 **Reflect:** Where should a platform enforce “no mutable tags in production” — developer docs, CI, admission policy, or all three?
 
@@ -656,13 +896,15 @@ Align with [D03 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D03%20Dock
 - Can a stranger build and run from docs alone?
 - Is the running identity non-root by default?
 - Can you name the digest you would deploy and the commit that built it?
-- Does `/ready` fail when Postgres is down?
+- Does `/ready` fail when Postgres is down **and** when credentials are wrong (query check, not TCP-only)?
+- Did you ignore `.venv/` and verify it before `git add`?
+- Can you show a registry **manifest digest** (not only a local image ID or tag)?
 - Did you test at least two failure drills with recorded evidence?
 - Are secrets absent from image layers and git history?
 
 ### Example assessment conclusion (evidence still required)
 
-> Harbour API ships as a multi-stage non-root image. Compose attaches the API to an internal bridge network with Postgres; the database is not published to the host. Readiness fails when Postgres is stopped. Image `localhost:5000/harbour-api@sha256:…` traces to commit `abc123`. Syft/Grype results for that digest are filed with two accepted risks and one patched dependency. A colleague brought the stack up from the README without pair programming.
+> Harbour API ships as a multi-stage non-root image. Compose attaches the API to an internal bridge network with Postgres; the database is not published to the host. Readiness uses an authenticated `SELECT 1` and fails when Postgres is stopped or credentials are wrong. Image `localhost:5000/harbour-api@sha256:…` traces to commit `abc123` (local image ID recorded before push). Syft/Grype results for that digest are filed with two accepted risks and one patched dependency. `.venv/` is ignored. A colleague brought the stack up from the README without pair programming.
 
 ---
 
@@ -675,7 +917,8 @@ Align with [D03 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D03%20Dock
 | Debug “connection refused” | Who is localhost? DNS name? Published ports? | Opening every port to the host |
 | Keep data | Named volumes + backup story | Assuming the writable layer persists |
 | Trust what you deploy | Digest + commit + scan of *that* digest | Deploying `:latest` because it worked locally |
-| Prove readiness | Separate `/health` vs `/ready` | Treating process up as dependency up |
+| Prove readiness | Separate `/health` vs `/ready`; prefer authenticated query | Treating TCP connect or process-up as “ready” |
+| Force an OOM for learning | Retain allocations under `--memory`; inspect without `--rm` | `dd` to `/dev/null` (does not grow RSS) |
 
 ## Glossary
 

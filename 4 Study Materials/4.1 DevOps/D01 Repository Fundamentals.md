@@ -183,6 +183,11 @@ Create a root ignore file:
 node_modules/
 dist/
 coverage/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Terraform local and state files
 .terraform/
@@ -219,7 +224,7 @@ Use a fabricated token string to demonstrate a preventative scanner. Choose an a
 
 **Verify:** `git ls-files` does not list `.env` or state files. `git check-ignore -v` explains which ignore rule matches. Explain why this is not evidence that secrets have never been committed historically.
 
-**Reflect:** Why should a dependency lockfile normally be committed while a local dependency installation directory is ignored?
+**Reflect:** Why should a dependency lockfile (or pinned `requirements.txt`) normally be committed while a local dependency installation directory such as `node_modules/` or `.venv/` is ignored?
 
 ---
 
