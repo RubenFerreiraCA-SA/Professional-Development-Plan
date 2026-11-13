@@ -2,7 +2,7 @@
 
 > **Status:** Draft scaffold — unapproved.
 
-**Programme period:** Weeks 33–44  
+**Programme period:** Weeks 32–43  
 **Scope:** Applied LLM engineering, agents, evaluations and LLM operations.
 
 ## Discipline objectives
