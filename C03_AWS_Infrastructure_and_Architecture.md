@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 25–32 of 64  
+**Weeks:** 24–31 of 64  
 **Purpose:** Secure, resilient and cost-conscious AWS solution design.
 
 ## Module overview
