@@ -90,10 +90,10 @@ The continuation command applies **only if you chose rebase**. For a merge confl
 
 ## 3. Repository architecture and code ownership
 
-Create or refactor the ongoing capstone repository:
+Create or refactor the ongoing Final Project repository:
 
 ```text
-capstone/
+final-project/
 ├── app/                   # Application code and tests
 ├── infra/                 # Infrastructure as code
 ├── deploy/                # Deployment and GitOps configuration

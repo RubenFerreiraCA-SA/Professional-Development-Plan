@@ -151,7 +151,7 @@ Completing these materials does **not** award a certification, and certification
 
 - Deploy managed container hosting infrastructure (such as ECS, GKE, or EKS).
 
-> **Hands-on lab:** Deploy a complete private cloud network and managed container cluster ready to host the capstone application.
+> **Hands-on lab:** Deploy a complete private cloud network and managed container cluster ready to host the Final Project application.
 
 ## D05: GitOps, Automation & Operations (24–30 hours | 20%)
 
@@ -165,7 +165,7 @@ Completing these materials does **not** award a certification, and certification
 
 - Deploy and configure a GitOps operator (such as ArgoCD or Flux).
 
-> **Hands-on lab:** Install a GitOps operator on the cloud cluster and sync the capstone application live from the /deploy directory of the repository.
+> **Hands-on lab:** Install a GitOps operator on the cloud cluster and sync the Final Project application live from the /deploy directory of the repository.
 
 ### Lesson 12 (8–10 hours): Release Strategies & Rollbacks
 
