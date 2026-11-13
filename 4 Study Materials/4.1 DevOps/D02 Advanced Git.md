@@ -814,4 +814,4 @@ The conclusion alone is **not** proof; it must be backed by the working reposito
 - [GitHub — Branch protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 - [GitLab — Protected branches](https://docs.gitlab.com/user/project/repository/branches/protected/)
 
-**Previous chapter:** [Chapter 1 — Repository Fundamentals](D01%20Repository%20Fundamentals.md) · **Course detail:** [D02 — Advanced Git](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md) · **Next chapter:** Chapter 3 — Docker and Containerization (not yet authored)
+**Previous chapter:** [Chapter 1 — Repository Fundamentals](D01%20Repository%20Fundamentals.md) · **Course detail:** [D02 — Advanced Git](../../3%20Course%20Detail/3.1%20DevOps/D02%20Advanced%20Git.md) · **Next chapter:** [Chapter 3 — Docker and Containerization](D03%20Docker%20and%20Containerization.md)

@@ -12,7 +12,7 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 | --- | --- | --- |
 | 1 · D01 | Repository Fundamentals | [Read Chapter 1](D01%20Repository%20Fundamentals.md) |
 | 2 · D02 | Advanced Git | [Read Chapter 2](D02%20Advanced%20Git.md) |
-| 3 · D03 | Docker and Containerization | Not yet authored |
+| 3 · D03 | Docker and Containerization | [Read Chapter 3](D03%20Docker%20and%20Containerization.md) |
 | 4 · D04 | CI/CD and Build Automation | Not yet authored |
 | 5 · D05 | Infrastructure as Code and Terraform | Not yet authored |
 | 6 · D06 | GitOps, Automation and Operations | Not yet authored |
@@ -23,4 +23,4 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 
 Start with Chapter 1 and continue in order. Chapters introduce a subject from its own fundamentals and build towards challenging engineering decisions, progressively harder exercises and a **Practical Assessment**. Work on the same Final Project wherever practical; use disposable repositories for destructive experiments.
 
-Chapters 3–8 will be added as their textbook material is developed. The chapter numbers are fixed even when a file has not yet been written. Study-hour estimates belong to the course detail and should not dictate the depth of the teaching.
+Chapters 4–8 will be added as their textbook material is developed. The chapter numbers are fixed even when a file has not yet been written. Study-hour estimates belong to the course detail and should not dictate the depth of the teaching.

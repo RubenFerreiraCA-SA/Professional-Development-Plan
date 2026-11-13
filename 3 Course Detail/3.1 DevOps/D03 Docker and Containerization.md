@@ -133,4 +133,6 @@ Create a Compose-based development environment consisting of an API, a database 
 - [OCI image specification](https://github.com/opencontainers/image-spec)
 - [SLSA supply-chain framework](https://slsa.dev/)
 
+**Textbook:** [Chapter 3 — Docker and Containerization](../../4%20Study%20Materials/4.1%20DevOps/D03%20Docker%20and%20Containerization.md)
+
 **Previous:** [D02 — Advanced Git](D02%20Advanced%20Git.md) · **Next:** [D04 — CI/CD and Build Automation](D04%20CICD%20and%20Build%20Automation.md)
