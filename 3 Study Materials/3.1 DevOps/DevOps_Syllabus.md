@@ -4,7 +4,7 @@
 
 ## Modules and estimated study time
 
-This approximately 120–150-hour curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous capstone project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
+This approximately 120–150-hour curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous Final Project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
 
 | Code | Module | Estimated hours | Weight | Core milestone |
 | --- | --- | ---: | --- | --- |
@@ -15,9 +15,9 @@ This approximately 120–150-hour curriculum follows the end-to-end DevOps lifec
 | D05 | [GitOps, Automation & Operations](D05_GitOps_Automation_and_Operations.md) | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
 | D06 | [Datadog & Observability](D06_Datadog_and_Observability.md) | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
 
-## Continuous practical project
+## Contribution to the Final Project
 
-The modules develop one reusable application delivery example across Git, Docker, CI/CD, Terraform, GitOps and Datadog. Each lesson includes a hands-on lab that builds on earlier work. The [module companion pages](D01_Git_and_Repository_Foundations.md) can be used to collect links to completed work; the lesson objectives and labs below remain the source of truth.
+The modules contribute to the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) through one reusable application delivery example across Git, Docker, CI/CD, Terraform, GitOps and Datadog. Each lesson includes a hands-on lab that builds on earlier work. The [module companion pages](D01_Git_and_Repository_Foundations.md) can be used to collect links to completed work; the lesson objectives and labs below remain the source of truth.
 
 ## Certifications
 
@@ -37,7 +37,7 @@ Completing these materials does **not** award a certification, and certification
 
 - Practice feature branching, clean commit conventions, and pull request code reviews.
 
-> **Hands-on lab:** Create the master capstone repository on GitHub or GitLab, configure branch protection on main, add a project README.md and .gitignore covering .env, Docker, and Terraform files, and merge a sample feature branch via pull request.
+> **Hands-on lab:** Create the Final Project repository on GitHub or GitLab, configure branch protection on main, add a project README.md and .gitignore covering .env, Docker, and Terraform files, and merge a sample feature branch via pull request.
 
 ## D02: Docker & Containerization (24–30 hours | 20%)
 

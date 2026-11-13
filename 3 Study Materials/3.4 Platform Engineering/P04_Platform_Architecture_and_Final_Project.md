@@ -1,9 +1,9 @@
-# P04 — Platform Architecture and Capstone
+# P04 — Platform Architecture and Final Project
 
 > **Status:** Draft module scaffold — not yet signed off.
 
 **Estimated study time:** 40–50 hours  
-**Purpose:** Integration, platform product goals, technical defence and capstone.
+**Purpose:** Integration, platform product goals, technical defence and the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md).
 
 ## Module overview
 
@@ -29,7 +29,7 @@ _TODO: Write measurable outcomes._
 
 These **five practical activities** represent approximately **40–50 study hours**, dedicated to platform engineering, implementation and demonstration.
 
-## Practical labs and deliverables
+## Practical Assessments and deliverables
 
 _TODO: Specify reproducible exercises, outputs and evidence._
 

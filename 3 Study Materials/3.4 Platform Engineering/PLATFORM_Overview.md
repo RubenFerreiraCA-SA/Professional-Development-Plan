@@ -16,13 +16,13 @@ _TODO: Define measurable objectives._
 | P01 | [Kubernetes and Cloud-Native Fundamentals](P01_Kubernetes_and_Cloud_Native_Fundamentals.md) | 48–60 |
 | P02 | [Kubernetes Administration and Operations](P02_Kubernetes_Administration_and_Operations.md) | 48–60 |
 | P03 | [Internal Developer Platforms and DevEx](P03_Internal_Developer_Platforms_and_DevEx.md) | 32–40 |
-| P04 | [Platform Architecture and Capstone](P04_Platform_Architecture_and_Capstone.md) | 40–50 |
+| P04 | [Platform Architecture and Final Project](P04_Platform_Architecture_and_Final_Project.md) | 40–50 |
 
-**All 168–210 estimated hours are instructional.** The final 40–50 hours focus on practical platform engineering and capstone delivery.
+**All 168–210 estimated hours are instructional.** The final 40–50 hours focus on practical platform engineering and Final Project delivery.
 
 ## Practical outcomes
 
-_TODO: Identify practical evidence and cumulative capstone contribution._
+_TODO: Identify practical evidence and cumulative Final Project contribution._
 
 ## Completion criteria
 

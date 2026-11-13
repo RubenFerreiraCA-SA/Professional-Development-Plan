@@ -7,7 +7,7 @@
 
 **Design, secure and operate a repository workflow suitable for a production engineering team.** Go beyond basic commands to understand Git's object model, maintain a trustworthy history, recover from failures and enforce review and release controls without making delivery unnecessarily difficult.
 
-The resulting repository becomes the foundation for the [DevOps capstone](DevOps_Syllabus.md). This module deepens the D01 syllabus objectives; it does not replace them.
+The resulting repository becomes the foundation for the [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md). This module deepens the D01 syllabus objectives; it does not replace them.
 
 ## Outcomes
 
@@ -146,7 +146,7 @@ Treat the repository as a **security boundary**, not merely a storage location.
 
 Review SSH keys, scoped tokens and signed commits/tags as options rather than mandatory setup steps. A valid signature proves possession of a key, not that the change is safe. Understand how compromised credentials, unsafe workflow triggers and excessive CI token permissions can undermine an otherwise protected repository.
 
-## 5. Integrated senior-level capstone scenario
+## 5. Practical Assessment — integrated scenario
 
 **Situation:** Two developers make conflicting changes while an infrastructure change needs additional review. A bad commit is then merged to the test branch, and an accidentally discarded local commit must be recovered.
 

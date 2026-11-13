@@ -9,6 +9,7 @@ Follow the learning pathway, complete hands-on labs and build an Internal Develo
 - [Programme Overview](1%20Foundational%20Documents/1.1%20Programme%20Overview.md) — what the programme aims to achieve
 - [Course Outline](1%20Foundational%20Documents/1.2%20Course%20Outline.md) — modules and estimated study hours
 - [How To Guide](1%20Foundational%20Documents/1.3%20How%20To%20Guide.md) — how to personalise and follow it
+- [Final Project](1%20Foundational%20Documents/1.4%20Final%20Project.md) — practical application of the learning
 
 ## Repository
 

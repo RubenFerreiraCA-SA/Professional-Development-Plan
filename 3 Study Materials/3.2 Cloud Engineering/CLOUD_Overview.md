@@ -15,7 +15,7 @@ _TODO: Link the module specifications and certification objectives._
 
 ## Practical outcomes
 
-_TODO: Identify practical evidence and cumulative capstone contribution._
+_TODO: Identify practical evidence and cumulative Final Project contribution._
 
 ## Completion criteria
 
