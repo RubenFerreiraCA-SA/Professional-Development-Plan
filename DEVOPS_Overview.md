@@ -30,7 +30,7 @@ The syllabus develops one organisation-neutral application delivery demonstratio
 
 ## Individual PDP schedule — Datadog Fundamentals
 
-**Datadog Fundamentals certification is required for an individual DVT PDP by 31 March 2027.** The detailed Datadog teaching module remains in Weeks 14–15 as authored. Certification preparation and exam booking may need to run in parallel earlier to protect the deadline; this would be an individual scheduling overlay, not a change to the course syllabus. See [PDP plan](Programme-Documents/02_Datadog_PDP_Plan.md).
+**Datadog Fundamentals certification is required for an individual DVT PDP by 31 March 2027.** The detailed Datadog teaching module remains in Weeks 14–15 as authored. Certification preparation and exam booking may need to run in parallel earlier to protect the deadline; this would be an individual scheduling overlay, not a change to the course syllabus. See [PDP plan](Programme-Documents/03_Certifications_and_PDP.md).
 
 ## Notes for DVT review
 

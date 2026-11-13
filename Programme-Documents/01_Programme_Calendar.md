@@ -1,29 +1,22 @@
-# Programme Structure and Calendar
+# Programme Calendar
 
-> **Status:** Owner-provided schedule applied to the 64-week curriculum; DVT approval pending. The [author's 15-week DevOps syllabus](../DevOps_15_Week_Syllabus.md) is the source of truth for Weeks 1–15.
+**Authoritative schedule:** 64 instructional weeks. Dates are the owner's supplied plan; no formal approval is implied.
 
-## Calendar principles
+| Discipline | Weeks | Duration | Dates |
+| --- | --- | ---: | --- |
+| [DevOps](../DEVOPS_Overview.md) | 1–15 | 15 | 23 Nov 2026 – 28 Mar 2027 |
+| [Cloud](../CLOUD_Overview.md) | 16–31 | 16 | 29 Mar – 18 Jul 2027 |
+| [AI](../AI_Overview.md) | 32–43 | 12 | 19 Jul – 10 Oct 2027 |
+| [Platform](../PLATFORM_Overview.md) | 44–64 | 21 | 11 Oct 2027 – 26 Mar 2028 |
+| **Total** | **1–64** | **64** | |
 
-- **Week 0:** 16–22 November 2026 — PDP planning and programme setup (outside the 64 instructional weeks).
-- **Week 1:** 23–29 November 2026.
-- **Scheduled leave:** 14 December 2026 – 3 January 2027, and 13 December 2027 – 2 January 2028. These weeks do not consume instructional week numbers.
-- **Week 64:** 20–26 March 2028.
-- **All 64 numbered weeks have instructional or supervised-independent practical content.** No assessment-only, review-only or sign-off week is included.
-- Formal reviews, any retake contingency and DVT sign-off are **budgeted separately** and do not reduce the instructional material.
+**Not counted as teaching weeks:** Week 0 (16–22 Nov 2026); leave (14 Dec 2026–3 Jan 2027; 13 Dec 2027–2 Jan 2028); formal reviews and sign-off.
 
-## Four disciplines
+The [original DevOps syllabus](../DevOps_15_Week_Syllabus.md) controls Weeks 1–15. Weeks 16–64 reflect proposed module allocations; specifications remain draft.
 
-| Discipline | Week numbers | Duration | Calendar start | Calendar end |
-| --- | --- | ---: | --- | --- |
-| [DevOps Engineering](../DEVOPS_Overview.md) | 1–15 | 15 weeks | 23-Nov-2026 | 28-Mar-2027 |
-| [Cloud Engineering](../CLOUD_Overview.md) | 16–31 | 16 weeks | 29-Mar-2027 | 18-Jul-2027 |
-| [AI Engineering](../AI_Overview.md) | 32–43 | 12 weeks | 19-Jul-2027 | 10-Oct-2027 |
-| [Platform Engineering](../PLATFORM_Overview.md) | 44–64 | 21 weeks | 11-Oct-2027 | 26-Mar-2028 |
-| **Total** | **1–64** | **64 weeks** | **23-Nov-2026** | **26-Mar-2028** |
+## Weekly plan
 
-## Detailed weekly learning calendar
-
-| Week | Start | End | Discipline | Module / instructional focus |
+| Week | Start | End | Discipline | Focus |
 | ---: | --- | --- | --- | --- |
 | 1 | 23-Nov-2026 | 29-Nov-2026 | DevOps | D01 Git foundations |
 | 2 | 30-Nov-2026 | 06-Dec-2026 | DevOps | D02 Docker & containers |
@@ -90,14 +83,4 @@
 | 63 | 13-Mar-2028 | 19-Mar-2028 | Platform | P04 Resilience and user testing |
 | 64 | 20-Mar-2028 | 26-Mar-2028 | Platform | P04 Final implementation and technical documentation |
 
-## Personal DVT PDP: Datadog Fundamentals
-
-The individual **Datadog Fundamentals certification** has a firm deadline of **31 March 2027**. D06 instruction occurs in Weeks 14–15 (15-Mar-2027 – 28-Mar-2027), leaving little time before the KPI deadline. The owner may study exam objectives and book the exam in parallel with the 15-week course. This does **not** alter the author-designed weekly syllabus.
-
-## Week 0 and external review budget
-
-Week 0 may include planning, baseline self-assessment, workstation preparation, training enrolment and preliminary DVT alignment. Quarterly competency reviews, sign-off meetings, and certification retakes can be scheduled outside the 64 numbered instructional weeks.
-
-## Notes
-
-All Cloud, AI and Platform module specifications remain drafts until completed. The week boundaries above are the approved planning baseline supplied by the programme owner, not formal DVT approval.
+**Personal KPI timing:** Datadog teaching is Weeks 14–15 (15–28 Mar 2027), while the individual certification deadline is **31 Mar 2027**. Parallel preparation and early booking should address the narrow gap. See [Certifications & PDP](03_Certifications_and_PDP.md).

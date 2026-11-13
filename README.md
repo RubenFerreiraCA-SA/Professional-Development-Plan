@@ -6,20 +6,19 @@ The goal is practical competence: learn the tools, complete real engineering lab
 
 **Timeline:** 23 November 2026 – 26 March 2028 · **Commitment:** 8–10 hours/week · **Status:** Draft for DVT review.
 
-[Programme Foundation](Programme-Documents/00_Programme_Foundation.md) · [64-Week Calendar](Programme-Documents/05_Programme_Structure_and_Calendar.md)
+[Programme Foundation](Programme-Documents/00_Programme_Foundation.md) · [64-Week Calendar](Programme-Documents/01_Programme_Calendar.md)
 
 ## Programme documents
 
-- [Programme foundation](Programme-Documents/00_Programme_Foundation.md)
-- [Learning outcomes](Programme-Documents/04_Programme_Learning_Outcomes.md)
-- [Programme structure and calendar](Programme-Documents/05_Programme_Structure_and_Calendar.md)
-- [Certification roadmap](Programme-Documents/06_Certification_Roadmap.md)
-- [Assessment framework](Programme-Documents/07_Assessment_Framework.md)
-- [Generic internal developer platform capstone](Programme-Documents/08_Capstone_Project.md)
-- [DVT review and sign-off](Programme-Documents/09_DVT_Review_and_Signoff.md)
-- [Learning resources](Programme-Documents/10_Learning_Resources.md)
-- [Progress and study log](Programme-Documents/11_Progress_and_Study_Log.md)
-- [Glossary](Programme-Documents/12_Glossary.md)
+| Document | Purpose |
+| --- | --- |
+| [00 Foundation](Programme-Documents/00_Programme_Foundation.md) | Scope, purpose and programme policy |
+| [01 Calendar](Programme-Documents/01_Programme_Calendar.md) | Exact 64-week schedule |
+| [02 Learning & Assessment](Programme-Documents/02_Learning_and_Assessment.md) | Learning outcomes, evidence standards and resources |
+| [03 Certifications & PDP](Programme-Documents/03_Certifications_and_PDP.md) | Certification targets, personal Datadog KPI and exam register |
+| [04 Practical Project](Programme-Documents/04_Practical_Project.md) | Integrated Internal Developer Platform capstone |
+| [05 Study & Evidence Log](Programme-Documents/05_Study_and_Evidence_Log.md) | Weekly progress and practical artefacts |
+| [06 DVT Review & Sign-off](Programme-Documents/06_DVT_Review_and_Signoff.md) | Stakeholder decisions, reviews and approval |
 
 ## Disciplines and modules
 
@@ -39,17 +38,14 @@ The calendar includes non-instructional Week 0 planning (16–22 November 2026) 
 
 ## Individual DVT PDP milestone
 
-**Datadog Fundamentals certification** is an individual PDP objective with a deadline of **31 March 2027**. It is distinct from the general programme's certification recommendations. See the [Datadog PDP plan](Programme-Documents/02_Datadog_PDP_Plan.md).
+**Datadog Fundamentals certification** is an individual PDP objective with a deadline of **31 March 2027**. It is distinct from the general programme's certification recommendations. See the [Datadog PDP plan](Programme-Documents/03_Certifications_and_PDP.md).
 
-## Existing working documents
+## Authoritative DevOps syllabus
 
-- [Earlier master programme overview](Programme-Documents/01%20Master%20Programme%20Overview.md) — earlier programme snapshot; may not match the current 64-week structure.
-- [Datadog PDP plan](Programme-Documents/02_Datadog_PDP_Plan.md)
-- [Certification and evidence tracker](Programme-Documents/03_Certification_and_Evidence_Tracker.md)
-- **[Authoritative DevOps 15-week syllabus](DevOps_15_Week_Syllabus.md)** — original author-designed sequence of six modules. Weeks 1–15 are preserved unchanged. Formal reviews and sign-off are scheduled outside the 64 instructional weeks.
+The [15-week DevOps Engineering syllabus](DevOps_15_Week_Syllabus.md) remains unchanged and governs D01–D06. The former 48-week plan has been superseded; its history remains available in Git.
 
 ## Repository conventions
 
-- All files are kept **at the repository root** for now; no folders.
+- Programme documents are in **Programme-Documents/**; discipline and module syllabi remain at the repository root.
 - Markdown is the editable source format. Placeholder files are labelled **Draft scaffold** until completed.
 - Personal performance assessments, manager signatures, access credentials and confidential client information should not be committed to this public repository.
