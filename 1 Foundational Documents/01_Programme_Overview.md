@@ -2,9 +2,15 @@
 
 ## Purpose
 
-This framework helps **any software developer create their own Professional Development Plan (PDP)** with a focus on **Platform Engineering and its enabling disciplines**.
+This framework helps **software developers create and execute their own Professional Development Plans (PDPs)**, with a focus on **Platform Engineering and its enabling disciplines**.
 
-It provides a **recommended 64-week learning pathway**, supporting study materials, practical exercises and guidance that developers can adapt to their experience, goals and available time.
+It provides a recommended 64-week learning pathway, study materials, practical exercises and tools that developers can adapt to their experience, goals and available time.
+
+## What is Platform Engineering?
+
+**Platform Engineering is the practice of building and maintaining internal tools and services that make it easier for developers to deliver software.** It brings infrastructure, automation, security and operations together into reliable, reusable, self-service capabilities.
+
+Instead of every development team solving the same deployment and infrastructure problems, a platform provides common solutions—such as automated environments, deployment workflows, service templates and observability.
 
 ## Four connected disciplines
 
