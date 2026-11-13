@@ -15,6 +15,8 @@ Work in order: **Concept → Worked example → Practice → Verify → Reflect*
 
 Examples use **kind** (local Kubernetes), **Flux v2**, and **Kustomize** under `deploy/`. Argo CD follows the same [OpenGitOps](https://opengitops.dev/) principles; §6.10 maps the same layout to Argo if you prefer that controller. This text teaches [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md). The [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) D06 bar is: *desired state in Git is what the isolated cluster reconciles; after deliberate drift or a bad revision, you return to a known-good state with auditable Git history.*
 
+> **Platform transition (read this):** [D05](D05%20Infrastructure%20as%20Code%20and%20Terraform.md) runs Harbour on **AWS ECS/Fargate**. This chapter deliberately switches the **runtime platform** to a **local kind Kubernetes cluster** so you can learn GitOps (controllers, namespaces, probes, HPA) without adding another always-on AWS control plane. You are **not** installing Flux onto the ECS service from D05. Digests and promotion habits still transfer; the compute substrate is different. When you later put GitOps on a real Kubernetes cluster in the cloud, Terraform (D05) still owns the cluster foundations and GitOps owns the workloads — same contract, different place.
+
 > **Safety boundary:** Use an isolated local cluster or a disposable cloud sandbox. Do not point a training GitOps controller at a production cluster or a production Git repo with broad write access. Keep secrets out of Git. Prefer digest-pinned images. Destroy the kind cluster when finished.
 
 ### Learning outcomes
@@ -134,13 +136,50 @@ Pods Running; `flux check` reports success.
 
 On a fresh shell with `kubectl` context `kind-harbour`, re-run `flux check` and `kubectl -n flux-system get kustomizations,gitrepositories`.
 
-### 6.2.4 Challenge — credential blast radius
+### 6.2.4 Worked example — hand off from bootstrap token to read-only Git access
 
-Document what the bootstrap token could have done if it had been `repo` write + org admin. Rotate to a read-focused deploy key for ongoing reconciliation. Note the difference between **bootstrap** (writes Flux config once) and **reconcile** (reads desired state forever).
+**Bootstrap** often needs write access so Flux can commit its install manifests once. **Ongoing reconciliation** should only **read** desired state. Rotating or deleting the personal access token in GitHub **does not** by itself replace the Secret already stored in the cluster — you must configure the controller’s Git credentials, verify sync, **then** revoke the bootstrap credential.
 
-### 6.2.5 Verify
+1. Create a **deploy key** (read-only) on the training repo, or a fine-scoped token with contents/read only. Save the private key locally (not in Git).
 
-You can name the Git path Flux watches for this cluster (`clusters/harbour-local`) and show controllers healthy.
+2. Create / replace the Secret Flux uses for the GitRepository (bootstrap with `--token-auth` typically stores HTTPS credentials in `flux-system` in namespace `flux-system`):
+
+```bash
+# SSH deploy key path (preferred for ongoing pull):
+flux create secret git flux-system \
+  --namespace=flux-system \
+  --url="ssh://git@github.com/${GITHUB_USER}/${GITHUB_REPO}.git" \
+  --private-key-file="${HOME}/.ssh/harbour-flux-ro" \
+  --export > /tmp/flux-git-secret.yaml
+# Inspect locally; apply without committing the private key:
+kubectl apply -f /tmp/flux-git-secret.yaml
+shred -u /tmp/flux-git-secret.yaml 2>/dev/null || rm -f /tmp/flux-git-secret.yaml
+```
+
+If you stay on HTTPS, recreate the Secret with the **read-only** token (`flux create secret git ... --username=git --password=...`) and point the `GitRepository` `secretRef` at it. If you switch URL scheme (HTTPS → SSH), update the `GitRepository` `.spec.url` in Git under `clusters/harbour-local/` and push so the change is auditable.
+
+3. **Verify reconciliation still works** *before* revoking anything:
+
+```bash
+flux reconcile source git flux-system -n flux-system
+flux get sources git -A
+kubectl -n flux-system get secret flux-system -o jsonpath='{.type}{"\n"}'
+# After §6.4 exists, also: flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+```
+
+**Expected:** Source Ready=True with the new credential. If it fails, **do not** revoke the bootstrap token yet — fix auth first.
+
+4. **Only then** revoke the original bootstrap PAT / broad token in the Git host UI. Confirm a forced reconcile still succeeds.
+
+5. Record in the Progress Log: bootstrap credential type, replacement type (deploy key vs RO token), revoke time, and the reconcile command that proved continuity.
+
+### 6.2.5 Challenge — credential blast radius
+
+Document what the bootstrap token could have done if it had been `repo` write + org admin. Contrast that with the read-only deploy key now in use. Note the difference between **bootstrap** (writes Flux config once) and **reconcile** (reads desired state forever).
+
+### 6.2.6 Verify
+
+You can name the Git path Flux watches (`clusters/harbour-local`), show controllers healthy, and show that ongoing Git access is **read-only** after the handoff — with the bootstrap token already revoked.
 
 ---
 
@@ -167,9 +206,10 @@ clusters/
   harbour-local/
     ...                 # flux bootstrap files
     harbour-api-staging.yaml
+    harbour-api-prod.yaml
 ```
 
-Base is **namespace-agnostic**. Overlays set `namespace:` and own the Namespace object.
+Base is **namespace-agnostic**. Overlays set `namespace:` and own the Namespace object. Staging and prod each get their **own** Flux Kustomization (§6.4) so promotion is a real second environment, not a Git-only fiction.
 
 ### 6.3.2 Worked example — base manifests
 
@@ -200,7 +240,7 @@ spec:
               containerPort: 8000
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
@@ -218,6 +258,15 @@ spec:
               cpu: "500m"
               memory: "256Mi"
 ```
+
+**Probe contract (carries forward from D03):**
+
+| Probe | Endpoint | Meaning |
+| --- | --- | --- |
+| Liveness | `GET /health` | Process is up — restart if this fails |
+| Readiness | `GET /ready` | Dependencies usable — remove from Service endpoints if this fails |
+
+On kind **without** `DATABASE_HOST`, Harbour’s `/ready` still returns ready with `database: "unconfigured"` (D03). That is intentional for a DB-free local cluster: readiness means “app accepts traffic; no DB was configured,” **not** “Postgres was verified.” When you attach a database later, keep `/ready` as the readiness probe so a failing dependency stops traffic without restart-looping the process.
 
 `deploy/harbour-api/base/service.yaml`:
 
@@ -271,7 +320,7 @@ images:
   - name: harbour-api
     newName: harbour-api
     newTag: local
-# Registry promotion (D04/D05) — replace images: with digest pin:
+# Registry promotion (D04/D05) — replace images: with digest pin (§6.5.3 pull auth if private):
 # images:
 #   - name: harbour-api
 #     newName: 123456789012.dkr.ecr.eu-west-1.amazonaws.com/harbour-stg-api
@@ -331,6 +380,7 @@ kubectl -n harbour-staging rollout status deploy/harbour-api
 kubectl -n harbour-staging port-forward svc/harbour-api 8080:80 &
 sleep 2
 curl -sS http://127.0.0.1:8080/health
+curl -sS http://127.0.0.1:8080/ready
 ```
 
 Then delete and let Flux own the same path later (`kubectl delete -k ...` after Flux is ready), so you do not dual-own.
@@ -341,18 +391,18 @@ Add a staging-only patch that sets `replicas: 3`. Show `kubectl kustomize` stagi
 
 ### 6.3.7 Verify
 
-Base has probes and resources; overlays only change env-specific image/namespace (and intentional patches). No Secret values in Git.
+Base uses `/ready` for readiness and `/health` for liveness, plus resources; overlays only change env-specific image/namespace (and intentional patches). No Secret values in Git.
 
 ---
 
-## Section 6.4 — Point Flux at Harbour staging
+## Section 6.4 — Point Flux at Harbour staging and prod
 
-### 6.4.1 Worked example — Flux Kustomization
+### 6.4.1 Worked example — Flux Kustomizations (both environments)
 
-Prefer generating objects with the CLI and **committing** the YAML Flux writes (or that you place under `clusters/harbour-local/`), so Git remains the source of truth for controller config too.
+Prefer generating objects with the CLI and **committing** the YAML under `clusters/harbour-local/`, so Git remains the source of truth for controller config too. Create **two** Kustomizations — staging and prod — so promotion later changes a live reconciled environment, not only a Git file.
 
 ```bash
-# Reuse the GitRepository bootstrap created (often named flux-system), or create an app source:
+# Reuse the GitRepository bootstrap created (often named flux-system):
 flux create kustomization harbour-api-staging \
   --namespace=flux-system \
   --source=GitRepository/flux-system \
@@ -363,8 +413,19 @@ flux create kustomization harbour-api-staging \
   --timeout=3m \
   --export > clusters/harbour-local/harbour-api-staging.yaml
 
-git add clusters/harbour-local/harbour-api-staging.yaml
-git commit -m "gitops: reconcile harbour-api staging"
+flux create kustomization harbour-api-prod \
+  --namespace=flux-system \
+  --source=GitRepository/flux-system \
+  --path=./deploy/harbour-api/overlays/prod \
+  --prune=true \
+  --interval=1m \
+  --wait=true \
+  --timeout=3m \
+  --export > clusters/harbour-local/harbour-api-prod.yaml
+
+git add clusters/harbour-local/harbour-api-staging.yaml \
+        clusters/harbour-local/harbour-api-prod.yaml
+git commit -m "gitops: reconcile harbour-api staging and prod"
 git push
 ```
 
@@ -372,9 +433,10 @@ If your bootstrap root already recursively applies `clusters/harbour-local/`, pu
 
 ```bash
 kubectl apply -f clusters/harbour-local/harbour-api-staging.yaml
+kubectl apply -f clusters/harbour-local/harbour-api-prod.yaml
 ```
 
-Example shape (adjust `sourceRef.name` to match bootstrap):
+Example shape for staging (prod is identical except `name` and `path`):
 
 ```yaml
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -393,19 +455,26 @@ spec:
   timeout: 3m
 ```
 
-Reconcile and exercise the Service:
+Reconcile and exercise **both** namespaces:
 
 ```bash
 flux reconcile source git flux-system -n flux-system
 flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+flux reconcile kustomization harbour-api-prod -n flux-system --with-source
 flux get kustomizations -A
 kubectl -n harbour-staging get deploy,pods,svc
+kubectl -n harbour-prod get deploy,pods,svc
 kubectl -n harbour-staging port-forward svc/harbour-api 8080:80 &
 sleep 2
 curl -sS http://127.0.0.1:8080/health
+curl -sS http://127.0.0.1:8080/ready
+# Optional: second forward on 8081 for prod
+kubectl -n harbour-prod port-forward svc/harbour-api 8081:80 &
+sleep 2
+curl -sS http://127.0.0.1:8081/ready
 ```
 
-**Expected:** Kustomization Ready=True; pods Ready; `/health` returns Harbour JSON.
+**Expected:** Both Kustomizations Ready=True; pods Ready in `harbour-staging` and `harbour-prod`; `/health` and `/ready` succeed.
 
 ### 6.4.2 Worked example — read controller signals
 
@@ -427,7 +496,7 @@ With a disposable resource only: set `prune: false`, remove a ConfigMap from Git
 
 ### 6.4.5 Verify
 
-`flux get kustomizations` matches the Git path that actually runs; you did not leave a long-lived `kubectl apply -k` dual path.
+`flux get kustomizations` lists **both** `harbour-api-staging` and `harbour-api-prod` with paths that match Git; you did not leave a long-lived `kubectl apply -k` dual path.
 
 ---
 
@@ -441,53 +510,122 @@ Promotion is a **reviewed change to desired state**, not a new CI deploy job wit
 | --- | --- |
 | D04 release | Publish image `@sha256:…` + evidence |
 | Human / bot PR | Update overlay `images:` to that digest |
-| Flux | Pull and reconcile |
+| Flux | Pull and reconcile **each** env Kustomization |
 | CI with cluster-admin | Not required for promotion |
 
-### 6.5.2 Worked example — digest promotion (registry path)
+### 6.5.2 Image pull paths — local load vs registry
 
-When using ECR/GHCR from D04/D05:
+| Path | How the node gets the bits | Auth needed in-cluster? |
+| --- | --- | --- |
+| `kind load docker-image` + `harbour-api:local` / `:good` | Image already on the kind node | No |
+| Public digest (e.g. disposable public training image) | kubelet pulls anonymously | No |
+| Private ECR / GHCR digest | kubelet pulls with credentials | **Yes** — `imagePullSecrets` (or equivalent node/IRSA pattern on cloud) |
 
-1. Record `CONTAINER_IMAGE=…@sha256:abc…` from release evidence (`image-ref.txt` or job summary).
-2. Update staging overlay `images:` to `newName` + `digest` (not a floating tag).
-3. Open a PR; require review. Example CODEOWNERS:
+Docker CLI login on your laptop does **not** transfer to the kind kubelet. If you pin a private registry digest without pull credentials, expect `ImagePullBackOff`.
+
+**Training default for this chapter:** keep using `kind load` + retags for the promotion drill (§6.5.4), **or** use a public disposable image digest if you want a true pull. Treat private ECR/GHCR as an explicit extension (§6.5.3).
+
+### 6.5.3 Worked example — private registry pull (when you leave kind-load)
+
+Only needed when overlays reference a **private** `newName` + `digest`. Prefer short-lived credentials and document rotation.
+
+```bash
+# Example: GHCR (PAT with read:packages) or ECR password from aws ecr get-login-password
+export REGISTRY_SERVER="ghcr.io"          # or ACCOUNT.dkr.ecr.REGION.amazonaws.com
+export REGISTRY_USER="<username-or-AWS>"
+export REGISTRY_PASSWORD="<short-lived-token>"
+
+for NS in harbour-staging harbour-prod; do
+  kubectl -n "$NS" create secret docker-registry harbour-regcred \
+    --docker-server="${REGISTRY_SERVER}" \
+    --docker-username="${REGISTRY_USER}" \
+    --docker-password="${REGISTRY_PASSWORD}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+done
+# Do not commit the Secret YAML with the password embedded.
+```
+
+Patch the Deployment (base or overlay) so pods use it:
+
+```yaml
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: harbour-regcred
+```
+
+**Rotation:** recreate the Secret when the token expires; force a rollout if pulls start failing. On EKS you would prefer IRSA / node roles over long-lived PATs — note that as the production direction; kind still needs an explicit Secret for private pulls.
+
+**Alternative:** pin a **public** training image digest so pull auth is unnecessary, and keep Harbour digests for when the registry and cluster share a real auth path.
+
+### 6.5.4 Worked example — promote between two reconciled environments (kind-load)
+
+Complete sequence: change staging → verify cluster → promote **same** reference to prod → verify prod cluster.
+
+```bash
+cd "$HARBOUR_ROOT"
+git switch main   # or the branch Flux tracks — confirm: flux get sources git
+docker tag harbour-api:local harbour-api:good
+kind load docker-image harbour-api:good --name harbour
+
+# 1) Staging PR / commit: set images newTag: good (or digest if using a registry)
+git switch -c promote/staging-good
+# edit deploy/harbour-api/overlays/staging/kustomization.yaml images:
+git add deploy/harbour-api/overlays/staging
+git commit -m "deploy(staging): pin harbour-api:good"
+STAGING_SHA="$(git rev-parse HEAD)"
+git push -u origin HEAD
+# Merge via PR (or merge locally on a personal training repo), then:
+git switch main && git pull
+
+flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+kubectl -n harbour-staging rollout status deploy/harbour-api
+STAGING_IMG="$(kubectl -n harbour-staging get pods -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}')"
+echo "staging sha=${STAGING_SHA} image=${STAGING_IMG}"
+
+# 2) Prod PR: same image reference — separate approval
+git switch -c promote/prod-good
+# copy the same images: block into deploy/harbour-api/overlays/prod/kustomization.yaml
+git add deploy/harbour-api/overlays/prod
+git commit -m "deploy(prod): promote harbour-api:good (same artifact as staging)"
+PROD_SHA="$(git rev-parse HEAD)"
+git push -u origin HEAD
+# Merge, then:
+git switch main && git pull
+
+flux reconcile kustomization harbour-api-prod -n flux-system --with-source
+kubectl -n harbour-prod rollout status deploy/harbour-api
+PROD_IMG="$(kubectl -n harbour-prod get pods -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}')"
+echo "prod sha=${PROD_SHA} image=${PROD_IMG}"
+test "$STAGING_IMG" = "$PROD_IMG" && echo "promotion: same running image in both envs"
+```
+
+Example CODEOWNERS for the second PR:
 
 ```text
 # .github/CODEOWNERS
 /deploy/harbour-api/overlays/prod/  @your-user
 ```
 
-4. Merge; Flux reconciles; verify running image:
+**Registry variant:** replace `newTag: good` with `newName` + `digest: sha256:…` from D04 evidence, ensure §6.5.3 pull auth (or a public digest), and compare `imageID` instead of the short image name:
 
 ```bash
 kubectl -n harbour-staging get pods -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'
+kubectl -n harbour-prod get pods -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'
 ```
 
-5. Promote **the same digest** to prod overlay in a second PR (separate approval).
-
-### 6.5.3 Worked example — local kind promotion simulation
-
-Without a registry, simulate good/bad tags:
-
-```bash
-docker tag harbour-api:local harbour-api:good
-kind load docker-image harbour-api:good --name harbour
-# Set staging images newTag: good — commit, push, reconcile
-flux reconcile kustomization harbour-api-staging -n flux-system --with-source
-kubectl -n harbour-staging get pods -o jsonpath='{.items[0].status.containerStatuses[0].image}{"\n"}'
-```
-
-### 6.5.4 Optional — CI updates desired state (still no cluster-admin)
+### 6.5.5 Optional — CI updates desired state (still no cluster-admin)
 
 A release workflow may open a PR that only changes `deploy/**/kustomization.yaml` image fields (or use Flux Image Automation Controllers). That bot needs **contents** permission on the desired-state path — **not** a kubeconfig. Keep required status checks honest about path filters (lesson from D04).
 
-### 6.5.5 Practice — reproduce
+### 6.5.6 Practice — reproduce
 
-Show Git commit SHA that changed the image and the cluster `imageID` side by side in your Progress Log.
+Record staging commit SHA, prod commit SHA, and both namespaces’ `image` / `imageID` in the Progress Log. Confirm `harbour-api-prod` reconciled — not only that the prod overlay file changed.
 
-### 6.5.6 Verify
+### 6.5.7 Verify
 
-Checklist: promotion is a Git change; CI did not need `kubectl apply` to the app namespace.
+Checklist: promotion is a Git change; **both** Flux Kustomizations reconciled; running images match across envs; CI did not need `kubectl apply` to app namespaces; private pulls (if used) had `imagePullSecrets` or an equivalent documented path.
 
 ---
 
@@ -539,18 +677,38 @@ You can explain Ready vs Suspended vs Failed from `flux get` without guessing.
 
 ## Section 6.7 — Broken release and rollback via Git
 
-### 6.7.1 Worked example — ship a broken desired state
+### 6.7.1 Worked example — ship a broken desired state (record the SHA)
 
-Prefer a **training branch or disposable overlay path** if `main` must stay healthy. For a personal training repo:
+Do this on the branch Flux tracks (usually `main`) so reconcile and revert stay aligned. Record the **bad commit SHA** explicitly — do not rely on `HEAD` after merges or branch switches.
 
 ```bash
 cd "$HARBOUR_ROOT"
+FLUX_BRANCH="$(kubectl -n flux-system get gitrepository flux-system \
+  -o jsonpath='{.spec.ref.branch}{"\n"}')"
+FLUX_BRANCH="${FLUX_BRANCH:-main}"
+echo "Flux tracks branch: ${FLUX_BRANCH}"
+
+git fetch origin
+git switch "${FLUX_BRANCH}"
+git pull --ff-only origin "${FLUX_BRANCH}"
+
 git switch -c demo/bad-rollout
 # In staging overlay, set newTag: missing-tag (or a digest that does not exist)
 git add deploy/harbour-api/overlays/staging
 git commit -m "demo: broken harbour image for rollback drill"
-git push -u origin HEAD
-# Merge to the branch Flux tracks, or retarget Flux temporarily for the drill
+BAD_SHA="$(git rev-parse HEAD)"
+echo "BAD_SHA=${BAD_SHA}"   # copy into Progress Log now
+git push -u origin demo/bad-rollout
+```
+
+Merge into the Flux branch with a **merge commit** or fast-forward (either is fine if you keep `BAD_SHA`):
+
+```bash
+git switch "${FLUX_BRANCH}"
+git merge --no-ff demo/bad-rollout -m "Merge demo/bad-rollout for rollback drill"
+MERGE_SHA="$(git rev-parse HEAD)"
+git push origin "${FLUX_BRANCH}"
+echo "MERGE_SHA=${MERGE_SHA} BAD_SHA=${BAD_SHA}"
 ```
 
 ```bash
@@ -560,19 +718,39 @@ kubectl -n harbour-staging get events --sort-by=.lastTimestamp | tail -n 30
 flux get kustomizations harbour-api-staging -n flux-system
 ```
 
+**Expected:** Pods fail to become Ready (ImagePullBackOff / invalid image); Flux may report health wait failures.
+
 **Investigation order:** Flux Kustomization status → ReplicaSet/Pod events → image pull errors → probes → controller logs.
 
-### 6.7.2 Worked example — recover by reverting desired state
+### 6.7.2 Worked example — recover by reverting the recorded bad commit
+
+Stay on the Flux-tracked branch. Revert **`${BAD_SHA}`**, not a guessed `HEAD`.
 
 ```bash
-git revert HEAD --no-edit   # or checkout known-good overlay files
-git push
+git switch "${FLUX_BRANCH}"
+git pull --ff-only origin "${FLUX_BRANCH}"
+
+# Ordinary commit (the demo/bad-rollout tip):
+git revert "${BAD_SHA}" --no-edit
+
+# If instead you must revert a merge commit (MERGE_SHA), Git needs the mainline parent:
+#   git revert -m 1 "${MERGE_SHA}" --no-edit
+# -m 1 means "keep the first parent" (the Flux branch before the merge) and undo the merged side.
+# Prefer reverting BAD_SHA when the bad change is a single ordinary commit — clearer history.
+
+REVERT_SHA="$(git rev-parse HEAD)"
+echo "REVERT_SHA=${REVERT_SHA} undoes BAD_SHA=${BAD_SHA}"
+git push origin "${FLUX_BRANCH}"
+
 flux reconcile kustomization harbour-api-staging -n flux-system --with-source
 kubectl -n harbour-staging rollout status deploy/harbour-api
 curl -sS http://127.0.0.1:8080/health
+curl -sS http://127.0.0.1:8080/ready
 ```
 
-**Expected:** Recovery is a Git commit, not `kubectl delete pod` folklore.
+**Expected:** Known-good image returns; pods Ready; recovery is a Git commit (`REVERT_SHA`), not `kubectl delete pod` folklore.
+
+**Complete sequence evidence (required):** `BAD_SHA` → failing pods/events → `REVERT_SHA` → Ready pods + `/ready` OK.
 
 ### 6.7.3 Data and migrations (hard limit)
 
@@ -590,7 +768,7 @@ For D06 Competent, a healthy rolling update + Git rollback is enough. Advanced: 
 
 ### 6.7.5 Practice — reproduce
 
-Write three investigation bullets you actually used (events, pods, flux). Include the bad commit SHA and the revert SHA.
+Write three investigation bullets you actually used (events, pods, flux). Include `BAD_SHA`, `REVERT_SHA`, and the Flux branch name. Confirm you did **not** run a blind `git revert HEAD` after switching branches.
 
 ### 6.7.6 Challenge
 
@@ -598,7 +776,7 @@ Suspend Flux, “fix” live with kubectl, resume, and watch Git overwrite you. 
 
 ### 6.7.7 Verify
 
-Known-good image is running; Git history shows bad commit + revert; no secret credential was pasted into chat or commits.
+Known-good image is running; Git history shows bad commit + revert of **that** SHA; cluster health matches Git; no secret credential was pasted into chat or commits.
 
 ---
 
@@ -607,8 +785,8 @@ Known-good image is running; Git history shows bad commit + revert; no secret cr
 ### 6.8.1 Worked example — pod kill and client impact
 
 ```bash
-# Terminal A — client loop
-while true; do curl -sf http://127.0.0.1:8080/health || echo FAIL; sleep 0.2; done
+# Terminal A — client loop (Service reachability; /ready matches readiness semantics)
+while true; do curl -sf http://127.0.0.1:8080/ready || echo FAIL; sleep 0.2; done
 
 # Terminal B — kill
 POD="$(kubectl -n harbour-staging get pod -l app=harbour-api -o jsonpath='{.items[0].metadata.name}')"
@@ -618,9 +796,26 @@ kubectl -n harbour-staging get pods -w
 
 Pod replacement ≠ zero downtime. With `replicas: 2` and readiness probes, record whether Terminal A printed `FAIL`. That observation belongs in the assessment evidence.
 
-### 6.8.2 Worked example — HPA (metrics-server required)
+### 6.8.2 Worked example — metrics-server on kind, then HPA
 
-kind often lacks metrics-server. If `kubectl top pods` fails, install metrics-server per current kind docs (typically a components YAML plus a kubelet TLS patch for kind). Only then:
+kind does not ship metrics-server. Install it, patch kubelet TLS for kind, **confirm CPU metrics**, then add the HPA.
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# kind’s kubelet serves a self-signed cert — metrics-server must allow it (training only):
+kubectl -n kube-system patch deployment metrics-server --type='json' -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"}
+]'
+
+kubectl -n kube-system rollout status deploy/metrics-server
+# Wait until metrics API answers (may take ~30–60s):
+kubectl top nodes
+kubectl -n harbour-staging top pods
+```
+
+**Expected:** `kubectl top` shows CPU/memory columns with numbers (not an metrics API error). If `top` still fails, fix metrics-server before claiming autoscaling evidence.
 
 `deploy/harbour-api/overlays/staging/hpa.yaml`:
 
@@ -642,17 +837,27 @@ spec:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 70
+          averageUtilization: 50
 ```
 
-Add `- hpa.yaml` under staging `resources:`. Commit, reconcile, then:
+Add `- hpa.yaml` under staging `resources:`. Commit, reconcile, then generate load and watch utilisation:
 
 ```bash
-kubectl -n harbour-staging get hpa
+flux reconcile kustomization harbour-api-staging -n flux-system --with-source
+kubectl -n harbour-staging get hpa harbour-api
 kubectl -n harbour-staging describe hpa harbour-api
+
+# Load against the port-forward (or ClusterIP via a throwaway pod):
+kubectl -n harbour-staging run loadgen --rm -it --restart=Never --image=busybox:1.36 -- \
+  /bin/sh -c 'while true; do wget -q -O- http://harbour-api/health >/dev/null; done'
+# In another terminal while loadgen runs:
+kubectl -n harbour-staging top pods
+kubectl -n harbour-staging get hpa harbour-api -w
 ```
 
-If metrics stay `<unknown>`, fix metrics-server before claiming the HPA experiment passed — or document the gap and stop at “HPA object exists, metrics not available.”
+**Expected:** HPA `TARGETS` shows a real CPU percentage (not `<unknown>`); under sustained load, `REPLICAS` may rise toward `maxReplicas`. Record before/after replica counts and a `kubectl top pods` sample. If CPU stays near zero, lower the target temporarily or run a tighter loop — do not invent scale events you did not observe.
+
+`--kubelet-insecure-tls` is a **kind training** compromise. Do not carry it into a production cluster hardening story without justification.
 
 ### 6.8.3 Secrets (do not commit plaintext)
 
@@ -763,7 +968,7 @@ If you choose Argo CD instead of Flux, keep the **same** `deploy/harbour-api` tr
 | `flux reconcile` | Sync button / `argocd app sync` |
 | suspend | disable auto-sync |
 
-Install Argo into kind per current upstream getting-started; point one Application at `deploy/harbour-api/overlays/staging`. Assessment evidence is the same: Git desired state, digest promotion, drift, Git rollback, day-two notes.
+Install Argo into kind per current upstream getting-started; point **two** Applications at `deploy/harbour-api/overlays/staging` and `.../prod`. Assessment evidence is the same: Git desired state, digest promotion across both apps, drift, Git rollback of a recorded SHA, day-two notes.
 
 ---
 
@@ -772,7 +977,7 @@ Install Argo into kind per current upstream getting-started; point one Applicati
 | Symptom | Likely cause | First check |
 | --- | --- | --- |
 | Kustomization not Ready | Bad path / YAML / auth | `flux get` message; `kubectl kustomize` locally |
-| ImagePullBackOff | Digest/tag missing on nodes/registry | `imageID`; `kind load` / registry auth |
+| ImagePullBackOff | Missing on node, private registry, or bad digest | `kind load` vs `imagePullSecrets`; events; never assume laptop `docker login` applies |
 | CrashLoopBackOff | App/config error | logs; probes too aggressive? |
 | Remains drifted | Suspended or no reconcile | `flux get`; resume |
 | Prune deleted shared object | Ownership mistake | ADR; restore from TF/Git carefully |
@@ -786,13 +991,13 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 
 ### Required deliverables
 
-1. GitOps controller on an isolated cluster with clear Git path and RBAC/secret boundaries.
-2. Two env overlays (staging/prod) with immutable image references (digest or documented local tag policy).
-3. Reviewed promotion of a D04 artifact (or simulated digest) between envs via Git.
-4. Broken-release drill with diagnosis and **Git** rollback.
+1. GitOps controller on an isolated cluster with clear Git path and RBAC/secret boundaries (bootstrap credential handed off to read-only access, then revoked).
+2. Two env overlays (staging/prod) with immutable image references (digest or documented local tag policy), each reconciled by its own Flux/Argo object.
+3. Reviewed promotion of the **same** artifact between envs via Git, with **both** environments verified running that image after reconcile.
+4. Broken-release drill with diagnosis and **Git** rollback of a **recorded** bad commit SHA (not a blind `revert HEAD`).
 5. Drift drill with reconcile or documented non-auto policy.
-6. Pod kill / HPA experiment evaluated against client-facing behaviour.
-7. Runbook covering rollout failure, secrets and data assumptions.
+6. Pod kill / HPA experiment evaluated against client-facing behaviour (HPA only claimed if metrics-server shows real CPU).
+7. Runbook covering rollout failure, secrets and data assumptions; image-pull auth path documented if private registries were used.
 
 ### Evaluation rubric
 
@@ -809,16 +1014,16 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 
 ### Self-check
 
-- Does Flux/Argo show the same image Git declares?
+- Does Flux/Argo show the same image Git declares in **staging and prod**?
 - Can you promote without cluster creds in CI?
-- Did rollback go through Git?
-- Are secrets absent from the repo?
-- Is prune scoped safely?
+- Did rollback revert the recorded `BAD_SHA` on the Flux-tracked branch?
+- Are secrets absent from the repo? Was the bootstrap token revoked after the read-only handoff?
+- Is prune scoped safely? Is the kind runtime vs D05 ECS platform difference clear in your ADR?
 - Does the runbook admit what Git revert cannot fix?
 
 ### Example assessment conclusion (evidence still required)
 
-> kind cluster `harbour` runs Flux against `deploy/harbour-api/overlays/staging`. Promotion PRs change image digests only. A bad tag was reverted in Git; Flux restored Ready pods. Manual scale drift self-healed. Pod kill showed brief client errors with two replicas. HPA object present; metrics-server noted. Runbook committed. Terraform remains out of the Deployment ownership path.
+> kind cluster `harbour` (not the D05 ECS service) runs Flux against staging and prod overlays. Bootstrap PAT was replaced with a read-only deploy key, then revoked. Promotion PRs pinned the same `harbour-api:good` (or digest) in both envs; both Kustomizations reconciled to matching images. `BAD_SHA` … was reverted as `REVERT_SHA` …; `/ready` recovered. Manual scale drift self-healed. Pod kill showed brief client errors with two replicas. metrics-server installed; `kubectl top` showed CPU; HPA targets were numeric. Runbook committed. Terraform remains out of the Deployment ownership path.
 
 ---
 
@@ -829,7 +1034,7 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 | Deploy a new digest | PR to overlay `images:` | `kubectl set image` as permanent fix |
 | Debug sync | `flux get`, controller logs, events | Only deleting pods |
 | Handle drift | Reconcile or suspend with ticket | Silent console edits |
-| Roll back | `git revert` known-good | Hope registry still has `:latest` |
+| Roll back | `git revert ${BAD_SHA}` on the Flux branch | Blind `git revert HEAD` after merges |
 | Secrets | External/sealed/out-of-band | Plain Secret YAML with values in Git |
 | Own a resource | ADR: Terraform xor GitOps | Dual controllers on one object |
 | Prove availability | Client curl loop during kill | Equating new pod with zero downtime |
@@ -844,6 +1049,7 @@ Align with [D06 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D06%20GitO
 | Self-heal | Revert manual/live changes back to Git |
 | Overlay | Env-specific Kustomize layer on a shared base |
 | Digest pin | Image reference by `@sha256:…` |
+| imagePullSecrets | Pod credentials for private registry pulls (independent of laptop `docker login`) |
 | Break-glass | Emergency imperative access outside normal GitOps |
 | Suspend | Pause reconciliation so live edits can stick temporarily |
 
