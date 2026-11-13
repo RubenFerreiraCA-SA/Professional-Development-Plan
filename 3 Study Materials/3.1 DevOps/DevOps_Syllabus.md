@@ -1,23 +1,23 @@
 # DevOps Engineering Syllabus
 
-*15-Week Curriculum Overview, Weekly Learning Objectives & Hands-On Lab Assignments*
+*Estimated 120–150 Study Hours · Learning Objectives & Hands-On Lab Assignments*
 
 ## Program Structure & Weighting Overview
 
-This 15-week curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous capstone project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
+This approximately 120–150-hour curriculum follows the end-to-end DevOps lifecycle across six weighted modules (D01–D06). Learners progress through a continuous capstone project—starting with repository setup, packaging services with Docker, automating CI/CD pipelines, provisioning cloud infrastructure with Terraform, deploying via GitOps, and monitoring live production systems with Datadog.
 
-| Code | Module Title | Duration | Schedule | Weight | Core Milestone |
-| --- | --- | --- | --- | --- | --- |
-| D01 | Git & Repository Foundations | 1 week | Week 1 | 7% | Set up a structured, branch-protected project repository. |
-| D02 | Docker & Containerization | 3 weeks | Weeks 2–4 | 20% | Package and run a multi-service app locally with Docker Compose. |
-| D03 | CI/CD & Build Automation | 2 weeks | Weeks 5–6 | 13% | Automate code testing, image scanning, and registry pushes. |
-| D04 | Infrastructure as Code & Terraform | 4 weeks | Weeks 7–10 | 27% | Provision cloud networking and container clusters via code. |
-| D05 | GitOps, Automation & Operations | 3 weeks | Weeks 11–13 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
-| D06 | Datadog & Observability | 2 weeks | Weeks 14–15 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
+| Code | Module Title | Estimated hours | Weight | Core Milestone |
+| --- | --- | ---: | --- | --- |
+| D01 | Git & Repository Foundations | 8–10 | 7% | Set up a structured, branch-protected project repository. |
+| D02 | Docker & Containerization | 24–30 | 20% | Package and run a multi-service app locally with Docker Compose. |
+| D03 | CI/CD & Build Automation | 16–20 | 13% | Automate code testing, image scanning, and registry pushes. |
+| D04 | Infrastructure as Code & Terraform | 32–40 | 27% | Provision cloud networking and container clusters via code. |
+| D05 | GitOps, Automation & Operations | 24–30 | 20% | Automate continuous cloud deployments, rollbacks, and scaling. |
+| D06 | Datadog & Observability | 16–20 | 13% | Monitor live system metrics, logs, APM traces, and alerts. |
 
-## D01: Git & Repository Foundations (Week 1 | 7%)
+## D01: Git & Repository Foundations (8–10 hours | 7%)
 
-### Week 1: Repository Setup & Version Control Workflows
+### Lesson 1 (8–10 hours): Repository Setup & Version Control Workflows
 
 **Learning objectives**
 
@@ -31,9 +31,9 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Create the master capstone repository on GitHub or GitLab, configure branch protection on main, add a project README.md and .gitignore covering .env, Docker, and Terraform files, and merge a sample feature branch via pull request.
 
-## D02: Docker & Containerization (Weeks 2–4 | 20%)
+## D02: Docker & Containerization (24–30 hours | 20%)
 
-### Week 2: Container Fundamentals & Images
+### Lesson 2 (8–10 hours): Container Fundamentals & Images
 
 **Learning objectives**
 
@@ -45,7 +45,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Write a multi-stage Dockerfile for a sample web API that cuts image size by at least 50%, verified using docker history and docker inspect.
 
-### Week 3: Container Networking & Storage
+### Lesson 3 (8–10 hours): Container Networking & Storage
 
 **Learning objectives**
 
@@ -57,7 +57,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Connect a database container to the API over an isolated bridge network with a persistent volume, proving data survives container deletion without exposing database ports to the host.
 
-### Week 4: Multi-Container Applications
+### Lesson 4 (8–10 hours): Multi-Container Applications
 
 **Learning objectives**
 
@@ -69,9 +69,9 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Combine a frontend, backend API, and database into a docker-compose.yml stack that boots cleanly with one command, then push tagged images to a remote registry.
 
-## D03: CI/CD & Build Automation (Weeks 5–6 | 13%)
+## D03: CI/CD & Build Automation (16–20 hours | 13%)
 
-### Week 5: Continuous Integration Workflows
+### Lesson 5 (8–10 hours): Continuous Integration Workflows
 
 **Learning objectives**
 
@@ -83,7 +83,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Build a CI pipeline (e.g., GitHub Actions or GitLab CI) that automatically lints and tests code on every pull request, blocking merges if automated checks fail.
 
-### Week 6: Automated Image Builds & Delivery
+### Lesson 6 (8–10 hours): Automated Image Builds & Delivery
 
 **Learning objectives**
 
@@ -95,9 +95,9 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Extend the CI workflow so merges to main automatically build, vulnerability-scan (e.g., with Trivy), and push production-ready container images to the registry.
 
-## D04: Infrastructure as Code & Terraform (Weeks 7–10 | 27%)
+## D04: Infrastructure as Code & Terraform (32–40 hours | 27%)
 
-### Week 7: IaC Concepts & Terraform Basics
+### Lesson 7 (8–10 hours): IaC Concepts & Terraform Basics
 
 **Learning objectives**
 
@@ -109,7 +109,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Provision a cloud storage bucket and basic compute instance via Terraform without hardcoding credentials.
 
-### Week 8: State Management & Team Workflows
+### Lesson 8 (8–10 hours): State Management & Team Workflows
 
 **Learning objectives**
 
@@ -121,7 +121,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Migrate Terraform state to a remote backend, manually alter a resource in the cloud console to simulate drift, and use Terraform to detect and revert the drift.
 
-### Week 9: Modular & Reusable Infrastructure
+### Lesson 9 (8–10 hours): Modular & Reusable Infrastructure
 
 **Learning objectives**
 
@@ -133,7 +133,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Convert existing Terraform files into a reusable module and deploy separate dev and prod environments from the shared codebase.
 
-### Week 10: Cloud Networking & Compute Provisioning
+### Lesson 10 (8–10 hours): Cloud Networking & Compute Provisioning
 
 **Learning objectives**
 
@@ -145,9 +145,9 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Deploy a complete private cloud network and managed container cluster ready to host the capstone application.
 
-## D05: GitOps, Automation & Operations (Weeks 11–13 | 20%)
+## D05: GitOps, Automation & Operations (24–30 hours | 20%)
 
-### Week 11: GitOps Principles & Pull-Based Delivery
+### Lesson 11 (8–10 hours): GitOps Principles & Pull-Based Delivery
 
 **Learning objectives**
 
@@ -159,7 +159,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Install a GitOps operator on the cloud cluster and sync the capstone application live from the /deploy directory of the repository.
 
-### Week 12: Release Strategies & Rollbacks
+### Lesson 12 (8–10 hours): Release Strategies & Rollbacks
 
 **Learning objectives**
 
@@ -171,7 +171,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Automate image tag updates from CI to the GitOps configuration, deploy a broken image tag, and restore service health with a single git revert.
 
-### Week 13: Day-Two Operations & Runbook Automation
+### Lesson 13 (8–10 hours): Day-Two Operations & Runbook Automation
 
 **Learning objectives**
 
@@ -183,9 +183,9 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Set up auto-scaling rules, run a load test to trigger scaling, and manually terminate a running container pod to verify self-healing without downtime.
 
-## D06: Datadog & Observability (Weeks 14–15 | 13%)
+## D06: Datadog & Observability (16–20 hours | 13%)
 
-### Week 14: Metrics, Logs & Infrastructure Monitoring
+### Lesson 14 (8–10 hours): Metrics, Logs & Infrastructure Monitoring
 
 **Learning objectives**
 
@@ -197,7 +197,7 @@ This 15-week curriculum follows the end-to-end DevOps lifecycle across six weigh
 
 > **Hands-on lab:** Deploy the Datadog Agent to the cluster and build a custom dashboard tracking CPU/memory metrics, container restarts, and filtered error logs.
 
-### Week 15: APM Tracing & Actionable Alerting
+### Lesson 15 (8–10 hours): APM Tracing & Actionable Alerting
 
 **Learning objectives**
 
