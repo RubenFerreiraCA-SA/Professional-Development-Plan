@@ -27,12 +27,12 @@ After completing the module, you should be able to:
 
 | Activity | Estimated hours |
 | --- | ---: |
-| Git internals and history engineering | 2 |
-| Conflict resolution, recovery and debugging | 2 |
+| Git internals and history engineering | 1.5–2 |
+| Conflict resolution, recovery and debugging | 1.5–2 |
 | Repository architecture and ownership | 1.5 |
 | Governance, identity and supply-chain controls | 2 |
 | Integrated scenario, validation and technical decisions | 1.5–2.5 |
-| **Total** | **9–10** |
+| **Total** | **8–10** |
 
 Use an isolated repository for destructive experiments. Advanced extensions are optional and sit outside the estimated core hours.
 
