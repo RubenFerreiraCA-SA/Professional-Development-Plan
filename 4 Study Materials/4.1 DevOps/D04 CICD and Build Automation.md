@@ -313,6 +313,13 @@ GitHub does not treat “skipped because paths did not match” as a passing req
 4. Revert the filter (return to Section 4.3.2) **or** introduce a deliberate pattern such as:
 
 ```yaml
+# Path-aware optimisation — explicit permissions required.
+# dorny/paths-filter uses the GitHub pull-request API for PR events;
+# without pull-requests: read the filter step can fail even when YAML is otherwise correct.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -351,7 +358,7 @@ jobs:
           fi
 ```
 
-Require the **`gate`** job (not `test`) when you adopt path filters. Until you need monorepo savings, keep the simple always-run workflow from 4.3.2.
+Require the **`gate`** job (not `test`) when you adopt path filters. Keep `pull-requests: read` on any workflow that uses `dorny/paths-filter` against pull_request events (and keep `contents: read` for checkout). Until you need monorepo savings, keep the simple always-run workflow from 4.3.2.
 
 **Practice:** Document in an ADR whether Harbour’s training repo uses always-run validation or a path-aware gate — and name the required check exactly.
 
@@ -578,7 +585,7 @@ Inline one-liners in workflows are easy to get wrong. This broken pattern looks 
 REF="$(tr -d '[:space:]' < deploy/harbour-api/image-ref.txt | sed '/^#/d' | tail -n 1)"
 ```
 
-**Fix:** strip comments and blanks **first**, then take the first remaining reference, then validate the full digest form.
+**Fix:** strip comments and blanks **first**, require **exactly one** remaining reference (reject multiple pins so the deploy contract is unambiguous), then validate the full digest form.
 
 Create `deploy/harbour-api/check-image-ref.sh`:
 
@@ -593,19 +600,25 @@ if [[ ! -f "$FILE" ]]; then
   exit 2
 fi
 
-# Drop comment lines and blanks; keep the first reference line.
-REF="$(
+# Drop comment lines and blanks; collect remaining reference lines.
+mapfile -t REFS < <(
   sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' "$FILE" \
     | grep -v '^#' \
-    | grep -v '^$' \
-    | head -n 1 || true
-)"
+    | grep -v '^$' || true
+)
 
-if [[ -z "$REF" ]]; then
+if [[ ${#REFS[@]} -eq 0 ]]; then
   echo "error: no image reference found in $FILE" >&2
   exit 1
 fi
 
+if [[ ${#REFS[@]} -gt 1 ]]; then
+  echo "error: expected exactly one image reference in $FILE, found ${#REFS[@]}:" >&2
+  printf '  %s\n' "${REFS[@]}" >&2
+  exit 1
+fi
+
+REF="${REFS[0]}"
 echo "ref=${REF}"
 
 # Require registry/name@sha256:<64 hex>
@@ -641,6 +654,13 @@ echo 'ghcr.io/example/harbour-api:latest' > /tmp/harbour-ref-tag.txt
 # Bad: truncated digest
 echo 'ghcr.io/example/harbour-api@sha256:abcd' > /tmp/harbour-ref-short.txt
 ./deploy/harbour-api/check-image-ref.sh /tmp/harbour-ref-short.txt && echo "UNEXPECTED SUCCESS" || echo "rejected as expected"
+
+# Bad: multiple references (ambiguous deploy contract)
+cat > /tmp/harbour-ref-multi.txt <<'EOF'
+ghcr.io/example/harbour-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ghcr.io/example/harbour-api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+./deploy/harbour-api/check-image-ref.sh /tmp/harbour-ref-multi.txt && echo "UNEXPECTED SUCCESS" || echo "rejected as expected"
 ```
 
 **Automated tests for the policy script** — delivery guards deserve CI of their own. Create `deploy/harbour-api/test_check_image_ref.sh`:
@@ -662,6 +682,7 @@ cat > "$TMP/good.txt" <<'EOF'
 ghcr.io/example/harbour-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 EOF
 "$CHECK" "$TMP/good.txt" >/dev/null || fail "good digest"
+pass "good digest"
 
 # mutable tag must fail
 echo 'ghcr.io/example/harbour-api:latest' > "$TMP/tag.txt"
@@ -674,6 +695,13 @@ echo 'ghcr.io/example/harbour-api@sha256:abcd' > "$TMP/short.txt"
 # comment-only must fail
 echo '# only a comment' > "$TMP/empty.txt"
 "$CHECK" "$TMP/empty.txt" >/dev/null 2>&1 && fail "comment-only should be rejected" || pass "comment-only rejected"
+
+# multiple references must fail (do not silently take the first)
+cat > "$TMP/multi.txt" <<'EOF'
+ghcr.io/example/harbour-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ghcr.io/example/harbour-api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+"$CHECK" "$TMP/multi.txt" >/dev/null 2>&1 && fail "multiple refs should be rejected" || pass "multiple refs rejected"
 
 pass "all check-image-ref tests"
 ```
@@ -929,7 +957,8 @@ Align with [D04 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D04%20CICD
 | Keep clean-tree checks honest | Write reports under `${{ runner.temp }}` | JUnit XML inside the checkout |
 | Trust an image | Registry digest + commit SHA + run URL | `:latest` or rebuild-per-env |
 | Handle fork PRs | read-only validate, no secrets | `pull_request_target` + build untrusted code |
-| Promote | Script + tests; full `@sha256:` + 64 hex | `tr`-then-`sed` comment stripping; `:latest` |
+| Promote | Script + tests; exactly one `@sha256:` + 64 hex | `tr`-then-`sed`; `:latest`; multiple refs in one file |
+| Path-aware PR filters | `permissions: pull-requests: read` (+ contents) | Relying on default token scopes for `paths-filter` |
 | Debug CI | Classify fault with logs | Infinite re-run |
 | Reuse | Working simple pipeline, then callable workflow | Reusable `workflow_call` before anything publishes |
 
