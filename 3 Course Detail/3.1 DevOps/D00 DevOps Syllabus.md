@@ -68,11 +68,13 @@ Each module provides a **Practical Assessment** appropriate to that subject. Col
 
 The recommended [programme Final Project](../../1%20Foundational%20Documents/1.4%20Final%20Project.md) integrates those assets into one **Internal Developer Platform**. Track the module-by-module Harbour increments on the [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md). This work is cumulative, not a separate project deferred until the end. Developers may substitute equivalent practical work consistent with their personal PDP.
 
+**Full curriculum vs Final Project:** Completing this syllabus means D01–**D08**. On the Final Project Checklist, D08 is **optional for personalised IDP acceptance** if an equivalent ops demonstration is documented on the D07 stack. That substitution does not remove D08 from the eight-chapter DevOps curriculum or textbook sequence.
+
 Where a provider feature, paid service or external reviewer is unavailable, document the limitation and show a reasonable alternative. Do not claim an untested control was enforced.
 
 ## Scope and boundaries
 
-D07 builds the vendor-neutral observability foundation; D08 applies it in Datadog. D03 introduces container runtime fundamentals, and D06 uses a **small, isolated Kubernetes environment** to practise GitOps. Deep Kubernetes administration, multi-cluster platform design, developer portals and organisation-wide platform operations are developed later in the Platform Engineering discipline. Cloud Engineering revisits networking, IAM and infrastructure at greater breadth. AI Engineering covers LLM and agent capabilities separately.
+D07 builds the vendor-neutral observability foundation; D08 applies it in Datadog as the eighth curriculum chapter (Final Project–optional only in the sense above). D03 introduces container runtime fundamentals, and D06 uses a **small, isolated Kubernetes environment** to practise GitOps. Deep Kubernetes administration, multi-cluster platform design, developer portals and organisation-wide platform operations are developed later in the Platform Engineering discipline. Cloud Engineering revisits networking, IAM and infrastructure at greater breadth. AI Engineering covers LLM and agent capabilities separately.
 
 Avoid unnecessary complexity: a demonstrable secure delivery system is more valuable than a fragile collection of tools.
 

@@ -4,7 +4,7 @@
 
 This is **one textbook with eight chapters**. Every `DXX` file is a chapter; the numbered sections within it use the chapter number: **Section 1.1, 1.2 …** for Chapter 1, **Section 2.1, 2.2 …** for Chapter 2, and so on. Smaller topics are numbered **1.1.1**, **1.1.2**, etc.
 
-The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md) and [D01–D08 course-detail documents](../../3%20Course%20Detail/3.1%20DevOps/) remain separate curriculum specifications; this book is the teaching material.
+The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20DevOps%20Syllabus.md) and [D01–D08 course-detail documents](../../3%20Course%20Detail/3.1%20DevOps/) remain separate curriculum specifications; this book is the teaching material. Chapter 8 (D08) is part of the full eight-chapter sequence; the [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) may treat Datadog as optional for personalised IDP acceptance only — that does not drop it from this curriculum.
 
 ## Table of contents
 
