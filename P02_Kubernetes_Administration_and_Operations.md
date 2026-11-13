@@ -2,7 +2,7 @@
 
 > **Status:** Draft module scaffold — not yet signed off.
 
-**Weeks:** 51–56 of 64  
+**Weeks:** 50–55 of 64  
 **Purpose:** Administration, RBAC, troubleshooting and recovery.
 
 ## Module overview
