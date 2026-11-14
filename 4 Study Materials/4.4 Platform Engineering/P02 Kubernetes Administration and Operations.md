@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 2 of 4*
 
-> **Status:** Authored; remediations after audits through `69d15ab` — **awaiting re-review (not signed off)**. Clean-room execution still not claimed.
+> **Status:** Authored; remediations after audits through `82e50a6` — **awaiting re-review (not signed off)**. Clean-room execution still not claimed.
 
 | | |
 | --- | --- |

@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; remediations after audits through `69d15ab` (fail≠error, multi-image reject, restore health) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `82e50a6` (fail-closed promotion, signer paths, gh≥2.102.0) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -179,7 +179,7 @@ Create `docs/final/LIMITATIONS.md` now, not the night before the demo. One row p
 
 ## Section 4.3 — Outcome 1: a developer creates a service
 
-> **Integrated pathway (run once before claiming P03+P04 together):** boundaries between chapters are where earlier audits found defects. Prefer this sequence over isolated chapter checks: (1) `harbour-new-service` from P03’s CLI; (2) rendered manifests pass restricted PSA dry-run **and** `harbour-policy-check` / Kyverno; (3) build + attest + release-manifest artifact; (4) promote with attestation workflow checked against `platform/policy/approved-release-workflows.txt` (not against a PR-defined identity alone); (5) Flux deploys the exact verified digest (`imageID` match); (6) add the Postgres dependency and re-run allow/deny NetworkPolicy matrix; (7) seed → verified backup → damage → Flux-suspended maintenance → restore with full snapshot equivalence; (8) resume reconciliation and confirm the app serves the restored records. Record the run under `docs/final/INTEGRATED-OUTCOME.md`.
+> **Integrated pathway (run once before claiming P03+P04 together):** boundaries between chapters are where earlier audits found defects. Prefer this sequence over isolated chapter checks: (1) `harbour-new-service` from P03’s CLI; (2) rendered manifests pass restricted PSA dry-run **and** `harbour-policy-check` / Kyverno; (3) build + attest + release-manifest artifact; (4) promote with attestation checked against `platform/policy/approved-signer-workflows.txt` (fully-qualified signer paths, not display names); (5) Flux deploys the exact verified digest (`imageID` match); (6) add the Postgres dependency and re-run allow/deny NetworkPolicy matrix; (7) seed → verified backup → damage → Flux-suspended maintenance → restore with full snapshot equivalence; (8) resume reconciliation and confirm the app serves the restored records. Record the run under `docs/final/INTEGRATED-OUTCOME.md`.
 
 Use the **P03 scaffold** exactly as a trial user would. Create the integrated demo service on a feature branch:
 
@@ -259,14 +259,17 @@ jobs:
           mkdir -p "docs/releases/${SVC}"
           # digest is already "sha256:…"
           MAN="docs/releases/${SVC}/${DIGEST}.json"
+          # workflow = display name (informational). signer_workflow = fully-qualified
+          # path used by gh attestation verify --signer-workflow (security principal).
           jq -n \
             --arg commit "${{ github.sha }}" \
             --arg workflow "${{ github.workflow }}" \
+            --arg signer_workflow "${{ github.repository }}/.github/workflows/service-release.yml" \
             --arg image "${IMAGE}@${DIGEST}" \
             --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --arg ref "${{ github.ref }}" \
             --arg event "${{ github.event_name }}" \
-            '{commit:$commit, workflow:$workflow, image:$image, run_url:$run, ref:$ref, event:$event}' > "$MAN"
+            '{commit:$commit, workflow:$workflow, signer_workflow:$signer_workflow, image:$image, run_url:$run, ref:$ref, event:$event}' > "$MAN"
           echo "Wrote $MAN"
       - uses: actions/upload-artifact@v4
         with:
@@ -319,45 +322,56 @@ SUBJECT_DIGEST="${REF##*@}"
 [ -n "$APPROVED_FILE" ] || [ -n "$EXPECT_WORKFLOW" ] \
   || { echo "ERROR: pass --approved-workflows-file (preferred) or --expect-workflow" >&2; exit 1; }
 docker buildx imagetools inspect "$REF" >/dev/null
-# Requires a recent GitHub CLI with `gh attestation verify` and identity flags
-# (--signer-workflow, --source-ref, --source-digest). Pin/upgrade gh if missing.
+# Pin gh ≥ 2.102.0 (patches workflow-prefix and case-insensitive source-ref matching).
+GH_VER="$(gh --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+python3 - "$GH_VER" <<'PY' || exit 1
+import sys
+want = (2, 102, 0)
+got = tuple(int(x) for x in sys.argv[1].split("."))
+if got < want:
+    print(f"FAIL: gh {sys.argv[1]} < 2.102.0 — upgrade (signer-workflow/source-ref security fixes)", file=sys.stderr)
+    sys.exit(1)
+print(f"OK: gh {sys.argv[1]} meets minimum 2.102.0")
+PY
 gh attestation verify --help >/dev/null 2>&1 \
-  || { echo "FAIL: upgrade gh CLI — need 'gh attestation verify'" >&2; exit 1; }
-# Resolve approved workflow name first (needed for --signer-workflow).
+  || { echo "FAIL: gh missing 'attestation verify'" >&2; exit 1; }
+# Allow-list entries are *fully-qualified signing-workflow paths* for --signer-workflow,
+# e.g. owner/repo/.github/workflows/service-release.yml — NOT githubWorkflowName display names.
 if [ -n "$APPROVED_FILE" ]; then
   [ -f "$APPROVED_FILE" ] || { echo "FAIL: missing allow-list $APPROVED_FILE" >&2; exit 1; }
-  mapfile -t APPROVED_WFS < <(grep -vE '^\s*(#|$)' "$APPROVED_FILE")
-  [ "${#APPROVED_WFS[@]}" -ge 1 ] || { echo "FAIL: empty allow-list $APPROVED_FILE" >&2; exit 1; }
+  mapfile -t APPROVED_SIGNERS < <(grep -vE '^\s*(#|$)' "$APPROVED_FILE")
+  [ "${#APPROVED_SIGNERS[@]}" -ge 1 ] || { echo "FAIL: empty allow-list $APPROVED_FILE" >&2; exit 1; }
 elif [ -n "$EXPECT_WORKFLOW" ]; then
-  APPROVED_WFS=("$EXPECT_WORKFLOW")
+  APPROVED_SIGNERS=("$EXPECT_WORKFLOW")
 fi
-# Native gh constraints bind identity more authoritatively than post-hoc .[0] parsing.
-# Certificate-derived identity is preferred over predicate metadata (GitHub docs).
+for s in "${APPROVED_SIGNERS[@]}"; do
+  [[ "$s" == */.github/workflows/*.yml ]] || [[ "$s" == */.github/workflows/*.yaml ]] \
+    || { echo "FAIL: allow-list entry must be owner/repo/.github/workflows/file.yml (got: $s)" >&2; exit 1; }
+done
 VERIFY_ARGS=(--repo "$EXPECT_REPO" --format json
   --source-digest "$EXPECT_COMMIT"
   --source-ref "refs/heads/${REQUIRE_BRANCH}")
-# Try each approved workflow until one verifies (select matching attestation, not array[0]).
-RAW=""; MATCHED_WF=""
-for wf in "${APPROVED_WFS[@]}"; do
+RAW=""; MATCHED_SIGNER=""
+for signer in "${APPROVED_SIGNERS[@]}"; do
   set +e
-  RAW="$(gh attestation verify "oci://$REF" "${VERIFY_ARGS[@]}" --signer-workflow "$wf" 2>/tmp/harbour-attest.err)"
+  RAW="$(gh attestation verify "oci://$REF" "${VERIFY_ARGS[@]}" --signer-workflow "$signer" 2>/tmp/harbour-attest.err)"
   rc=$?
   set -e
-  if [ "$rc" -eq 0 ] && [ -n "$RAW" ]; then MATCHED_WF="$wf"; break; fi
+  if [ "$rc" -eq 0 ] && [ -n "$RAW" ]; then MATCHED_SIGNER="$signer"; break; fi
 done
-[ -n "$MATCHED_WF" ] || {
-  echo "FAIL: no attestation matched approved workflow + source-ref/digest" >&2
+[ -n "$MATCHED_SIGNER" ] || {
+  echo "FAIL: no attestation matched approved signer-workflow + source-ref/digest" >&2
   cat /tmp/harbour-attest.err >&2 || true
   exit 1
 }
-# Select the attestation whose certificate matches the full identity contract
-# (not array[0]). Write JSON to a file so a heredoc does not steal stdin.
+# Certificate fields: display name is informational; signer path was enforced by gh.
+# Still require ref/trigger/commit/repo — absent fields fail (no soft skip).
 printf '%s' "$RAW" > /tmp/harbour-attest.json
-SELECTED="$(MATCHED_WF="$MATCHED_WF" EXPECT_COMMIT="$EXPECT_COMMIT" \
+SELECTED="$(MATCHED_SIGNER="$MATCHED_SIGNER" EXPECT_COMMIT="$EXPECT_COMMIT" \
   REQUIRE_BRANCH="$REQUIRE_BRANCH" EXPECT_REPO="$EXPECT_REPO" python3 - <<'PY'
 import json, os, sys
 data = json.load(open("/tmp/harbour-attest.json"))
-want_wf = os.environ["MATCHED_WF"]
+want_signer = os.environ["MATCHED_SIGNER"].lower()
 want_commit = os.environ["EXPECT_COMMIT"]
 want_ref = "refs/heads/" + os.environ["REQUIRE_BRANCH"]
 want_repo = os.environ["EXPECT_REPO"].lower()
@@ -370,32 +384,39 @@ def canon(r):
 
 for item in data if isinstance(data, list) else [data]:
     cert = (((item or {}).get("verificationResult") or {}).get("signature") or {}).get("certificate") or {}
-    wf = cert.get("githubWorkflowName") or ""
+    display = cert.get("githubWorkflowName") or ""
+    # Job/reusable workflow identity when present (path-like); do not equate to display name.
+    job_wf = (cert.get("jobWorkflowRef") or cert.get("githubWorkflowFileRef") or "").lower()
     commit = cert.get("sourceRepositoryDigest") or ""
     ref = cert.get("githubWorkflowRef") or ""
     trigger = cert.get("githubWorkflowTrigger") or ""
     repo = canon(cert.get("sourceRepositoryURI") or "")
     commit_ok = commit in {want_commit, f"sha1:{want_commit}", f"sha256:{want_commit}"}
-    # Required identity fields — absent fields are failures, not soft skips.
-    if wf != want_wf: continue
     if not commit_ok: continue
-    if ref != want_ref: continue
-    if trigger != "push": continue
-    if repo != canon(want_repo): continue
-    json.dump({"workflow": wf, "commit": commit, "ref": ref, "trigger": trigger, "repo": repo}, sys.stdout)
+    if not ref or ref != want_ref: continue
+    if not trigger or trigger != "push": continue
+    if not repo or repo != canon(want_repo): continue
+    # If the certificate exposes a path-like job workflow ref, it must match the allow-listed signer.
+    if job_wf and want_signer not in job_wf and job_wf not in want_signer:
+        continue
+    json.dump({
+        "signer_workflow": want_signer,
+        "display_name": display,
+        "commit": commit, "ref": ref, "trigger": trigger, "repo": repo,
+    }, sys.stdout)
     sys.exit(0)
-print("FAIL: attestations returned but none matched full identity contract", file=sys.stderr)
+print("FAIL: attestations returned but certificate identity contract unmet", file=sys.stderr)
 sys.exit(1)
 PY
 )" || exit 1
-WORKFLOW="$(printf '%s' "$SELECTED" | jq -r .workflow)"
+SIGNER="$(printf '%s' "$SELECTED" | jq -r .signer_workflow)"
+DISPLAY="$(printf '%s' "$SELECTED" | jq -r .display_name)"
 COMMIT="$(printf '%s' "$SELECTED" | jq -r .commit)"
 ATT_REF="$(printf '%s' "$SELECTED" | jq -r .ref)"
 ATT_TRIGGER="$(printf '%s' "$SELECTED" | jq -r .trigger)"
 REPO="$(printf '%s' "$SELECTED" | jq -r .repo)"
-printf 'subject=%s\nrepo=%s\nworkflow=%s\ncommit=%s\nref=%s\ntrigger=%s\n' \
-  "$SUBJECT_DIGEST" "$REPO" "$WORKFLOW" "$COMMIT" "$ATT_REF" "$ATT_TRIGGER"
-# Reviewed-history gate: attested commit must be an ancestor of the protected branch tip.
+printf 'subject=%s\nrepo=%s\nsigner_workflow=%s\ndisplay_name=%s\ncommit=%s\nref=%s\ntrigger=%s\n' \
+  "$SUBJECT_DIGEST" "$REPO" "$SIGNER" "$DISPLAY" "$COMMIT" "$ATT_REF" "$ATT_TRIGGER"
 STRIP_COMMIT="${COMMIT#sha1:}"; STRIP_COMMIT="${STRIP_COMMIT#sha256:}"
 git fetch --no-tags origin "refs/heads/${REQUIRE_BRANCH}:refs/remotes/origin/${REQUIRE_BRANCH}" \
   || { echo "FAIL: git fetch origin/$REQUIRE_BRANCH failed — refuse to verify against stale tips" >&2; exit 1; }
@@ -417,10 +438,10 @@ while ! git merge-base --is-ancestor "$STRIP_COMMIT" "origin/$REQUIRE_BRANCH" 2>
 done
 TIP="$(git rev-parse "origin/$REQUIRE_BRANCH")"
 echo "protected_branch_tip=$TIP (pre_fetch_tip=$TIP_BEFORE)" >&2
-echo "VERIFIED: $REF bound to $REPO / workflow=$WORKFLOW / $EXPECT_COMMIT on $REQUIRE_BRANCH@$TIP"
+echo "VERIFIED: $REF signer=$SIGNER commit=$EXPECT_COMMIT on $REQUIRE_BRANCH@$TIP"
 ```
 
-Always-on required check `.github/workflows/promotion-verify.yml`. The release manifest identifies **candidate commit and digest**; the **approved-workflow allow-list** is protected platform config; the attested commit must belong to **protected-branch history**:
+Always-on required check `.github/workflows/promotion-verify.yml`. Diff failures and multi-image overlays **fail closed** (never treat as docs-only / empty verification):
 
 ```yaml
 name: promotion-verify
@@ -437,25 +458,47 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       HARBOUR_EXPECT_REPO: ${{ github.repository }}
       HARBOUR_REQUIRE_BRANCH: main
+      # Pin a patched GitHub CLI (≥ 2.102.0).
+      GH_VERSION: "2.102.0"
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+      - name: Install pinned gh
+        run: |
+          set -euo pipefail
+          curl -fsSL -o gh.tgz \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          tar -xzf gh.tgz
+          sudo install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+          gh --version | grep -F "$GH_VERSION"
       - name: Substantive verify only when promotion overlays change
         run: |
           set -euo pipefail
-          mapfile -t FILES < <(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
-            'deploy/*/overlays/*/kustomization.yaml' || true)
-          if [ "${#FILES[@]}" -eq 0 ]; then
-            echo "No promotion overlays changed — gate reports success (D04 always-on pattern)."
+          # Fail closed on git diff errors — never || true into an empty skip.
+          set +e
+          DIFF_OUT="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
+            'deploy/*/overlays/*/kustomization.yaml' \
+            'deploy/*/base/*.yaml' 2>/tmp/harbour-diff.err)"
+          DIFF_RC=$?
+          set -e
+          [ "$DIFF_RC" -eq 0 ] || {
+            echo "FAIL: git diff failed (cannot determine changed deploy files)"; cat /tmp/harbour-diff.err; exit 1; }
+          mapfile -t FILES <<< "$DIFF_OUT"
+          # Drop blank lines from <<< on empty DIFF_OUT
+          FILES=( "${FILES[@]/]}" )
+          if [ "${#FILES[@]}" -eq 0 ] || [ -z "${FILES[0]:-}" ]; then
+            echo "No deploy overlay/base changes — gate reports success (D04 always-on pattern)."
             exit 0
           fi
-          ALLOW="platform/policy/approved-release-workflows.txt"
+          ALLOW="platform/policy/approved-signer-workflows.txt"
           [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
           SENTINEL="sha256:0000000000000000000000000000000000000000000000000000000000000000"
           for f in "${FILES[@]}"; do
+            case "$f" in
+              */overlays/*/kustomization.yaml) ;;
+              *) echo "base/manifest change $f — require overlay digest verification in same PR or fail"; continue ;;
+            esac
             svc="$(echo "$f" | cut -d/ -f2)"
-            # YAML-aware unpromoted detection. Never trust the word UNPROMOTED.
-            # Golden-path contract: exactly one images[] entry; every replicas[] count must be 0.
             is_unpromoted="$(python3 - "$f" "$SENTINEL" <<'PY'
 import sys, yaml
 from pathlib import Path
@@ -465,7 +508,7 @@ images = [i for i in (doc.get("images") or []) if isinstance(i, dict)]
 digests = [i.get("digest") for i in images if i.get("digest")]
 replicas = [r for r in (doc.get("replicas") or []) if isinstance(r, dict)]
 if len(images) != 1:
-    print("no"); sys.exit(0)  # multi-image overlays are never "quietly unpromoted"
+    print("no"); sys.exit(0)
 all_disabled = bool(replicas) and all(r.get("count") == 0 for r in replicas)
 only_sentinel = digests == [sentinel]
 print("yes" if only_sentinel and all_disabled else "no")
@@ -475,9 +518,10 @@ PY
               echo "skip $f (single sentinel digest + all replicas count 0)"
               continue
             fi
-            # Verify *every* image mapping — golden path requires exactly one; reject otherwise.
-            mapfile -t IMAGE_ROWS < <(python3 - "$f" <<'PY'
-import sys, yaml
+            # Capture exit status — mapfile < <(...) does NOT fail closed on producer exit 1.
+            set +e
+            IMAGE_DATA="$(python3 - "$f" <<'PY'
+import sys, yaml, json
 from pathlib import Path
 doc = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 images = [i for i in (doc.get("images") or []) if isinstance(i, dict)]
@@ -485,31 +529,38 @@ if len(images) != 1:
     print(f"FAIL: golden-path overlays must declare exactly one images[] entry (got {len(images)})", file=sys.stderr)
     sys.exit(1)
 i = images[0]
-print(f"{i.get('newName','')}\t{i.get('digest','')}")
+name, digest = i.get("newName") or "", i.get("digest") or ""
+if not name or not digest:
+    print("FAIL: missing newName/digest", file=sys.stderr); sys.exit(1)
+print(json.dumps({"newName": name, "digest": digest}))
 PY
-)
-            for row in "${IMAGE_ROWS[@]}"; do
-              img="${row%%$'\t'*}"; d="${row#*$'\t'}"
-              [ -n "$img" ] && [ -n "$d" ] || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
-              [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without all replicas count 0 in $f"; exit 1; }
-              MAN="docs/releases/${svc}/${d}.json"
-              [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (download CI artifact into PR)"; exit 1; }
-              commit="$(jq -r .commit "$MAN")"
-              [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
-                || { echo "FAIL: manifest image does not match overlay"; exit 1; }
-              platform/bin/harbour-verify-artifact "${img}@${d}" \
-                --approved-workflows-file "$ALLOW" \
-                --expect-commit "$commit" \
-                --require-branch "$HARBOUR_REQUIRE_BRANCH"
-            done
+)"
+            IMG_RC=$?
+            set -e
+            [ "$IMG_RC" -eq 0 ] || { echo "FAIL: overlay image validation for $f"; exit 1; }
+            [ -n "$IMAGE_DATA" ] || { echo "FAIL: empty image validation result for $f"; exit 1; }
+            img="$(printf '%s' "$IMAGE_DATA" | jq -r .newName)"
+            d="$(printf '%s' "$IMAGE_DATA" | jq -r .digest)"
+            [ -n "$img" ] && [ -n "$d" ] && [ "$img" != null ] && [ "$d" != null ] \
+              || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
+            [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without all replicas count 0 in $f"; exit 1; }
+            MAN="docs/releases/${svc}/${d}.json"
+            [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN"; exit 1; }
+            commit="$(jq -r .commit "$MAN")"
+            [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
+              || { echo "FAIL: manifest image does not match overlay"; exit 1; }
+            platform/bin/harbour-verify-artifact "${img}@${d}" \
+              --approved-workflows-file "$ALLOW" \
+              --expect-commit "$commit" \
+              --require-branch "$HARBOUR_REQUIRE_BRANCH"
           done
 ```
 
-**Promotion hand-off (P03 → P04):** after the release run finishes, download artifact `release-manifest-<svc>-<sha>` and place `docs/releases/<svc>/<digest>.json` in the promotion branch **before** opening the PR. `harbour-promote` only edits the overlay; without the committed manifest, `promotion-verify` fails closed. Golden-path overlays declare **exactly one** `images[]` entry; multi-image overlays are rejected.
+**Promotion hand-off (P03 → P04):** download artifact `release-manifest-<svc>-<sha>` into `docs/releases/<svc>/<digest>.json` before opening the promotion PR. Golden-path overlays declare **exactly one** `images[]` entry; multi-image / zero-image overlays fail closed.
 
-Create and protect `platform/policy/approved-release-workflows.txt` (one exact attestation `githubWorkflowName` per line). CODEOWNERS: platform reviewers only. Trust chain: **manifest** (commit/digest candidate) · **attestation** (signed identity via `--signer-workflow` / `--source-ref` / `--source-digest`) · **allow-list** · **protected-branch ancestry**.
+Create and protect `platform/policy/approved-signer-workflows.txt` — one **fully-qualified signing-workflow path** per line, e.g. `your-org/harbour-platform/.github/workflows/service-release.yml` (the reusable workflow that signs). CODEOWNERS: platform reviewers only. Display names (`github.workflow`) are informational in the release manifest; they are **not** the allow-list principal.
 
-**Required negative tests:** (1) fabricated digest fails; (2) missing `docs/releases/…` fails; (3) non-allow-listed workflow fails; (4) overlay with a **real** digest plus a comment containing the word `UNPROMOTED` still runs verification (must not skip); (5) attested commit **not** on `main` fails; (6) multi-image overlay fails; (7) docs-only PR succeeds.
+**Required negative tests:** (1) fabricated digest fails; (2) missing manifest fails; (3) non-allow-listed **signer path** fails; (4) real digest + `UNPROMOTED` comment still verifies; (5) commit not on `main` fails; (6) multi-image overlay fails (exit nonzero — not silent skip); (7) broken git base-ref fails the gate; (8) docs-only PR succeeds.
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -525,7 +576,7 @@ gh api "repos/$GH_OWNER/$(basename "$HARBOUR_ROOT")/branches/main/protection" \
 
 Required checks must include the service validate job, `policy` and `promotion-verify` (**always reports**). If your plan cannot enforce this, write the gap into `LIMITATIONS.md` with a compensating control (e.g. you do not self-approve; a second reviewer is the independent tester).
 
-**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` with `--expect-commit` and `--approved-workflows-file` and show a non-allow-listed attestation workflow is rejected. (4) Promote a **fabricated** digest and show `promotion-verify` fails. (5) Open a docs-only PR and show `promotion-verify` still reports success.
+**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` with `--expect-commit` and `--approved-workflows-file` pointing at signer **paths**; show a non-allow-listed signer is rejected. (4) Promote a **fabricated** digest and show `promotion-verify` fails. (5) Open a multi-image overlay PR and show the gate exits nonzero. (6) Open a docs-only PR and show `promotion-verify` still reports success.
 
 **Verify:** One page shows *merge commit → run URL → digest → attestation commit → promotion PR*. Without a break in that chain, the artefact is traceable.
 
@@ -583,16 +634,11 @@ spec:
       exclude: {any: [{resources: {namespaces: [kube-system, kyverno, flux-system, local-path-storage, platform-system]}}]}
       validate:
         failureAction: Enforce
-        message: "Pods must run as non-root; every container type forbids privilege escalation and sets a memory limit. CPU limits optional (ADR 0301/0309)."
+        message: "Pods must run as non-root; app/init containers forbid privilege escalation and set memory limits. CPU limits optional (ADR 0301/0309)."
         pattern:
           spec:
             securityContext: {runAsNonRoot: true}
             =(initContainers):
-              - securityContext: {allowPrivilegeEscalation: false}
-                resources:
-                  requests: {cpu: "?*", memory: "?*"}
-                  limits: {memory: "?*"}
-            =(ephemeralContainers):
               - securityContext: {allowPrivilegeEscalation: false}
                 resources:
                   requests: {cpu: "?*", memory: "?*"}
@@ -602,9 +648,21 @@ spec:
                 resources:
                   requests: {cpu: "?*", memory: "?*"}
                   limits: {memory: "?*"}
+    # Ephemeral containers (kubectl debug) cannot set resources in Kubernetes — apply
+    # digest (above) + privilege restrictions only.
+    - name: require-ephemeral-no-privilege
+      match: {any: [{resources: {kinds: [Pod]}}]}
+      exclude: {any: [{resources: {namespaces: [kube-system, kyverno, flux-system, local-path-storage, platform-system]}}]}
+      validate:
+        failureAction: Enforce
+        message: "Ephemeral containers must not escalate privilege (resources are forbidden by the API)."
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - securityContext: {allowPrivilegeEscalation: false}
 ```
 
-> **Workload model:** golden-path services may use init containers; ephemeral containers are rare in kind labs but covered so a debug attach cannot bypass digest/security rules. A compliant app container with a noncompliant init container must fail offline + admission checks.
+> **Workload model:** golden-path services may use init containers. Ephemeral containers get **digest + no privilege escalation** only — Kubernetes rejects `resources` on ephemeral containers, so requiring requests/limits would ban legitimate `kubectl debug`. Lab: attach a debug container and confirm admission still enforces digest/security.
 
 **Platform-wide resource policy (explicit):** P01 omits CPU *limits* to avoid throttling; P04 must **not** contradict that. Kyverno requires memory limits + CPU/memory *requests*. CPU limits remain allowed but not mandatory. Document in ADR 0309. Re-render P01 Harbour, a P03 golden-path service, Postgres and the backup Job through `harbour-policy-check` — all must pass the same suite.
 
@@ -726,7 +784,7 @@ def result_of(r):
     return str(r.get("result") or r.get("status") or "").lower()
 
 found_fail = False
-saw_error_for_rule = False
+bad_side = []
 matched = []
 for r in (rep.get("results") or []):
     if not isinstance(r, dict):
@@ -734,19 +792,59 @@ for r in (rep.get("results") or []):
     rule = str(r.get("rule") or r.get("policy") or "")
     result = result_of(r)
     matched.append((rule, result))
-    if want in rule and result == "error":
-        saw_error_for_rule = True
-    if want in rule and result == "fail":
+    if want not in rule:
+        continue
+    if result == "fail":
         found_fail = True
-if saw_error_for_rule and not found_fail:
-    print(f"FAIL: rule {want} returned error (evaluation failure), not a proven denial; saw={matched[:12]}")
+    elif result in {"error", "skip", "warn"}:
+        bad_side.append(result)
+# A successful denial requires fail and *no* error/skip/warn for that rule.
+if bad_side:
+    print(f"FAIL: rule {want} has non-fail outcomes {bad_side} (mixed reports are not a clean denial); saw={matched[:12]}")
     sys.exit(1)
 if not found_fail:
     print(f"FAIL: did not observe rule {want} result=fail; saw={matched[:12]} rc={apply_rc}")
     sys.exit(1)
-print(f"OK: rule {want} denied fixture with result=fail (kyverno_rc={apply_rc})")
+print(f"OK: rule {want} denied fixture with clean result=fail (kyverno_rc={apply_rc})")
 PY
 }
+# Unit-test the report parser (pass-only, fail-only, error-only, fail+error, skip, empty).
+python3 <<'PY'
+import sys, tempfile, textwrap, subprocess, os, yaml
+from pathlib import Path
+
+def parse(want, report_yaml):
+    # Inline copy of denial acceptance rules for fixture coverage.
+    docs = list(yaml.safe_load_all(report_yaml))
+    rep = next((d for d in docs if isinstance(d, dict) and "results" in d), docs[0] if docs else {})
+    found_fail, bad = False, []
+    for r in (rep.get("results") or []):
+        rule = str(r.get("rule") or "")
+        result = str(r.get("result") or r.get("status") or "").lower()
+        if want not in rule: continue
+        if result == "fail": found_fail = True
+        elif result in {"error", "skip", "warn"}: bad.append(result)
+    if bad: return "reject-mixed"
+    if not found_fail: return "reject-missing"
+    return "accept"
+
+cases = [
+    ("pass-only", [{"rule": "require-image-digest", "result": "pass"}], "reject-missing"),
+    ("fail-only", [{"rule": "require-image-digest", "result": "fail"}], "accept"),
+    ("error-only", [{"rule": "require-image-digest", "result": "error"}], "reject-mixed"),
+    ("fail+error", [
+        {"rule": "require-image-digest", "result": "fail"},
+        {"rule": "require-image-digest", "result": "error"},
+    ], "reject-mixed"),
+    ("skip", [{"rule": "require-image-digest", "result": "skip"}], "reject-mixed"),
+    ("empty", [], "reject-missing"),
+]
+for name, results, expect in cases:
+    doc = {"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReport", "results": results}
+    got = parse("require-image-digest", yaml.safe_dump(doc))
+    assert got == expect, f"{name}: want {expect} got {got}"
+print("OK: denial-parser unit fixtures")
+PY
 cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -1569,15 +1667,17 @@ for stage in suspend copy; do
     [ "$NOW" = "$DESIRED_REPLICAS" ] \
       || { echo "FAIL: replicas after $stage failure=$NOW want=$DESIRED_REPLICAS"; exit 1; }
     kubectl -n "$NS" wait --for=condition=Ready pod -l "app=$SVC" --timeout=180s
-    # Application health — resume ≠ recovery until /ready is query_ok (or HTTP 200 for stateless).
+    # Stateful Ledger: /ready must return HTTP 200 with query_ok. /health alone is insufficient.
     kubectl -n "$NS" port-forward "svc/$SVC" 18081:80 >/tmp/pf-recover-$stage.log 2>&1 &
     PF_REC=$!
     sleep 2
-    curl -sf --max-time 5 http://127.0.0.1:18081/ready | tee -a "$HARBOUR_DRILL_OUT/restore-fail-$stage.txt" \
-      | grep -qE 'query_ok|ok|ready' \
-      || curl -sf --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/health | grep -q 200
+    READY_CODE="$(curl -sS --max-time 5 -o /tmp/ready-body -w '%{http_code}' http://127.0.0.1:18081/ready || echo 000)"
     kill "$PF_REC" 2>/dev/null || true
-    echo "OK: safe failure $stage → Flux resumed, replicas=$NOW, app healthy"
+    [ "$READY_CODE" = "200" ] || { echo "FAIL: /ready HTTP $READY_CODE after $stage"; exit 1; }
+    grep -q query_ok /tmp/ready-body \
+      || { echo "FAIL: /ready body missing query_ok (got: $(cat /tmp/ready-body))"; exit 1; }
+    echo "OK: safe failure $stage → Flux resumed, replicas=$NOW, /ready query_ok" \
+      | tee -a "$HARBOUR_DRILL_OUT/restore-fail-$stage.txt"
   } | tee -a "$HARBOUR_DRILL_OUT/restore-fail-$stage.txt"
 done
 # Unsafe path: inject after pg_restore — writers must remain stopped.
@@ -1594,7 +1694,17 @@ APP_PODS="$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | w
   || { echo "FAIL: writers still running after unsafe restore (pods=$APP_PODS)"; exit 1; }
 echo "OK: unsafe restore left Flux suspended and writers stopped" \
   | tee -a "$HARBOUR_DRILL_OUT/restore-fail-pg_restore.txt"
-# Operator recovery after the unsafe drill (document in evidence): verify DB, then resume.
+# Operator recovery: verify DB consistency *before* resuming writers.
+kubectl -n "$NS" exec postgres-0 -- \
+  psql -U harbour -d harbour -tAc "SELECT count(*) FROM ledger_entries" \
+  | tee -a "$HARBOUR_DRILL_OUT/operator-db-check.txt"
+# Compare against the last known good snapshot count when available.
+if [ -f "$HARBOUR_DRILL_OUT/entries-at-backup.json" ]; then
+  WANT="$(python3 -c 'import json; print(json.load(open("'"$HARBOUR_DRILL_OUT"'/entries-at-backup.json"))["count"])')"
+  GOT="$(tail -1 "$HARBOUR_DRILL_OUT/operator-db-check.txt" | tr -d '[:space:]')"
+  [ "$GOT" = "$WANT" ] \
+    || { echo "FAIL: operator DB count $GOT != backup snapshot $WANT — do not resume"; exit 1; }
+fi
 flux resume kustomization "$SVC" -n "$NS"
 kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite || true
 flux reconcile kustomization "$SVC" -n "$NS" --with-source

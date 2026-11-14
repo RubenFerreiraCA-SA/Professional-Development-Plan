@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; remediations after audits through `69d15ab` (PSA file input, YAML quota) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `82e50a6` (PSA file input, YAML quota) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
