@@ -34,8 +34,8 @@ Hour estimates in course detail are planning assumptions. Use disposable cluster
 
 | | |
 | --- | --- |
-| **P01–P04** | Authored; remediations after audits through `fbd5030` — **awaiting re-review (not signed off)** |
-| **Remediation focus (fbd5030)** | YAML-aware quota + unpromoted overlay; Kyverno if/else rc capture; Pod-level PSA dry-run; MAINT-before-suspend + DB_UNSAFE restore; harden fetch ancestry |
+| **P01–P04** | Authored; remediations after audits through `69d15ab` — **awaiting re-review (not signed off)** |
+| **Remediation focus (69d15ab)** | PSA file-based Pod dry-run; Kyverno fail≠error + broken-policy fixture; single-image promotion; initContainer policy; gh --signer-workflow/--source-ref; restore health asserts |
 | **Not claimed** | Clean-room lab execution; independent Gate-5 platform-user acceptance; executable Harbour reference repository |
 
 **Course detail:** [P00 Platform Syllabus](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) · **Checklist:** [Final Project Checklist · Platform](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

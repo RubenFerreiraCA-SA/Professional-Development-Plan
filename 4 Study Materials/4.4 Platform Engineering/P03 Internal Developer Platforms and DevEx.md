@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; remediations after audits through `fbd5030` (YAML quota/PSA Pod dry-run, init-probe split) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `69d15ab` (PSA file input, YAML quota) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -596,17 +596,25 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 T="${1:?usage: test-template-admission <generated-service-name>}"
 NS="psa-probe-$T"
+# Clean up the probe namespace even if an intermediate command fails.
+trap 'kubectl delete namespace "$NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true' EXIT
 kubectl create namespace "$NS" --dry-run=client -o yaml \
   | kubectl label --local -f - \
       pod-security.kubernetes.io/enforce=restricted \
       pod-security.kubernetes.io/enforce-version=latest -o yaml \
   | kubectl apply -f -
+# Write rendered YAML to a file so Python stdin is not stolen by a heredoc.
+RENDERED="/tmp/harbour-psa-${T}.yaml"
+POD_GOOD="/tmp/harbour-psa-${T}-good.yaml"
+POD_BAD="/tmp/harbour-psa-${T}-bad.yaml"
+kubectl kustomize "deploy/$T/overlays/staging" > "$RENDERED"
 # Build a Pod from the Deployment template (PSA evaluates Pod admission).
-kubectl kustomize "deploy/$T/overlays/staging" | python3 - "$NS" <<'PY' \
-  | kubectl apply --dry-run=server -f -
+# Heredoc supplies the *program*; YAML is read from $RENDERED (not stdin) — avoids the
+# classic `cmd | python3 - <<'PY'` collision where the heredoc replaces piped input.
+python3 - "$NS" "$RENDERED" "$POD_GOOD" <<'PY'
 import sys, yaml, copy
-ns = sys.argv[1]
-docs = list(yaml.safe_load_all(sys.stdin))
+ns, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+docs = list(yaml.safe_load_all(open(src)))
 dep = next(d for d in docs if d and d.get("kind") == "Deployment")
 pod = {
   "apiVersion": "v1",
@@ -619,30 +627,30 @@ pod = {
   "spec": copy.deepcopy(dep["spec"]["template"]["spec"]),
 }
 pod["spec"]["restartPolicy"] = "Never"
-yaml.safe_dump(pod, sys.stdout)
+open(dst, "w").write(yaml.safe_dump(pod))
 PY
-# Negative: privileged Pod must be rejected by restricted PSA.
+kubectl apply --dry-run=server -f "$POD_GOOD"
+# Single-property negative: start from the *valid* Pod, flip only privileged: true.
+python3 - "$POD_GOOD" "$POD_BAD" <<'PY'
+import sys, yaml
+good, bad = sys.argv[1], sys.argv[2]
+pod = yaml.safe_load(open(good))
+pod["metadata"]["name"] = "psa-bad-privileged"
+for c in pod["spec"].get("containers") or []:
+    sc = c.setdefault("securityContext", {})
+    sc["privileged"] = True
+yaml.safe_dump(pod, open(bad, "w"))
+PY
 set +e
-kubectl -n "$NS" apply --dry-run=server -f - <<'EOF' 2>/tmp/psa-deny.txt
-apiVersion: v1
-kind: Pod
-metadata: {name: psa-bad}
-spec:
-  containers:
-    - name: c
-      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000001
-      command: ["sleep", "1"]
-      securityContext: {privileged: true}
-EOF
+kubectl apply --dry-run=server -f "$POD_BAD" 2>/tmp/psa-deny.txt
 rc=$?; set -e
-[ "$rc" -ne 0 ] || { echo "FAIL: privileged Pod was admitted under restricted PSA"; exit 1; }
-grep -qiE 'privileged|pod security|violat' /tmp/psa-deny.txt \
-  || { echo "FAIL: rejection was not PSA (got: $(cat /tmp/psa-deny.txt))"; exit 1; }
-kubectl delete namespace "$NS" --wait=false
-echo "template OK (Pod PSA dry-run + privileged denial)"
+[ "$rc" -ne 0 ] || { echo "FAIL: privileged=true Pod was admitted under restricted PSA"; exit 1; }
+grep -qiE 'privileged' /tmp/psa-deny.txt \
+  || { echo "FAIL: denial did not cite privileged (got: $(cat /tmp/psa-deny.txt))"; exit 1; }
+echo "template OK (Pod PSA dry-run + single-property privileged denial)"
 ```
 
-Wire `test-template` into a workflow on every change to `platform/` or the reusable workflows. Run `test-template-admission` on kind after Flux is up. (`.venv/` must be gitignored.) **Verify:** offline passes; breaking the template fails; valid Pod dry-run passes; privileged Pod is rejected.
+Wire `test-template` into a workflow on every change to `platform/` or the reusable workflows. Run `test-template-admission` on kind after Flux is up. (`.venv/` must be gitignored.) **Verify:** offline passes; breaking the template fails; valid Pod dry-run passes; flipping only `privileged: true` is rejected.
 
 **Practice — reproduce:** Generate `hello-docs`, run its tests and `kubectl kustomize` its staging overlay. **Challenge:** resist adding a `--db` flag; write down why stateful services are *not* in v1 (P04 §4.6 shows the cost of getting this wrong).
 
