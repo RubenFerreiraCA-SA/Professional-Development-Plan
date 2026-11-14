@@ -14,6 +14,6 @@ This folder contains the **textbooks and progressive teaching materials** for th
 
 [Read the AI Engineering textbook](4.3%20AI%20Engineering/README.md) — **A01–A03** documentation signed off (**optional** Final Project track). Course-detail under [AI Engineering](../3%20Course%20Detail/3.3%20AI%20Engineering/).
 
-## Other disciplines
+## Platform Engineering textbook
 
-Platform Engineering textbook is not yet authored; its course-detail files remain working outlines.
+[Read the Platform Engineering textbook](4.4%20Platform%20Engineering/README.md) — **P01–P04** authored; **documentation review pending** (not signed off). Course-detail under [Platform Engineering](../3%20Course%20Detail/3.4%20Platform%20Engineering/).

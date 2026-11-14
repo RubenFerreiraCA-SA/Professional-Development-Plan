@@ -178,8 +178,11 @@ Local state on a laptop is not a platform. Use an access-controlled **remote bac
 | Piece (AWS pattern) | Role |
 | --- | --- |
 | S3 bucket | State objects (versioning + encryption on) |
-| DynamoDB table | Lock lease |
-| IAM | Who may read/write which state keys |
+| S3 lock object (`.tflock`) | Native state lock when `use_lockfile = true` (Terraform **1.10+**; treat **≥ 1.11** as the curriculum default) |
+| IAM | Who may read/write state keys **and** the sibling `.tflock` object |
+| DynamoDB table (legacy) | Deprecated lock lease — keep only for migration labs; do **not** teach it as the primary architecture |
+
+HashiCorp’s S3 backend documents DynamoDB locking as **deprecated** and scheduled for removal. This chapter’s primary path is **S3-native locking**. If you already created a DynamoDB lock table from an older draft, complete the migration exercise in §5.2.4 rather than leaving DynamoDB as the only lock.
 
 `sensitive` outputs still often land in state. Treat state access like production secret access.
 
@@ -199,7 +202,7 @@ cd infra/bootstrap
 
 ```hcl
 terraform {
-  required_version = ">= 1.9.0"
+  required_version = ">= 1.11.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -229,7 +232,7 @@ variable "aws_region" {
 
 variable "name_prefix" {
   type        = string
-  description = "Short prefix for bucket/table names (lowercase alphanumeric and hyphen)."
+  description = "Short prefix for bucket names (lowercase alphanumeric and hyphen)."
   default     = "harbour"
 
   validation {
@@ -246,7 +249,7 @@ aws_region  = "eu-west-1"
 name_prefix = "harbour"
 ```
 
-`main.tf`:
+`main.tf` (primary path — **no DynamoDB**):
 
 ```hcl
 data "aws_caller_identity" "current" {}
@@ -283,27 +286,8 @@ resource "aws_s3_bucket_public_access_block" "tf_state" {
   restrict_public_buckets = true
 }
 
-resource "aws_dynamodb_table" "tf_locks" {
-  name         = "${var.name_prefix}-tf-locks"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = {
-    Purpose = "terraform-lock"
-  }
-}
-
 output "state_bucket" {
   value = aws_s3_bucket.tf_state.bucket
-}
-
-output "lock_table" {
-  value = aws_dynamodb_table.tf_locks.name
 }
 
 output "aws_region" {
@@ -321,16 +305,16 @@ terraform plan -out=/tmp/harbour-bootstrap.tfplan
 terraform apply /tmp/harbour-bootstrap.tfplan
 
 export STATE_BUCKET="$(terraform output -raw state_bucket)"
-export LOCK_TABLE="$(terraform output -raw lock_table)"
 export AWS_REGION="$(terraform output -raw aws_region)"
 export AWS_ACCOUNT_ID="$(terraform output -raw aws_account_id)"
 echo "STATE_BUCKET=$STATE_BUCKET"
-echo "LOCK_TABLE=$LOCK_TABLE"
 echo "AWS_REGION=$AWS_REGION"
 echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
 ```
 
-Record those four values in your Progress Log. **Do not destroy bootstrap** while environments still use it.
+Record those three values in your Progress Log. **Do not destroy bootstrap** while environments still use it.
+
+IAM for callers that use `use_lockfile` must allow `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on both the state key and the sibling `*.tflock` object (see [S3 backend](https://developer.hashicorp.com/terraform/language/backend/s3)).
 
 ### 5.2.3 Worked example — lock-drill root (deterministic contention)
 
@@ -345,7 +329,7 @@ cd "$HARBOUR_ROOT/infra/lock-drill"
 
 ```hcl
 terraform {
-  required_version = ">= 1.9.0"
+  required_version = ">= 1.11.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -358,9 +342,10 @@ terraform {
   }
 
   backend "s3" {
-    # filled by -backend-config on init (same bucket/table as bootstrap)
-    key      = "harbour/lock-drill/terraform.tfstate"
-    encrypt  = true
+    # bucket/region via -backend-config; native lock is opt-in here
+    key          = "harbour/lock-drill/terraform.tfstate"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 
@@ -397,7 +382,6 @@ aws_region = "eu-west-1"
 cd "$HARBOUR_ROOT/infra/lock-drill"
 terraform init \
   -backend-config="bucket=${STATE_BUCKET}" \
-  -backend-config="dynamodb_table=${LOCK_TABLE}" \
   -backend-config="region=${AWS_REGION}"
 terraform apply -auto-approve
 ```
@@ -409,15 +393,25 @@ cd "$HARBOUR_ROOT/infra/lock-drill"
 terraform plan -lock-timeout=0s
 ```
 
-**Expected:** Terminal B fails immediately with a state lock error (lock ID present). Do **not** `force-unlock` while A is still applying. After A finishes, B’s plan succeeds.
+**Expected:** Terminal B fails immediately with a state lock error (lock holder identity present). Do **not** `force-unlock` while A is still applying. After A finishes, B’s plan succeeds. Optionally confirm a `.tflock` object existed beside the state key during the hold (`aws s3 ls "s3://${STATE_BUCKET}/harbour/lock-drill/"`).
 
 Destroy when done: `terraform destroy -auto-approve` in the lock-drill root.
 
 **Practice — reproduce:** Capture the lock error text in your evidence notes.
 
-**Challenge:** Write the recovery steps for a *stale* lock after a crashed CI runner (prove no apply is running, then unlock) — separate from “active apply in another terminal.”
+**Challenge:** Write the recovery steps for a *stale* lock after a crashed CI runner (prove no apply is running, then unlock / remove the stale `.tflock` only with that proof) — separate from “active apply in another terminal.”
 
-**Verify:** Staging/prod will use the same bucket/table with **different state keys**; lock-drill proved locking works before you build expensive resources.
+### 5.2.4 Legacy path — DynamoDB locking and migration
+
+Only if you already operate DynamoDB locks or must interoperate with older Terraform clients:
+
+1. Keep `dynamodb_table` **and** set `use_lockfile = true` so both locks are acquired.  
+2. Bump all humans and CI to Terraform **≥ 1.11**, run `terraform init -reconfigure`.  
+3. Remove `dynamodb_table` once every consumer uses native locking; delete the unused table when safe.
+
+Do **not** present DynamoDB-only locking as the recommended Harbour architecture. See HashiCorp’s [S3 backend](https://developer.hashicorp.com/terraform/language/backend/s3) and AWS Prescriptive Guidance on backends.
+
+**Verify:** Staging/prod will use the same bucket with **different state keys** and `use_lockfile = true`; lock-drill proved locking works before you build expensive resources.
 
 ---
 
@@ -829,7 +823,7 @@ cd "$HARBOUR_ROOT/infra/envs/staging"
 
 ```hcl
 terraform {
-  required_version = ">= 1.9.0"
+  required_version = ">= 1.11.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -838,9 +832,10 @@ terraform {
   }
 
   backend "s3" {
-    key     = "harbour/staging/terraform.tfstate"
-    encrypt = true
-    # bucket, region, dynamodb_table via -backend-config
+    key          = "harbour/staging/terraform.tfstate"
+    encrypt      = true
+    use_lockfile = true
+    # bucket, region via -backend-config
   }
 }
 
@@ -883,7 +878,7 @@ variable "container_image" {
   description = "ECR image@sha256 digest. Required when enable_runtime is true."
   default     = ""
 
-  # Cross-variable validation requires Terraform >= 1.9 (matches required_version).
+  # Cross-variable validation requires Terraform >= 1.9 (curriculum default is >= 1.11).
   validation {
     condition = (
       !var.enable_runtime || (
@@ -954,12 +949,12 @@ container_image = ""
 cd "$HARBOUR_ROOT/infra/envs/staging"
 # Re-export if this is a new shell:
 # source values recorded from bootstrap, or:
-# export STATE_BUCKET=... LOCK_TABLE=... AWS_REGION=... AWS_ACCOUNT_ID=...
+# export STATE_BUCKET=... AWS_REGION=... AWS_ACCOUNT_ID=...
 
 terraform init \
   -backend-config="bucket=${STATE_BUCKET}" \
-  -backend-config="dynamodb_table=${LOCK_TABLE}" \
-  -backend-config="region=${AWS_REGION}"
+  -backend-config="region=${AWS_REGION}" \
+  -backend-config="use_lockfile=true"
 
 terraform plan -out=/tmp/harbour-stg-a.tfplan
 terraform apply /tmp/harbour-stg-a.tfplan
@@ -1193,7 +1188,7 @@ GitHub org/repo settings can customise the OIDC `sub` format (for example to inc
 **Plan role** permissions (illustrative — review with IAM Access Analyzer):
 
 - `s3:ListBucket`, `s3:GetObject` on the state bucket/prefix `harbour/staging/*`
-- DynamoDB lock table items needed for plan
+- S3 state object + sibling `.tflock` permissions needed for plan (legacy DynamoDB only if migrating)
 - Read-only describe/list for refresh
 - **No** mutate/create/delete on compute/network; **no** deleting state objects
 
@@ -1281,7 +1276,7 @@ jobs:
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -backend-config="use_lockfile=true" \
             -backend-config="region=eu-west-1"
       - name: Plan
         run: |
@@ -1362,7 +1357,7 @@ Propose a change that sets `allowed_cidrs = ["0.0.0.0/0"]` (should already fail 
 
 - AWS Budgets / billing alarm for the training account
 - Tags: `Project`, `Owner`, `Environment`
-- Estimate: ALB hours + Fargate vCPU/GB + S3/DynamoDB (usually small) — **NAT would dominate**; you avoided it on purpose
+- Estimate: ALB hours + Fargate vCPU/GB + S3 state (usually small) — **NAT would dominate**; you avoided it on purpose
 - `infra/README.md`: bootstrap → lock-drill (optional) → staging stages A→B→C → curl health → destroy order
 
 ### 5.7.2 ADR
@@ -1416,7 +1411,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 
 ### Example assessment conclusion (evidence still required)
 
-> Bootstrap S3/DynamoDB backends host env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Intended reviewers get a lower-exposure JSON address/action summary (still private); full plan files stay on the trusted runner. A second engineer completed staging from the README.
+> Bootstrap S3 backend with `use_lockfile` hosts env state. Lock-drill proved contention. Staging used A→B→C (build/pull image, push unique immutable ECR tag, resolve digest, then ECS). `/health` serves Harbour behind an IP-restricted ALB. Every PR runs validate-only (no AWS); plan/apply use OIDC roles scoped to trusted workflow/ref/environment. Intended reviewers get a lower-exposure JSON address/action summary (still private); full plan files stay on the trusted runner. A second engineer completed staging from the README.
 
 ---
 
@@ -1425,7 +1420,7 @@ Align with [D05 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D05%20Infr
 | You need to… | Start by… | Avoid… |
 | --- | --- | --- |
 | Understand a change | `plan` + `show`, check replacements | Blind `apply` |
-| Share state | S3 + DynamoDB lock + IAM | Laptop `terraform.tfstate` in Dropbox |
+| Share state | S3 + `use_lockfile` + IAM (DynamoDB only during migration) | Laptop `terraform.tfstate` in Dropbox |
 | Isolate envs | Separate state keys + CIDR/name prefixes | One state for all worlds |
 | Cut training cost | No NAT; tiny Fargate; destroy often | Always-on NAT + open ALB |
 | CI | Validate on every PR (no AWS); plan via scoped OIDC | `repo:…:*` trust; PR code assuming plan role; “redaction = safe” |
