@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 2 of 4*
 
-> **Status:** Authored for study; **documentation review pending** (not signed off). Commands and manifests have not been run in a clean-room environment by an independent reviewer. Kubernetes and kind behaviour changes between releases — verify against current documentation and your cluster version.
+> **Status:** Authored; corrections after audit `ff921e0` — **not signed off**. Clean-room execution still not claimed.
 
 | | |
 | --- | --- |
@@ -222,14 +222,42 @@ kubectl --context "$ALICE" delete deploy harbour-api             # Forbidden
 
 **Expected:** the first two succeed; each other line fails with `Error from server (Forbidden): … User "alice" cannot …` naming the verb, resource and namespace. Save all of it to `docs/platform/rbac-evidence.txt` — this is checklist evidence.
 
-Faster, and available to admins who cannot hold alice's key:
+Machine-checkable contract (`deploy/platform/staging/test-rbac.sh`) — distinguish Forbidden from auth/connectivity failures; fail the script if the wrong outcome appears:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+NS="${1:?namespace}"; USER="${2:-alice}"; GROUP="${3:-harbour-developers}"
+pass=0; fail=0
+assert_yes() {
+  if kubectl auth can-i $1 --as "$USER" --as-group "$GROUP" -n "$NS" | grep -qx yes; then
+    echo "PASS allow: $1"; pass=$((pass+1))
+  else echo "FAIL expected allow: $1"; fail=$((fail+1)); fi
+}
+assert_no() {
+  if kubectl auth can-i $1 --as "$USER" --as-group "$GROUP" -n "$NS" | grep -qx no; then
+    echo "PASS deny: $1"; pass=$((pass+1))
+  else echo "FAIL expected deny: $1"; fail=$((fail+1)); fi
+}
+# Live Forbidden (not connection errors)
+out="$(kubectl --context "kind-${LAB_CLUSTER}-alice" get secrets -n "$NS" 2>&1 || true)"
+echo "$out" | grep -q 'Forbidden' || { echo "FAIL: secrets denial was not Forbidden (got: $out)"; fail=$((fail+1)); }
+assert_yes "get pods"
+assert_yes "list pods"
+assert_no "get secrets"
+assert_no "create pods/exec"
+assert_no "delete deployments"
+assert_no "create namespaces"
+# Negative control: a deliberately excessive binding must make assert_no fail — prove the harness works.
+echo "Harness check: temporarily bind cluster-admin to alice in a disposable clone only; expect assert_no to fail, then remove."
+[ "$fail" -eq 0 ] || exit 1
+echo "OK rbac contract ($pass assertions)"
+```
+
+Faster listing for humans:
 
 ```bash
 kubectl auth can-i --list -n "$NS" --as alice --as-group harbour-developers
-for check in "get secrets" "create pods/exec" "list pods -n harbour-prod" "create clusterroles" "* *"; do
-  printf '%-32s ' "$check"
-  kubectl auth can-i $check --as alice --as-group harbour-developers -n "$NS"
-done
 ```
 
 ### 2.2.5 Escalation traps — audit for these
@@ -566,6 +594,23 @@ kubectl -n "$NS" delete pod denied-client
 
 The unlabelled `denied-client` must fail (it is not in the `harbour-api-ingress` allow list, and its egress is default-denied); the labelled `probe-client` must succeed. The **blocked vs allowed** outputs are the evidence.
 
+#### Connectivity matrix (required before calling NetworkPolicy “done”)
+
+Default-deny is a significant change. One probe succeeding is **not** proof that the platform still works. Record and automate this matrix (save as `docs/platform/networkpolicy-matrix.md` and a script under `deploy/platform/staging/test-connectivity.sh`):
+
+| Flow | From → To | Expect | How to test |
+| --- | --- | --- | --- |
+| App health (allowed) | `probe-client` → `harbour-api:8000` | Allow | `run_probe` → HTTP 200 |
+| Lateral (denied) | `denied-client` → `harbour-api:8000` | Deny | timeout / connection error |
+| DNS | any app Pod → `kube-dns:53` | Allow | `nslookup kubernetes.default.svc.cluster.local` from a labelled Pod |
+| Observability (if present) | app → OTel/Prometheus collector | Allow or **documented exception** | scrape/export succeeds or gap in LIMITATIONS |
+| Ingress controller (if present) | ingress Pod → `harbour-api:8000` | Allow or exception | external request reaches `/health` |
+| Egress to registry/CI (usually none from app) | app → Internet | Deny by default | confirm no unexpected egress |
+
+**Reversible apply sequence:** (1) save current policies (`kubectl -n "$NS" get netpol -o yaml > /tmp/netpol-before.yaml`); (2) apply default-deny + allows; (3) run the matrix script (must exit non-zero on any unexpected allow/deny); (4) restore with `kubectl apply -f /tmp/netpol-before.yaml` **or** `kubectl apply -k deploy/platform/staging` from Git; (5) re-run the matrix and confirm baseline restored.
+
+P03/P04 tenants must inherit an equivalent default-deny + DNS allow (and app ingress allow for their probe/status identity) — see tenant post-provisioning checks in P03.
+
 ### 2.4.3 Worked example — admission policy: digest-addressed images only
 
 Kubernetes 1.30+ includes `ValidatingAdmissionPolicy` (CEL expressions, no extra controller). `deploy/platform/cluster/vap-require-digest.yaml`:
@@ -838,20 +883,43 @@ If your etcd image lacks `etcdutl`, use `etcdctl snapshot status` (deprecated bu
 
 **Honest bar for this chapter:** a verified snapshot (`status` output saved) plus a **measured Git rebuild** (§2.7.2 and §2.7.4) is Competent. A full etcd restore rehearsal is **Advanced** and optional.
 
-### 2.7.4 Worked example — rebuild the whole cluster
+### 2.7.4 Worked example — rebuild the whole cluster (claim the right recovery level)
+
+Distinguish what you prove. Do **not** call a manual `kubectl apply -k` of the app “GitOps recovered”.
+
+| Recovery level | What must work after rebuild | Evidence |
+| --- | --- | --- |
+| Workload | App Ready and serving | `deploy` Available; client probe |
+| Cluster configuration | RBAC, admission, quota, NetworkPolicy restored | `test-rbac.sh`, policy denials, matrix |
+| **GitOps** | Flux installed; GitRepository reachable; Kustomizations Ready; **no** hand-applied app manifests required for steady state | `flux check`; `flux get all -A` |
+| Platform | Tenant provisioning / golden path works again | P03 `harbour-create` or tenant reconcile |
+
+**Competent (this chapter):** levels 1–3. Level 4 is strengthened in P03–P04 but should not regress here.
 
 ```bash
 START=$(date +%s)
 kind delete cluster --name "$LAB_CLUSTER"
-kind create cluster --config infra/kind/harbour-lab.yaml --image "$KIND_NODE_IMAGE"   # or the Calico config if you needed enforcement
+kind create cluster --config infra/kind/harbour-lab.yaml --image "$KIND_NODE_IMAGE"   # or Calico config if required
 # re-run P01 §1.2.2 registry wiring (nodes lost their containerd config)
-kubectl apply -f deploy/platform/cluster/vap-require-digest.yaml
-kubectl apply -k deploy/platform/staging
+# --- GitOps recovery (required for the GitOps claim) ---
+# Re-bootstrap Flux the same way D06/your runbook documents (pin versions).
+# Example shape — replace with your actual bootstrap script:
+#   ./scripts/bootstrap-flux.sh   # installs controllers, creates GitRepository + root Kustomization
+flux check
+flux get sources git -A
+flux get kustomizations -A
+# Wait until the *platform* and *app* Kustomizations are Ready (reconciled from Git),
+# not merely until a one-shot kubectl apply finished.
+kubectl -n flux-system wait --for=condition=Ready kustomization/flux-system --timeout=300s || true
 kubectl -n "$NS" wait --for=condition=Available deploy/harbour-api --timeout=300s
-echo "RTO (cluster rebuild): $(( $(date +%s) - START )) s" | tee docs/platform/recovery-cluster.txt
+# Cluster configuration recovery checks:
+kubectl apply -f deploy/platform/cluster/vap-require-digest.yaml  # only if this lives outside Flux; prefer Git
+./deploy/platform/staging/test-rbac.sh "$NS"
+./deploy/platform/staging/test-connectivity.sh "$NS"
+echo "RTO (cluster rebuild incl. GitOps): $(( $(date +%s) - START )) s" | tee docs/platform/recovery-cluster.txt
 ```
 
-Registry images survive (the registry container is outside the cluster), so digests resolve. Note what needed manual steps: registry wiring, and identities — **alice's kubeconfig is now invalid** because the new cluster has a new CA. If a rebuild step is not scripted, that is a runbook gap; fix it.
+If you only re-apply manifests with `kubectl apply -k` and never restore Flux, record the claim as **workload + config recovery** and mark GitOps recovery `Unproven` in your claims ledger (P04). Registry images survive (registry container outside the cluster). **alice's kubeconfig is invalid** after rebuild (new CA) — re-issue as part of the runbook.
 
 ### 2.7.5 Practice — reproduce
 

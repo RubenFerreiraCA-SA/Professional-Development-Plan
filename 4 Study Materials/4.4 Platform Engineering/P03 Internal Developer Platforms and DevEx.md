@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored for study; documentation review pending. Clean-room execution of every script is **not** claimed. |
+| **Status** | Authored; corrections after audit `ff921e0` — **not signed off** |
 
 ## How to study this chapter
 
@@ -403,7 +403,15 @@ EOF
 cat > "platform/tenants/$NAME/tenant.yaml" <<EOF
 apiVersion: v1
 kind: Namespace
-metadata: {name: $NS, labels: {platform.harbour/service: $NAME, platform.harbour/env: staging}}
+metadata:
+  name: $NS
+  labels:
+    platform.harbour/service: $NAME
+    platform.harbour/env: staging
+    # Inherit P02 security baseline — namespace alone is not isolation.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -420,6 +428,34 @@ metadata: {name: reconciler, namespace: $NS}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: admin}
 subjects: [{kind: ServiceAccount, name: reconciler, namespace: $NS}]
 ---
+# Platform-default NetworkPolicies (same contract as P02 harbour-staging).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny-all, namespace: $NS}
+spec: {podSelector: {}, policyTypes: [Ingress, Egress]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-dns-egress, namespace: $NS}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ${NAME}-ingress, namespace: $NS}
+spec:
+  podSelector: {matchLabels: {app: $NAME}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: probe-client}}}]
+      ports: [{protocol: TCP, port: 8000}]
+---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata: {name: $NAME, namespace: $NS}
@@ -432,6 +468,9 @@ spec:
   timeout: 3m
   serviceAccountName: reconciler
 EOF
+# Post-provision proof (run after Flux reconciles the tenant):
+#   platform/bin/harbour-check-service $NAME --allow-unpromoted
+# must confirm PSA labels + default-deny exist — not merely that the namespace was created.
 
 # --- discoverability + docs ----------------------------------------------
 cat > "catalog/$NAME.yaml" <<EOF
@@ -592,22 +631,45 @@ for f in "services/$NAME/Dockerfile" "services/$NAME/test_main.py" "catalog/$NAM
 done
 grep -qE '^  owner: .+' "catalog/$NAME.yaml" || bad "catalog: owner missing"
 R="$(kubectl kustomize "deploy/$NAME/overlays/staging")" || { echo "FAIL: kustomize build"; exit 1; }
+# Introductory text checks (fast feedback). Final acceptance uses structural/Kyverno deny fixtures (P04 §4.5.2).
 echo "$R" | grep -q 'readinessProbe' || bad "no readinessProbe"
 echo "$R" | grep -q 'livenessProbe'  || bad "no livenessProbe"
 echo "$R" | grep -q 'limits:'        || bad "no resource limits"
 echo "$R" | grep -q 'runAsNonRoot: true' || bad "not runAsNonRoot"
 echo "$R" | grep -qE 'image: .*:latest' && bad "uses :latest"
-IMG="$(echo "$R" | sed -nE 's/^[[:space:]]*image:[[:space:]]*(.*)$/\1/p' | head -1)"
-case "$IMG" in
-  *@sha256:0000000000000000000000000000000000000000000000000000000000000000)
-    [ "$ALLOW" = "--allow-unpromoted" ] || bad "image is the UNPROMOTED sentinel; promote a real digest" ;;
-  *@sha256:*) ;;
-  *) bad "image not pinned by digest: $IMG" ;;
-esac
+# Structural: every container image in the rendered Deployment must be digest-shaped.
+mapfile -t IMAGES < <(printf '%s\n' "$R" | python3 -c '
+import sys, yaml
+docs = list(yaml.safe_load_all(sys.stdin))
+for d in docs:
+    if not d or d.get("kind") != "Deployment":
+        continue
+    for c in d["spec"]["template"]["spec"].get("containers", []):
+        print(c.get("image", ""))
+')
+[ "${#IMAGES[@]}" -ge 1 ] || bad "no Deployment containers found in rendered overlay"
+for IMG in "${IMAGES[@]}"; do
+  case "$IMG" in
+    *@sha256:0000000000000000000000000000000000000000000000000000000000000000)
+      [ "$ALLOW" = "--allow-unpromoted" ] || bad "image is the UNPROMOTED sentinel; promote a real digest" ;;
+    *@sha256:*) ;;
+    *) bad "image not pinned by digest: $IMG" ;;
+  esac
+done
+# Effective tenant controls (namespace labels / NetworkPolicy presence) — not "namespace exists".
+TENANT_NS="$NAME-staging"
+if kubectl get ns "$TENANT_NS" >/dev/null 2>&1; then
+  kubectl get ns "$TENANT_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}{"\n"}' \
+    | grep -qx 'restricted' || bad "tenant namespace missing PSA enforce=restricted"
+  kubectl -n "$TENANT_NS" get networkpolicy default-deny-all >/dev/null 2>&1 \
+    || bad "tenant missing default-deny-all NetworkPolicy (P02 inheritance)"
+fi
 [ "$fail" -eq 0 ] && echo "OK: $NAME conforms to golden path v1" || exit 1
 ```
 
 Wire it into a required pull-request check (`policy`) so that a failing check blocks merge — mirroring D04's failed-gate proof. The sentinel is allowed only when the PR is the *creation* PR.
+
+**Honest limit:** grep/structure checks prove *shape*, not that admission will reject the same violation. P04 §4.5.2 requires negative fixtures that fail both `kyverno apply` and live admission.
 
 ### 3.4.4 One-time platform wiring (author task, documented)
 
@@ -697,24 +759,41 @@ NAME="${1:?usage: harbour-status <service> [env]}"; ENV="${2:-staging}"; NS="$NA
 k() { kubectl --request-timeout=10s "$@"; }
 if ! k get ns "$NS" >/dev/null 2>&1; then
   echo "VERDICT: UNKNOWN — namespace $NS not visible."
-  echo "Next step: not deployed yet? Golden path step 4 (promote). No access? START-HERE §Access."; exit 3
+  echo "Next step: not deployed yet? Golden path step 4 (promote). No access? START-HERE §Access."
+  exit 4
 fi
 read -r DESIRED READY <<<"$(k -n "$NS" get deploy "$NAME" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>/dev/null || echo '0 0')"
-READY="${READY:-0}"
+READY="${READY:-0}"; DESIRED="${DESIRED:-0}"
+FLUX_READY="$(k -n "$NS" get kustomization "$NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo n/a)"
 echo "service:  $NAME ($ENV)"
 echo "image:    $(k -n "$NS" get deploy "$NAME" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo n/a)"
 echo "replicas: ready $READY / desired $DESIRED"
-echo "gitops:   Ready=$(k -n "$NS" get kustomization "$NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo n/a)"
+echo "gitops:   Ready=$FLUX_READY"
 echo "recent events:"; k -n "$NS" get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 5 | sed 's/^/  /'
-if [ "$READY" = "$DESIRED" ] && [ "$DESIRED" != "0" ]; then echo "VERDICT: HEALTHY"
+# Exit codes are part of the contract: automation must not treat DOWN as success.
+# 0=HEALTHY, 2=DEGRADED, 3=DOWN, 4=UNKNOWN/no namespace, 5=GitOps not Ready.
+if [ "$READY" = "$DESIRED" ] && [ "$DESIRED" != "0" ]; then
+  if [ "$FLUX_READY" != "True" ] && [ "$FLUX_READY" != "n/a" ]; then
+    echo "VERDICT: DEGRADED — replicas Ready but Flux Kustomization is not Ready."
+    echo "Next step: kubectl -n $NS describe kustomization $NAME"
+    exit 2
+  fi
+  echo "VERDICT: HEALTHY"
+  exit 0
 elif [ "$READY" != "0" ]; then
-  echo "VERDICT: DEGRADED — some replicas not ready."; echo "Next step: docs/services/$NAME/RUNBOOK.md, row 'Pods not Ready'. Read the events above."
+  echo "VERDICT: DEGRADED — some replicas not ready."
+  echo "Next step: docs/services/$NAME/RUNBOOK.md, row 'Pods not Ready'. Read the events above."
+  exit 2
 else
-  echo "VERDICT: DOWN — no ready replicas."; echo "Next step: docs/services/$NAME/RUNBOOK.md; if the last promotion caused it, promote the previous digest."
+  echo "VERDICT: DOWN — no ready replicas."
+  echo "Next step: docs/services/$NAME/RUNBOOK.md; if the last promotion caused it, promote the previous digest."
+  exit 3
 fi
 ```
 
-**Limitations to state honestly:** this reports *Kubernetes* health, not user-journey health; link it to the D07 dashboard and SLO page for that. Treat it as the first screen, not the whole picture.
+**Contract:** CI and scripts must check `$?` (and preferably the `VERDICT:` line). A printed `DOWN` with exit 0 is a defect — this version exits non-zero.
+
+**Limitations to state honestly:** this reports *Kubernetes + Flux Ready* health, not user-journey health; link it to the D07 dashboard and SLO page for that. Treat it as the first screen, not the whole picture.
 
 ### 3.5.5 Portal options (decide with evidence)
 

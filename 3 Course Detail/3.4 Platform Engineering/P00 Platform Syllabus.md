@@ -52,9 +52,9 @@ Track Harbour increments on the [Final Project Checklist](../../1%20Foundational
 
 | Artifact | Status |
 | --- | --- |
-| This syllabus + module course-detail | Authored with the textbook (documentation review pending) |
-| Textbook chapters | [P01](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P02%20Kubernetes%20Administration%20and%20Operations.md), [P03](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md), [P04](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) — authored; documentation review pending |
+| This syllabus + module course-detail | Authored; **corrections in progress** after audit `ff921e0` — not signed off |
+| Textbook chapters | [P01](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)–[P04](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) — remediation for policy/promotion equivalence, application-level stateful recovery, GitOps rebuild, status contracts |
 | Clean-room lab certification | Separate QA workstream — not implied by authorship |
-| Executable Harbour reference + Gate 5 user acceptance | Programme next milestones (audit baseline `a478909c`) |
+| Executable Harbour reference + Gate 5 user acceptance | Still required before full programme sign-off |
 
 **Previous discipline:** [AI syllabus](../3.3%20AI%20Engineering/A00%20AI%20Syllabus.md) (optional) or [Cloud syllabus](../3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md) · **Next module:** [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)

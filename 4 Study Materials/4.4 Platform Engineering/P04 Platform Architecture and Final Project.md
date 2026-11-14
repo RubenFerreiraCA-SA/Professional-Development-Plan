@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored for study; documentation review pending. Clean-room execution of every script is **not** claimed. |
+| **Status** | Authored; corrections after audit `ff921e0` — **not signed off** |
 
 ## How to study this chapter
 
@@ -251,53 +251,88 @@ Callers (`<svc>-release.yml`) must now grant `id-token: write` and `attestations
 
 ### 4.4.3 Worked example — verify before you promote
 
-`platform/bin/harbour-verify-artifact` turns "I trust the build" into a command:
+`platform/bin/harbour-verify-artifact` turns "I trust the build" into a command that **binds** digest → expected source repository → approved workflow → expected commit (or rejects):
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-REF="${1:?usage: harbour-verify-artifact ghcr.io/<owner>/<svc>@sha256:<digest>}"
-OWNER="${REF#ghcr.io/}"; OWNER="${OWNER%%/*}"
+# usage: harbour-verify-artifact <oci-ref@sha256:…> [--expect-commit <sha>] [--expect-workflow <name>]
+REF="${1:?}"; shift || true
+EXPECT_COMMIT=""; EXPECT_WORKFLOW="${HARBOUR_EXPECT_WORKFLOW:-}"
+EXPECT_REPO="${HARBOUR_EXPECT_REPO:-${GITHUB_REPOSITORY:-}}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --expect-commit) EXPECT_COMMIT="$2"; shift 2 ;;
+    --expect-workflow) EXPECT_WORKFLOW="$2"; shift 2 ;;
+    --expect-repo) EXPECT_REPO="$2"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
 [[ "$REF" =~ @sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: reference must be pinned by digest" >&2; exit 1; }
-docker buildx imagetools inspect "$REF" >/dev/null   # image exists in the registry
-gh attestation verify "oci://$REF" --owner "$OWNER" --format json \
-  | jq -r '.[0].verificationResult.signature.certificate
-           | "built-from-commit=\(.sourceRepositoryDigest)\nref=\(.sourceRepositoryRef)\nworkflow=\(.githubWorkflowName)"'
-echo "VERIFIED: $REF"
+SUBJECT_DIGEST="${REF##*@}"
+OWNER="${REF#ghcr.io/}"; OWNER="${OWNER%%/*}"
+[ -n "$EXPECT_REPO" ] || { echo "ERROR: set HARBOUR_EXPECT_REPO or GITHUB_REPOSITORY" >&2; exit 1; }
+[ -n "$EXPECT_WORKFLOW" ] || { echo "ERROR: set HARBOUR_EXPECT_WORKFLOW or --expect-workflow" >&2; exit 1; }
+docker buildx imagetools inspect "$REF" >/dev/null
+RAW="$(gh attestation verify "oci://$REF" --repo "$EXPECT_REPO" --format json)"
+# Field paths differ across gh versions — pin yours after one inspect of $RAW.
+COMMIT="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryDigest // empty')"
+WORKFLOW="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowName // empty')"
+REPO="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryURI // empty')"
+printf 'subject=%s\nrepo=%s\nworkflow=%s\ncommit=%s\n' "$SUBJECT_DIGEST" "$REPO" "$WORKFLOW" "$COMMIT"
+echo "$REPO" | grep -q "$EXPECT_REPO" || { echo "FAIL: attestation repo mismatch (want $EXPECT_REPO)" >&2; exit 1; }
+[ "$WORKFLOW" = "$EXPECT_WORKFLOW" ] || { echo "FAIL: workflow mismatch want=$EXPECT_WORKFLOW got=$WORKFLOW" >&2; exit 1; }
+if [ -n "$EXPECT_COMMIT" ]; then
+  case "$COMMIT" in
+    "$EXPECT_COMMIT"|sha1:"$EXPECT_COMMIT"|sha256:"$EXPECT_COMMIT") ;;
+    *) echo "FAIL: commit mismatch want=$EXPECT_COMMIT got=$COMMIT" >&2; exit 1 ;;
+  esac
+fi
+echo "VERIFIED: $REF bound to $EXPECT_REPO / $EXPECT_WORKFLOW / ${EXPECT_COMMIT:-any-recorded-commit}"
 ```
 
-(JSON field paths can differ between `gh` versions — inspect the raw output once and adjust.) The output answers *which commit built this digest*; compare it with `git log` for the merge commit.
+An attestation that only proves “some workflow in this owner built something” is **not** enough for promotion.
 
-Make promotion **impossible without verification** with a PR check, `.github/workflows/promotion-verify.yml`:
+Make promotion **impossible without verification** with an **always-on** required check (D04 lesson: path filters must not be the required check itself). `.github/workflows/promotion-verify.yml`:
 
 ```yaml
 name: promotion-verify
 on:
-  pull_request:
-    paths: ["deploy/*/overlays/*/kustomization.yaml"]
+  pull_request:          # no paths: filter — required checks must always report
 permissions:
   contents: read
   attestations: read
   packages: read
 jobs:
-  verify:
+  gate:
     runs-on: ubuntu-latest
-    env: {GH_TOKEN: "${{ github.token }}"}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HARBOUR_EXPECT_REPO: ${{ github.repository }}
+      HARBOUR_EXPECT_WORKFLOW: reusable-release.yml   # set to your real release workflow file/name
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Verify the digest pinned in every changed overlay
+      - name: Substantive verify only when promotion overlays change
         run: |
-          for f in $(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- 'deploy/*/overlays/*/kustomization.yaml'); do
+          set -euo pipefail
+          mapfile -t FILES < <(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
+            'deploy/*/overlays/*/kustomization.yaml' || true)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No promotion overlays changed — gate reports success (D04 always-on pattern)."
+            exit 0
+          fi
+          for f in "${FILES[@]}"; do
+            grep -q UNPROMOTED "$f" && { echo "skip $f (unpromoted sentinel)"; continue; }
             img="$(sed -nE 's/^[[:space:]]+newName:[[:space:]]+(.*)$/\1/p' "$f" | head -1)"
             d="$(grep -oE 'digest: sha256:[0-9a-f]{64}' "$f" | head -1 | cut -d' ' -f2)"
-            grep -q UNPROMOTED "$f" && { echo "skip $f (unpromoted)"; continue; }
-            gh attestation verify "oci://${img}@${d}" --owner "${{ github.repository_owner }}" >/dev/null \
-              && echo "verified ${img}@${d}" || { echo "NO VALID ATTESTATION for ${img}@${d}"; exit 1; }
+            [ -n "$img" ] && [ -n "$d" ] || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
+            platform/bin/harbour-verify-artifact "${img}@${d}" \
+              --expect-workflow "$HARBOUR_EXPECT_WORKFLOW"
           done
 ```
 
-This is deliberately simple (one image per overlay). Treat it as a starting point and test it with a **fabricated digest** — it must fail.
+Test with a **fabricated digest** — the gate must fail. Test with an unrelated docs-only PR — the gate must succeed (not stay pending/skipped).
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -311,9 +346,9 @@ gh api "repos/$GH_OWNER/$(basename "$HARBOUR_ROOT")/branches/main/protection" \
          checks: .required_status_checks.contexts, admins: .enforce_admins.enabled}'
 ```
 
-Required checks must include the service validate job, `policy` and `promotion-verify`. If your plan cannot enforce this, write the gap into `LIMITATIONS.md` with a compensating control (e.g. you do not self-approve; a second reviewer is the independent tester).
+Required checks must include the service validate job, `policy` and `promotion-verify` (**always reports**). If your plan cannot enforce this, write the gap into `LIMITATIONS.md` with a compensating control (e.g. you do not self-approve; a second reviewer is the independent tester).
 
-**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` on that digest and match the commit. (4) Promote a **fabricated** digest and show `promotion-verify` fails.
+**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` with `--expect-commit` / `--expect-workflow` and show a mismatched workflow is rejected. (4) Promote a **fabricated** digest and show `promotion-verify` fails. (5) Open a docs-only PR and show `promotion-verify` still reports success.
 
 **Verify:** One page shows *merge commit → run URL → digest → attestation commit → promotion PR*. Without a break in that chain, the artefact is traceable.
 
@@ -342,7 +377,7 @@ helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace
 kubectl -n kyverno rollout status deploy --timeout=180s
 ```
 
-`platform/policy/harbour-baseline.yaml` (rule-level `failureAction` requires a recent Kyverno; older releases use `spec.validationFailureAction` — check your version's docs):
+`platform/policy/harbour-baseline.yaml` (rule-level `failureAction` requires a recent Kyverno; older releases use `spec.validationFailureAction` — check your version's docs). Enable **Pod controller autogeneration** so matching `Pod` also evaluates generated Pod templates from Deployments/StatefulSets/Jobs — required for CI `kyverno apply` on rendered Kustomize output:
 
 ```yaml
 apiVersion: kyverno.io/v1
@@ -375,16 +410,64 @@ spec:
                 resources: {limits: {cpu: "?*", memory: "?*"}}
 ```
 
-**Relationship to P02:** P02 §2.4.3 shows a built-in `ValidatingAdmissionPolicy` for digest-addressed **Deployments**, and says plainly that StatefulSets, Jobs and bare Pods are not covered. Kyverno's Pod-level rules cover them (including the Postgres StatefulSet and backup CronJob) and run identically in CI. Use one mechanism per rule, or run both and note the overlap in ADR 0309; do not leave an uncovered kind unrecorded. NetworkPolicy and Pod Security admission (P02 §2.3–§2.4) remain additional controls — list any you did *not* apply in `LIMITATIONS.md`.
+Confirm autogen is active for this policy version (`kubectl get clusterpolicy harbour-baseline -o yaml | grep -A20 autogen` or check Kyverno docs for your chart). If your Kyverno version does **not** autogen from Pod→Deployment, change `kinds` to include `Deployment`, `StatefulSet` and `Job` explicitly — then re-run the negative fixtures below.
 
-Commit it to `platform/policy/` and reconcile it through the platform Kustomization (a policy applied by hand is a snowflake). Now add the **same file** to CI — replace the grep checks in `harbour-check-service` with:
+**Relationship to P02:** P02 §2.4.3 shows a built-in `ValidatingAdmissionPolicy` for digest-addressed **Deployments**, and says plainly that StatefulSets, Jobs and bare Pods are not covered. Kyverno's Pod-level rules (with autogen) cover them. Use one mechanism per rule, or run both and note the overlap in ADR 0309. NetworkPolicy and Pod Security admission remain additional controls — list any you did *not* apply in `LIMITATIONS.md`.
+
+Commit it to `platform/policy/` and reconcile it through the platform Kustomization. **CI and admission must reject the same forbidden configurations.** A green `kyverno apply` with zero applicable rules is a false pass.
+
+`platform/bin/harbour-policy-check` (used by the required `policy` job):
 
 ```bash
+#!/usr/bin/env bash
+set -euo pipefail
+NAME="${1:?service}"
+POLICY="platform/policy/harbour-baseline.yaml"
+FIXDIR="platform/policy/fixtures"
+mkdir -p "$FIXDIR"
+# 1) Positive: rendered overlay must pass, and report which rules applied.
 kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/rendered.yaml
-kyverno apply platform/policy/harbour-baseline.yaml --resource /tmp/rendered.yaml
+OUT="$(kyverno apply "$POLICY" --resource /tmp/rendered.yaml --policy-report 2>&1)" || {
+  echo "$OUT"; echo "FAIL: rendered overlay rejected"; exit 1; }
+echo "$OUT"
+echo "$OUT" | grep -Eqi 'require-image-digest|pass|Pass' \
+  || { echo "FAIL: digest rule not evidently evaluated — inspect kyverno output; do not treat skip as pass"; exit 1; }
+
+# 2) Negative fixtures — each MUST fail both CLI apply and (separately) live admission.
+cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: bad-tag, namespace: default}
+spec:
+  containers: [{name: c, image: nginx:latest}]
+EOF
+cat > "$FIXDIR/bad-root-no-limits.yaml" <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: bad-root, namespace: default}
+spec:
+  containers:
+    - name: c
+      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
+EOF
+
+kyverno apply "$POLICY" --resource "$FIXDIR/bad-mutable-tag.yaml" && {
+  echo "FAIL: mutable-tag fixture was accepted by CLI"; exit 1; }
+kyverno apply "$POLICY" --resource "$FIXDIR/bad-root-no-limits.yaml" && {
+  echo "FAIL: root/no-limits fixture was accepted by CLI"; exit 1; }
+
+# 3) Live admission must reject the same shapes (cluster with policy reconciled).
+NS="${NAME}-staging"
+kubectl -n "$NS" delete pod policy-probe-bad --ignore-not-found --wait=false
+if kubectl -n "$NS" run policy-probe-bad --image=nginx:latest --restart=Never 2>/tmp/adm.err; then
+  echo "FAIL: admission accepted nginx:latest"; kubectl -n "$NS" delete pod policy-probe-bad --ignore-not-found; exit 1
+fi
+grep -qiE 'digest|harbour-baseline|blocked|denied|violation' /tmp/adm.err \
+  || { echo "FAIL: admission error did not cite policy (got: $(cat /tmp/adm.err))"; exit 1; }
+echo "OK: CI CLI and admission reject the same forbidden shapes for $NAME"
 ```
 
-(Allow the UNPROMOTED sentinel digest as before; it is a valid digest *format*, and replicas are 0.)
+**Required standard for sign-off:** *the same forbidden configuration fails in CI and at Kubernetes admission*, and skipped/unmatched rules are not counted as passes.
 
 ### 4.5.3 Worked example — show what the controls deny
 
@@ -401,13 +484,16 @@ SA="system:serviceaccount:${SVC}-staging:reconciler"
   echo "# read-only developer identity cannot change anything"
   kubectl auth can-i delete pods -n "${SVC}-staging" --as=system:serviceaccount:platform-system:dev-viewer
   echo "# admission: a mutable-tag pod is rejected even for the privileged reconciler"
-  kubectl -n "${SVC}-staging" run bad --image=nginx:latest --as="$SA" 2>&1 | tail -n 3
+  kubectl -n "${SVC}-staging" run bad --image=nginx:latest --as="$SA" 2>&1 | tee /tmp/adm-tag.txt | tail -n 3
+  grep -qiE 'digest|harbour-baseline|denied|violation|blocked' /tmp/adm-tag.txt
+  echo "# policy CLI rejects the same fixture"
+  platform/bin/harbour-policy-check "$SVC"
   echo "# promotion to an unapproved environment is refused"
   platform/bin/harbour-promote "$SVC" prod "sha256:$(printf '0%.0s' {1..64})" 2>&1
 } | tee docs/final/drills/access-denials.txt
 ```
 
-Expect `yes`, `no`, `no`, `no`, an admission denial quoting the policy message, and the promotion error. If any `no` is `yes`, you have found a privilege gap — fix it or record it.
+Expect `yes`, `no`, `no`, `no`, an admission denial quoting the policy message, a successful `harbour-policy-check`, and the promotion error. If any `no` is `yes`, you have found a privilege gap — fix it or record it.
 
 ### 4.5.4 Secrets
 
@@ -470,10 +556,6 @@ spec:
           resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 256Mi}}
           volumeMounts:
             - {name: data, mountPath: /var/lib/postgresql/data}
-            - {name: backup, mountPath: /backup, readOnly: true}
-      volumes:
-        - name: backup
-          persistentVolumeClaim: {claimName: postgres-backup}
   volumeClaimTemplates:
     - metadata: {name: data}
       spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
@@ -483,15 +565,18 @@ kind: Service
 metadata: {name: postgres}
 spec: {clusterIP: None, selector: {app: postgres}, ports: [{name: pg, port: 5432}]}
 ---
+# Backup PVC is separate from the data volume and used only by backup Jobs.
+# Do NOT mount the same RWO PVC on both the StatefulSet and a concurrent Job unless
+# you have proved your StorageClass allows it (kind local-path typically does not).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-backup
-  annotations: {kustomize.toolkit.fluxcd.io/prune: disabled}   # never garbage-collect backups
+  annotations: {kustomize.toolkit.fluxcd.io/prune: disabled}
 spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
 ```
 
-`platform/components/postgres/backup-cronjob.yaml` (training cadence: every 5 minutes so RPO is measurable within one session):
+`platform/components/postgres/backup-cronjob.yaml` (training cadence: every 5 minutes). The Job alone mounts the backup PVC; it connects to Postgres over the network:
 
 ```yaml
 apiVersion: batch/v1
@@ -525,36 +610,103 @@ spec:
           volumes: [{name: backup, persistentVolumeClaim: {claimName: postgres-backup}}]
 ```
 
-Add `kustomization.yaml` listing both files; include the component and the readiness dependency in `deploy/$SVC/overlays/staging/kustomization.yaml`:
+**Backup durability bar (compulsory for any recovery claim):** (1) prove at least **two** successful CronJob runs produce distinct dump files; (2) copy a chosen dump **off-cluster** (`kubectl cp` to `~/harbour-backups/`); (3) restore that chosen file later. A CronJob object alone is not evidence.
+
+Add `kustomization.yaml` listing both files; include the component in `deploy/$SVC/overlays/staging/kustomization.yaml`:
 
 ```yaml
 resources: [../../base, ../../../../platform/components/postgres]
 patches:
   - target: {kind: Deployment, name: ledger}   # use your $SVC name
     patch: |-
-      - {op: add, path: /spec/template/spec/containers/0/env, value: [{name: DATABASE_HOST, value: postgres}]}
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - {name: DATABASE_HOST, value: postgres}
+          - {name: DATABASE_USER, value: harbour}
+          - {name: DATABASE_NAME, value: harbour}
+          - {name: DATABASE_PASSWORD, valueFrom: {secretKeyRef: {name: postgres-credentials, key: password}}}
 ```
 
-Make readiness meaningful — the dependency check from D03, so a missing database removes the pod from traffic **without** restart-looping it. Replace `ready()` in `services/$SVC/main.py`:
+Make readiness and the **business data contract** real. TCP-only `/ready` is insufficient for P04. Replace the relevant handlers in `services/$SVC/main.py`:
 
 ```python
-import os, socket
+import os, psycopg
+from datetime import datetime, timezone
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
+app = FastAPI()
+
+def _dsn() -> str:
+    return (
+        f"host={os.environ['DATABASE_HOST']} dbname={os.environ['DATABASE_NAME']} "
+        f"user={os.environ['DATABASE_USER']} password={os.environ['DATABASE_PASSWORD']}"
+    )
+
+def _conn():
+    return psycopg.connect(_dsn(), connect_timeout=2)
+
+@app.on_event("startup")
+def migrate():
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS ledger_entries(
+                 id bigserial PRIMARY KEY,
+                 note text NOT NULL,
+                 created_at timestamptz NOT NULL DEFAULT now())"""
+        )
+        c.commit()
 
 @app.get("/ready")
 def ready():
-    host = os.getenv("DATABASE_HOST", "")
-    if not host:
-        return {"status": "ready", "database": "unconfigured"}
     try:
-        with socket.create_connection((host, 5432), timeout=1.5):
-            return {"status": "ready", "database": "tcp_ok"}
-    except OSError:
-        return JSONResponse(status_code=503, content={"status": "not-ready", "database": "unreachable"})
+        with _conn() as c, c.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return {"status": "ready", "database": "query_ok"}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "not-ready", "database": str(e.__class__.__name__)})
+
+class EntryIn(BaseModel):
+    note: str = Field(min_length=1, max_length=200)
+
+@app.post("/v1/entries")
+def write_entry(body: EntryIn):
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO ledger_entries(note) VALUES (%s) RETURNING id, note, created_at",
+            (body.note,),
+        )
+        row = cur.fetchone()
+        c.commit()
+    return {"id": row[0], "note": row[1], "created_at": row[2].astimezone(timezone.utc).isoformat()}
+
+@app.get("/v1/entries/{entry_id}")
+def read_entry(entry_id: int):
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT id, note, created_at FROM ledger_entries WHERE id=%s", (entry_id,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "missing")
+    return {"id": row[0], "note": row[1], "created_at": row[2].astimezone(timezone.utc).isoformat()}
+
+@app.get("/v1/entries")
+def list_entries():
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT id, note, created_at FROM ledger_entries ORDER BY id")
+        rows = cur.fetchall()
+    return {
+        "count": len(rows),
+        "entries": [
+            {"id": r[0], "note": r[1], "created_at": r[2].astimezone(timezone.utc).isoformat()}
+            for r in rows
+        ],
+    }
 ```
 
-Ship this through the **normal** path (PR → build → verify → promote). **Honest limits:** TCP reachability is not "queries work"; a single replica has no failover; kind's local-path volume lives on the Docker host; the backup PVC shares the cluster's fate (so you copy a dump **off-cluster** in the drill); prune must never touch data PVCs (hence the annotation and `volumeClaimTemplates`).
+Ship through the **normal** path (PR → build → verify → promote). Add `psycopg[binary]` to the service dependencies. **Honest limits:** single replica; kind storage is local disk; in-cluster backup PVC still shares cluster fate until you copy dumps off-cluster.
 
 ### 4.6.2 Define health and recovery targets first
 
@@ -562,13 +714,14 @@ Write them in ADR 0310/0311 *before* injecting failures:
 
 | Signal | Where | Healthy |
 | --- | --- | --- |
-| Pod Ready / restarts | `harbour-status`, `kubectl get pods` | Ready; restarts stable |
-| Readiness body | `/ready` | `database: tcp_ok` |
+| Pod Ready / restarts | `harbour-status`, `kubectl get pods` | Ready; restarts stable; exit 0 |
+| Readiness body | `/ready` | `database: query_ok` (authenticated query, not TCP) |
+| Application contract | `POST/GET /v1/entries` | write then read returns the same note |
 | Service endpoints | `kubectl get endpoints $SVC` | non-empty |
-| Backup freshness | newest successful Job | < 10 min old (2× schedule) |
+| Backup freshness | newest successful Job + off-cluster copy | < 10 min old; file exists outside cluster |
 | SLI (if D07 stack present) | `docs/observability/slo-harbour.md` pattern | availability objective met |
 
-Targets (training, state yours): **RTO ≤ 3 min** for DB pod loss; **RPO ≤ 5 min** for restore from backup. They are *hypotheses* until measured.
+Targets (training, state yours): **RTO ≤ 3 min** until `/ready` is `query_ok` **and** `GET /v1/entries` succeeds; **RPO** measured as wall-clock gap between last acknowledged write timestamp and backup completion timestamp (not only row counts). They are *hypotheses* until measured.
 
 ### 4.6.3 Stateless drill (brief)
 
@@ -576,77 +729,132 @@ Delete one `$SVC` pod; with two replicas the Service keeps serving (D06 §6.8.1)
 
 ### 4.6.4 Stateful drills — the script
 
-`platform/drills/stateful-drill.sh` (run phases in order; every phase appends to a timeline):
+`platform/drills/stateful-drill.sh` (run phases in order). Evidence is **application HTTP** plus SQL support — SQL alone does not pass:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 NS="${1:?namespace}"; PHASE="${2:?phase}"; SVC="${SVC:?set SVC}"
-OUT="docs/final/drills/stateful-$(date -u +%Y%m%d)"; mkdir -p "$OUT"
+OUT="docs/final/drills/stateful-$(date -u +%Y%m%d)"; mkdir -p "$OUT" ~/harbour-backups
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/timeline.log"; }
-sql() { kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -v ON_ERROR_STOP=1 -At -c "$1"; }
-fingerprint() { sql "SELECT count(*)||':'||coalesce(md5(string_agg(id||'/'||note, ',' ORDER BY id)),'empty') FROM drill_ledger"; }
+# Port-forward the app Service for HTTP checks (business path).
+PF_PID=""
+app_pf() {
+  kubectl -n "$NS" port-forward "svc/$SVC" 18080:80 >/tmp/pf-ledger.log 2>&1 & PF_PID=$!
+  for i in $(seq 1 30); do curl -sf http://127.0.0.1:18080/ready >/dev/null && return 0; sleep 1; done
+  return 1
+}
+app_stop_pf() { [ -n "${PF_PID}" ] && kill "$PF_PID" 2>/dev/null || true; PF_PID=""; }
+trap app_stop_pf EXIT
+http() { curl -sf -H 'content-type: application/json' "$@"; }
+app_count() { http http://127.0.0.1:18080/v1/entries | python3 -c 'import sys,json; print(json.load(sys.stdin)["count"])'; }
+app_notes() { http http://127.0.0.1:18080/v1/entries | python3 -c 'import sys,json; print(",".join(e["note"] for e in json.load(sys.stdin)["entries"]))'; }
 case "$PHASE" in
-  seed)   # A = rows that exist before the backup
-    sql "CREATE TABLE IF NOT EXISTS drill_ledger(id serial primary key, note text not null)"
-    sql "INSERT INTO drill_ledger(note) SELECT 'A-'||g FROM generate_series(1,100) g"
-    log "seeded A fingerprint=$(fingerprint)" ;;
-  backup) # force a backup now, then record what it contains
+  seed)
+    app_pf
+    for i in $(seq 1 20); do
+      http -d "{\"note\":\"A-$i\"}" http://127.0.0.1:18080/v1/entries >/dev/null
+    done
+    date -u +%FT%TZ > "$OUT/last_ack_before_backup.txt"
+    log "seeded via HTTP count=$(app_count) last_ack=$(cat "$OUT/last_ack_before_backup.txt")"
+    app_stop_pf ;;
+  backup)
     J="manual-backup-$(date +%s)"
     kubectl -n "$NS" create job --from=cronjob/postgres-backup "$J"
     kubectl -n "$NS" wait --for=condition=complete "job/$J" --timeout=120s
-    fingerprint > "$OUT/fingerprint-at-backup.txt"
-    log "backup $J complete; fingerprint-at-backup=$(cat "$OUT/fingerprint-at-backup.txt")" ;;
-  write-after) # B = acknowledged writes AFTER the backup (these define RPO exposure)
-    sql "INSERT INTO drill_ledger(note) SELECT 'B-'||g FROM generate_series(1,25) g"
-    fingerprint > "$OUT/fingerprint-before-incident.txt"
-    log "wrote B; fingerprint-before-incident=$(cat "$OUT/fingerprint-before-incident.txt")" ;;
-  kill-db) # drill S2: pod loss — data should survive on the PVC
-    ep() { kubectl -n "$NS" get endpoints "$SVC" -o jsonpath='{.subsets[*].addresses[*].ip}'; }
+    date -u +%FT%TZ > "$OUT/backup_completed_at.txt"
+    # Copy the newest dump off-cluster (compulsory for recovery claims).
+    POD="$(kubectl -n "$NS" get pods -l job-name="$J" -o jsonpath='{.items[0].metadata.name}')"
+    DUMP="$(kubectl -n "$NS" exec "$POD" -- sh -c 'ls -1t /backup/*.dump | head -1')"
+    kubectl -n "$NS" cp "$POD:$DUMP" "$HOME/harbour-backups/$(basename "$DUMP")"
+    echo "$HOME/harbour-backups/$(basename "$DUMP")" > "$OUT/offcluster-backup.path"
+    app_pf; app_count > "$OUT/count-at-backup.txt"; app_notes > "$OUT/notes-at-backup.txt"; app_stop_pf
+    log "backup $J complete at $(cat "$OUT/backup_completed_at.txt"); offcluster=$(cat "$OUT/offcluster-backup.path"); http_count=$(cat "$OUT/count-at-backup.txt")" ;;
+  write-after)
+    app_pf
+    for i in $(seq 1 5); do
+      RESP="$(http -d "{\"note\":\"B-$i\"}" http://127.0.0.1:18080/v1/entries)"
+      echo "$RESP" | tee -a "$OUT/ack-after-backup.jsonl"
+      echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["created_at"])' \
+        >> "$OUT/ack_timestamps_after_backup.txt"
+    done
+    date -u +%FT%TZ > "$OUT/last_ack_before_incident.txt"
+    app_count > "$OUT/count-before-incident.txt"
+    log "wrote B via HTTP; count=$(cat "$OUT/count-before-incident.txt"); last_ack=$(cat "$OUT/last_ack_before_incident.txt")"
+    app_stop_pf ;;
+  kill-db)
+    app_pf || true
     log "S2 inject: delete pod postgres-0"
     T0=$(date +%s); kubectl -n "$NS" delete pod postgres-0 --wait=false
-    until [ -z "$(ep)" ] || [ $(( $(date +%s) - T0 )) -ge 60 ]; do sleep 2; done
-    [ -z "$(ep)" ] && log "S2 detected: $SVC endpoints empty after $(( $(date +%s) - T0 ))s" \
-                   || log "S2 readiness never dropped (outage shorter than probe window)"
-    kubectl -n "$NS" get pods -o wide | tee -a "$OUT/observe.log"
+    # Wait until app readiness fails (HTTP 503) — service-level detection.
+    until ! curl -sf http://127.0.0.1:18080/ready >/dev/null; do
+      [ $(( $(date +%s) - T0 )) -ge 90 ] && break; sleep 1
+    done
+    log "S2 detected not-ready after $(( $(date +%s) - T0 ))s"
     kubectl -n "$NS" wait --for=condition=ready pod/postgres-0 --timeout=180s
-    until [ -n "$(ep)" ]; do sleep 2; done
-    log "S2 recovered: RTO=$(( $(date +%s) - T0 ))s; app restarts=$(kubectl -n "$NS" get pods -l app="$SVC" \
-      -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}')"
-    [ "$(fingerprint)" = "$(cat "$OUT/fingerprint-before-incident.txt")" ] \
-      && log "S2 data intact after pod loss" || { log "S2 DATA MISMATCH"; exit 1; } ;;
-  destroy) # drill S3: simulated bad migration — logical damage the PVC cannot undo
-    log "S3 inject: DELETE half the rows (simulated bad migration)"
-    sql "DELETE FROM drill_ledger WHERE id % 2 = 0"; log "after damage fingerprint=$(fingerprint)" ;;
-  restore) # runbook step: restore the newest dump onto the live database
+    until curl -sf http://127.0.0.1:18080/ready | grep -q query_ok; do sleep 2; done
+    GOT="$(app_count)"; WANT="$(cat "$OUT/count-before-incident.txt")"
+    log "S2 recovered RTO=$(( $(date +%s) - T0 ))s http_count=$GOT expected=$WANT"
+    [ "$GOT" = "$WANT" ] || { log "S2 HTTP DATA MISMATCH"; exit 1; }
+    app_stop_pf ;;
+  destroy)
+    app_pf
+    # Logical damage through SQL (simulates bad migration); app still "healthy" but wrong.
+    kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -c \
+      "DELETE FROM ledger_entries WHERE note LIKE 'A-%' AND id % 2 = 0"
+    log "S3 damaged; http_count=$(app_count) (pod may still be Ready)"
+    app_stop_pf ;;
+  restore)
     T0=$(date +%s)
-    kubectl -n "$NS" exec postgres-0 -- sh -c \
-      'f=$(ls -1t /backup/*.dump | head -1); echo "restoring $f"; pg_restore -U harbour -d harbour --clean --if-exists "$f"'
-    GOT="$(fingerprint)"; WANT="$(cat "$OUT/fingerprint-at-backup.txt")"
-    BEFORE="$(cut -d: -f1 "$OUT/fingerprint-before-incident.txt")"
-    log "S3 restore RTO=$(( $(date +%s) - T0 ))s restored=$GOT expected=$WANT"
-    log "S3 RPO exposure: acknowledged rows lost = $(( BEFORE - ${GOT%%:*} ))"
-    [ "$GOT" = "$WANT" ] || { log "S3 RESTORE MISMATCH"; exit 1; } ;;
+    BACKUP="$(cat "$OUT/offcluster-backup.path")"
+    [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
+    # Restore chosen off-cluster dump into the live database (training path).
+    kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
+    kubectl -n "$NS" exec postgres-0 -- \
+      pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
+    app_pf
+    until curl -sf http://127.0.0.1:18080/ready | grep -q query_ok; do sleep 2; done
+    GOT="$(app_count)"; WANT="$(cat "$OUT/count-at-backup.txt")"
+    # RPO in time: gap between last acknowledged post-backup write and backup completion.
+    python3 - <<PY | tee -a "$OUT/rpo-report.txt"
+from datetime import datetime, timezone
+backup = datetime.fromisoformat(open("$OUT/backup_completed_at.txt").read().strip().replace("Z", "+00:00"))
+acks = [datetime.fromisoformat(l.strip().replace("Z", "+00:00"))
+        for l in open("$OUT/ack_timestamps_after_backup.txt") if l.strip()]
+last = max(acks)
+gap = (last - backup.astimezone(timezone.utc)).total_seconds()
+before = int(open("$OUT/count-before-incident.txt").read())
+at_b = int(open("$OUT/count-at-backup.txt").read())
+print(f"RPO_time_seconds={gap:.1f} (last_ack_after_backup - backup_completed)")
+print(f"RPO_rows_lost={before - at_b}")
+PY
+    log "S3 restore service-RTO=$(( $(date +%s) - T0 ))s http_count=$GOT expected=$WANT"
+    [ "$GOT" = "$WANT" ] || { log "S3 HTTP RESTORE MISMATCH"; exit 1; }
+    # Spot-check one known note through HTTP
+    http http://127.0.0.1:18080/v1/entries | grep -q '"note": "A-1"' || { log "missing A-1 via HTTP"; exit 1; }
+    app_stop_pf ;;
   *) echo "phases: seed backup write-after kill-db destroy restore" >&2; exit 2 ;;
 esac
 ```
 
-Run it (note that `ledger` quota and Postgres must be healthy first):
+Run it (Postgres and ledger must be healthy first; run `harbour-status "$SVC"` and confirm exit 0):
 
 ```bash
 NS="${SVC}-staging"
+# Prove recurring backups before the incident drill:
+kubectl -n "$NS" create job --from=cronjob/postgres-backup "warmup-a-$(date +%s)"
+sleep 30
+kubectl -n "$NS" create job --from=cronjob/postgres-backup "warmup-b-$(date +%s)"
 for p in seed backup write-after kill-db destroy restore; do platform/drills/stateful-drill.sh "$NS" "$p"; done
 ```
-
-To hold the database down long enough to *watch* readiness drop (a fast pod recreation can finish inside the probe window), you may suspend reconciliation first — `flux suspend kustomization $SVC -n $NS`, scale the StatefulSet to 0, observe, scale back, `flux resume …` — and record that you did.
 
 What each drill proves — and what it does not:
 
 | Drill | Injects | Expected behaviour | Proves | Does **not** prove |
 | --- | --- | --- | --- | --- |
-| **S2 pod loss** | Delete `postgres-0` | `/ready` → 503 and the Service drops endpoints (pods stay up, **no restart loop**); StatefulSet recreates pod; PVC reattaches; fingerprints match | Self-healing + data durability across pod loss; readiness is meaningful | Node loss, disk loss, HA |
-| **S3 bad migration** | Delete half the rows | Pod is healthy yet **data is wrong**; only a backup helps; restore returns the backup-time state | Backup is *restorable*; RPO exposure is quantified (the 25 `B-` rows are gone) | PITR, restoring into a clean cluster |
-| **Prune hazard** (read) | Remove the StatefulSet from Git | PVC from `volumeClaimTemplates` survives; the annotated backup PVC is not pruned | Why §4.2.1 forbids prune on data | A tested cluster rebuild |
+| **S2 pod loss** | Delete `postgres-0` | `/ready` → 503 (`query_ok` lost); Service drops endpoints; recreate; HTTP counts match | Self-healing + data durability **through the app** | Node/disk loss, HA |
+| **S3 bad migration** | Delete rows in DB | App may stay Ready yet HTTP list is wrong; restore from **off-cluster** dump; HTTP matches backup-time notes | Restorable backup; **time-based RPO** + row loss | PITR, clean-cluster rebuild |
+| **Prune hazard** (read) | Remove StatefulSet from Git | Data PVC survives; annotated backup PVC not pruned | Why prune must never target data | Full platform GitOps rebuild (see P02 §2.7.4) |
 
 **Observe the difference:** S2 recovers automatically; S3 needs a human and a runbook, and it **loses data**. A status page that says HEALTHY during S3 is correct about the pod and wrong about the business — record this in the ADR.
 

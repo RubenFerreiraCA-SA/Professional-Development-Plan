@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 1 of 4*
 
-> **Status:** Authored for study; **documentation review pending** (not signed off). Commands and manifests have not been run in a clean-room environment by an independent reviewer. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
+> **Status:** Authored; corrections after audit `ff921e0` — **not signed off**. Clean-room execution still not claimed. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
 
 | | |
 | --- | --- |
@@ -166,11 +166,16 @@ kubectl get nodes -o wide
 
 This follows the pattern in the [kind local registry guide](https://kind.sigs.k8s.io/docs/user/local-registry/). Read that page; its details change between kind releases.
 
+**Reproducibility bar:** commit `scripts/bootstrap-kind-registry.sh` once you have a working sequence, with a short compatibility matrix (kind version, Kubernetes/`kindest/node` digest, containerd behaviour, registry image **digest**). Until that script exists and has been re-run on a clean machine, do **not** claim a frozen infrastructure baseline — only a studied procedure.
+
 ```bash
 reg_name="kind-registry"; reg_port="5001"
+# Resolve a current registry image digest once, then pin it:
+#   docker buildx imagetools inspect registry:2 --format '{{.Manifest.Digest}}'
+REG_IMAGE="${REG_IMAGE:-registry@sha256:REPLACE_WITH_RESOLVED_DIGEST}"
 if [ "$(docker inspect -f '{{.State.Running}}' "$reg_name" 2>/dev/null || true)" != "true" ]; then
   docker run -d --restart=always -p "127.0.0.1:${reg_port}:5000" \
-    --network bridge --name "$reg_name" registry:2     # pin by digest in your own notes
+    --network bridge --name "$reg_name" "$REG_IMAGE"
 fi
 
 # Tell each node's containerd that localhost:5001 means the registry container:
@@ -930,6 +935,8 @@ helm -n harbour-helm list; helm -n harbour-helm history harbour-helm
 
 Forgetting `--set image.digest` must **fail** (`required`). That is a template-level guard; compare with the policy guard you will add in P02 §2.4.
 
+**Equivalence warning:** the Helm template above is intentionally abbreviated relative to the hardened Kustomize Deployment (seccomp, `automountServiceAccountToken`, startup probe, etc.). Do **not** claim packaging equivalence unless you either (a) expand the chart to match the hardened base, or (b) run a rendered-manifest comparison / conformance check (`helm template …` vs `kubectl kustomize …`) and document remaining deltas. P03/P04 conformance is the stricter bar.
+
 ### 1.9.3 Ownership rule
 
 One release must have **one owner**. If Flux (D06) applies Kustomize to `harbour-staging`, do not also `helm install` into it. The lab uses separate namespaces. Write the rule into ADR 0302.
@@ -1034,7 +1041,7 @@ Align with [P01 Course Detail](../../3%20Course%20Detail/3.4%20Platform%20Engine
 1. **Cluster record** — kind config, pinned node image reference, registry wiring notes, and the measured **cluster rebuild time** from §1.2.3.
 2. **Manifests in Git** — `deploy/harbour-api/` base + staging overlay (Kustomize) with digest-addressed image, non-root, read-only root filesystem, dropped capabilities, resource requests and a memory limit.
 3. **Probe evidence** — startup, readiness and liveness configured; recorded outputs for readiness-failure (no restart, traffic removed, old Pods kept serving) **and** liveness-failure (restarts) experiments.
-4. **Recovery demo** — single-pod kill **and** all-pod delete with client-loop logs, ok/bad counts, and a statement that **no manual intervention** occurred after the kill.
+4. **Recovery demo (compulsory client-facing evidence)** — single-pod kill **and** all-pod delete with in-cluster client-loop logs, quantified `ok`/`bad` (non-200) counts during termination, and a statement that **no manual intervention** occurred after the kill. Controller `Ready 2/2` alone does **not** pass.
 5. **Networking notes** — Service → EndpointSlice → Pod mapping; why `port-forward` was not used as evidence.
 6. **Configuration/secret note** — ConfigMap-triggered rollout shown; Secret limitations and your chosen handling path stated; no real secrets in Git.
 7. **Packaging ADRs** — `0301` (runtime substrate, honest limits, resource stance) and `0302` (Kustomize vs Helm, ownership, digest handling), plus a validated Helm chart or a written reason you did not need one.
