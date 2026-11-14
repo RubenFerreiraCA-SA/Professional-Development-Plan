@@ -17,3 +17,5 @@ This textbook accompanies the [AI Engineering syllabus](../../3%20Course%20Detai
 Prefer a working Harbour `/health` and runbook notes from DevOps before deep labs. Core exercises support a **mock LLM** path so you are not blocked on paid APIs. Never commit provider keys.
 
 Hour estimates are planning assumptions. If AI is out of your PDP scope, mark Final Project Checklist A01–A03 as `N/A — out of scope`.
+
+**Documentation status:** A01–A03 signed off for study. Clean-room execution of the AI exit scenario remains a separate QA gate.

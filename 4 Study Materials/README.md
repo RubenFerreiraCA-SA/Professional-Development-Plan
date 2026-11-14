@@ -12,7 +12,7 @@ This folder contains the **textbooks and progressive teaching materials** for th
 
 ## AI Engineering textbook
 
-[Read the AI Engineering textbook](4.3%20AI%20Engineering/README.md) — **A01–A03** authored (**optional** Final Project track). Course-detail under [AI Engineering](../3%20Course%20Detail/3.3%20AI%20Engineering/).
+[Read the AI Engineering textbook](4.3%20AI%20Engineering/README.md) — **A01–A03** documentation signed off (**optional** Final Project track). Course-detail under [AI Engineering](../3%20Course%20Detail/3.3%20AI%20Engineering/).
 
 ## Other disciplines
 

@@ -1075,7 +1075,7 @@ bash "$HARBOUR_ROOT/scripts/check-ai-eval.sh" | tee "$HARBOUR_ROOT/docs/ai/ops/e
 
 Align with [A03 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/A03%20LLMOps%20and%20AI%20Infrastructure.md) and Checklist A03: *disable or roll back in one documented action; basic cost/safety limits or monitors exist.*
 
-**AI Engineering exit scenario (Competent across A01–A03):** start mock `harbour-diag` → known health question returns grounded answer with citations → unsupported question returns uncertainty / empty citations (not an invented diagnosis) → mutating tool attempt denied + audited (A02) → rate-limit exhaustion rejected via API → `scripts/check-ai-eval.sh` re-runs eval and fails if any case fails → `./scripts/disable-harbour-ai.sh` disables AI without taking down core Harbour.
+**AI Engineering exit scenario (Competent across A01–A03):** start mock `harbour-diag` → known health question returns grounded answer with citations → unsupported question returns uncertainty / empty citations (not an invented diagnosis) → mutating tool attempt denied + audited (A02) → rate-limit exhaustion rejected via API → `scripts/check-ai-eval.sh` re-runs eval and fails if any case fails → with core Harbour running, `HARBOUR_AI_REQUIRE_CORE_CHECK=1 ./scripts/disable-harbour-ai.sh` disables AI while capturing fresh core before/after health (do **not** claim core survival unless this flag was set and both evidence files exist).
 
 ### Required deliverables
 

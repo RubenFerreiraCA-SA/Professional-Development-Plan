@@ -34,7 +34,7 @@ Operate the Harbour diagnostics AI path like a product surface: pinned versions,
 
 ## 2. Kill switch and rollback
 
-One documented action (`scripts/disable-harbour-ai.sh`) disables the path and verifies. Rollback restores known-good code **and** matching VERSION. Core Harbour stays up.
+One documented action (`HARBOUR_AI_REQUIRE_CORE_CHECK=1 ./scripts/disable-harbour-ai.sh` when core is in scope) disables the path and verifies with fresh before/after core health. Rollback restores known-good code **and** matching VERSION.
 
 ## 3. Cost, safety, signals and eval gate
 
@@ -44,7 +44,7 @@ Enforce limits on the live API (training in-memory limiter is honest about its l
 
 **Required evidence:** Integrated diagnose evidence, VERSION pin, one-action disable proof, API limit deny, runtime telemetry, eval gate script.
 
-**Acceptance:** Checklist A03 — you can disable or roll back the AI path in one documented action; basic cost/safety limits or monitors exist. Prefer the textbook **AI exit scenario** (grounded ask → no-match → tool deny → rate limit → eval gate → disable).
+**Acceptance:** Checklist A03 — you can disable or roll back the AI path in one documented action; basic cost/safety limits or monitors exist. Prefer the textbook **AI exit scenario** (grounded ask → no-match → tool deny → rate limit → eval gate → `HARBOUR_AI_REQUIRE_CORE_CHECK=1` disable with core before/after evidence).
 
 **Textbook:** [Chapter 3 — LLMOps and AI Infrastructure](../../4%20Study%20Materials/4.3%20AI%20Engineering/A03%20LLMOps%20and%20AI%20Infrastructure.md)
 
