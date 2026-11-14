@@ -75,12 +75,13 @@ Create `docs/runbooks/harbour-connectivity.md` with:
 **Required evidence:**
 
 1. Reachability diagram for your actual lab topology.  
-2. Diagnostic command list with expected healthy output.  
-3. A planted failure (DNS, firewall/port, stopped process, or wrong bind address) diagnosed without guess-and-reboot.  
-4. Recovery record: before/after, root cause, residual risk.  
-5. Short note linking symptoms to cloud shared-responsibility (what would change on AWS ELB/SG vs local Compose).
+2. Diagnostic command list with expected healthy output (Compose via `app/docker-compose.yml` / `-f` path).  
+3. An **application** planted failure (e.g. stopped process or dependency) diagnosed without guess-and-reboot.  
+4. A **network** planted failure (bind/publish or firewall) with command evidence that differs from (3) — e.g. refused vs timeout, listener absent vs present.  
+5. Recovery records for both; residual risk.  
+6. Short note linking symptoms to cloud shared-responsibility (what would change on AWS ELB/SG vs local Compose).
 
-**Acceptance:** Another engineer can follow the runbook to restore a similar failure. “I restarted Docker” without a diagnosis does not pass.
+**Acceptance:** Another engineer can follow the runbook to restore a similar failure and can tell application failure from network failure using output alone. “I restarted Docker” without a diagnosis does not pass.
 
 ## Certifications (optional)
 
