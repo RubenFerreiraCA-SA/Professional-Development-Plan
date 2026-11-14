@@ -23,4 +23,23 @@ The existing [D00 DevOps Syllabus](../../3%20Course%20Detail/3.1%20DevOps/D00%20
 
 Start with Chapter 1 and continue in order. Chapters introduce a subject from its own fundamentals and build towards challenging engineering decisions, progressively harder exercises and a **Practical Assessment**. Work on the same Final Project wherever practical; use disposable repositories for destructive experiments.
 
-Study-hour estimates belong to the course detail and should not dictate the depth of the teaching. D08 remains part of the full DevOps curriculum even when the Final Project checklist allows a vendor `N/A` substitution for personalised IDP acceptance.
+Study-hour estimates belong to the course detail and should not dictate the depth of the teaching (treat **179–263 h** as a planning range until actual completions are logged). D08 remains part of the full DevOps curriculum even when the Final Project checklist allows a vendor `N/A` substitution for personalised IDP acceptance.
+
+## Documentation baseline
+
+| | |
+| --- | --- |
+| **Status** | All eight chapters authored — approved for self-directed study (documentation review) |
+| **Freeze commit** | `69f54e0d2dc81d414c3f2c9bd47138015a8ba9ec` (14 Nov 2026) |
+| **Integrated check** | [DevOps Exit Assessment](DevOps%20Exit%20Assessment.md) |
+| **Not claimed by this freeze** | Clean-room end-to-end Harbour lab certification — track that as a separate QA workstream |
+
+## Prerequisite bridges
+
+| Before… | If you lack… | Do this (short) |
+| --- | --- | --- |
+| D05 | AWS IAM / VPC / billing vocabulary | Skim Cloud course-detail C01–C02 outlines; keep a training account + budget alarm |
+| D06 | Deployments, Services, namespaces | Read a short Kubernetes workload primer; kind labs in D06 stay the hands-on path |
+| D08 | Datadog account / plan limits | Confirm training org access and cost caps before enabling collect-all logs |
+
+Deeper Cloud and Platform modules remain the full treatment — these bridges are only enough to complete DevOps labs safely.

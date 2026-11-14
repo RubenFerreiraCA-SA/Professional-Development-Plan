@@ -4,6 +4,12 @@ This folder contains the **textbooks and progressive teaching materials** for th
 
 ## DevOps Engineering textbook
 
-[Read the DevOps Engineering textbook contents](4.1%20DevOps/README.md). It contains **eight chapters (D01–D08)** in a single learning sequence, with each chapter stored in its own Markdown file for easy maintenance.
+[Read the DevOps Engineering textbook](4.1%20DevOps/README.md) — **eight chapters (D01–D08)** complete (documentation baseline recorded in that README).
 
-Chapters 1–5 (through Infrastructure as Code and Terraform) are available. The remaining chapters will be authored progressively.
+## Cloud Engineering textbook
+
+[Read the Cloud Engineering textbook](4.2%20Cloud%20Engineering/README.md) — **C01** authored; C02–C03 textbooks follow. Course-detail for C01–C03 is available under [Cloud Engineering](../3%20Course%20Detail/3.2%20Cloud%20Engineering/).
+
+## Other disciplines
+
+AI and Platform Engineering textbooks are not yet authored; their course-detail files remain working outlines.

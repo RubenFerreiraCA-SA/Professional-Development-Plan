@@ -3,32 +3,52 @@
 | | Details |
 | --- | --- |
 | **Estimated study time** | 64–80 hours |
-| **Prerequisites** | To be defined. |
+| **Prerequisites** | [C02](C02%20AWS%20Cloud%20Foundations.md); Terraform literacy from [D05](../3.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) strongly recommended. |
 
-> **Status:** Draft module scaffold — not yet signed off.
+## Objective
 
-**Purpose:** Secure, resilient and cost-conscious AWS solution design.
+Design and verify a **resilient, cost-conscious** Harbour architecture on AWS: multi-AZ intent (or honest single-AZ limits), failure injection, backup/restore assumptions and change via code — not unrecorded console snowflakes.
 
-## Module overview
+## Outcomes
 
-_TODO: Define professional relevance and scope._
+1. Produce an architecture ADR covering compute, network, data, edge and observability hooks.  
+2. Justify HA, backup and limit choices with verified behaviour (not aspirational diagrams).  
+3. Inject or simulate a documented failure mode and recover per the ADR.  
+4. Keep cost controls and teardown paths explicit.  
+5. Prefer IaC changes; document any break-glass console use.
 
-## Learning outcomes
+## Suggested activities
 
-_TODO: Write measurable outcomes._
+| Activity | Estimated hours |
+| --- | ---: |
+| Architecture options and ADR | 12–16 |
+| Implement/adjust infra as code | 20–24 |
+| Failure injection + recovery drills | 16–20 |
+| Cost, limits, Practical Assessment | 16–20 |
+| **Total** | **64–80** |
 
-## Learning activities
+## 1. Architecture decision
 
-_TODO: Add each activity's topics, learning outcomes and learning resources._
+Compare topologies (e.g. ECS in public subnets vs private+NAT; RDS Multi-AZ vs single). Record trade-offs for **training vs production**.
 
-## Practical labs and deliverables
+## 2. Implement through code
 
-_TODO: Specify reproducible exercises, outputs and evidence._
+Extend or refine D05 `infra/` — do not invent a parallel unmanaged stack. Security groups, least-privilege task roles, health checks and load balancer target groups as applicable.
 
-## Certifications and exam-objective mapping
+## 3. Failure and recovery
 
-_TODO: Check the current official provider syllabus and map objectives. Proposed certifications are not guarantees._
+Pick one: AZ impairment simulation, dependency outage, bad deploy rollback (tie D06), or restore-from-backup drill for data. Evidence must match the ADR.
 
-## Assessment and completion criteria
+## 4. Cost and limits
 
-_TODO: Define pass standards, practical assessment and review._
+Service quotas, idle spend, NAT cost honesty, destroy scripts/runbooks.
+
+## Practical Assessment — recover per ADR
+
+**Required evidence:** Architecture ADR, verified HA/backup/limit choices in `infra/`, recovery evidence for the injected failure, cost controls, list of any console exceptions.
+
+**Acceptance:** Checklist C03 — recovery matches the ADR without unrecorded snowflakes.
+
+**Textbook:** Not yet authored (course detail ready for study planning).
+
+**Previous:** [C02](C02%20AWS%20Cloud%20Foundations.md) · **Next:** [Platform Engineering](../3.4%20Platform%20Engineering/) (after Cloud milestone)
