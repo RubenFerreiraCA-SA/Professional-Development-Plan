@@ -27,19 +27,26 @@ This text teaches [C02 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20En
 
 ### Before you begin
 
+Install tooling and prepare docs **before** any profile-specific STS check. Profiles are created in §2.2; identity validation happens immediately after that.
+
 ```bash
 export HARBOUR_ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
-export AWS_PROFILE="${AWS_PROFILE:-harbour-training}"
 export AWS_REGION="${AWS_REGION:-eu-west-1}"
+# AWS_PROFILE is set after §2.2 configures harbour-training / harbour-demo
 cd "$HARBOUR_ROOT"
 mkdir -p docs/cloud docs/runbooks docs/decisions
 
-aws --version
-aws sts get-caller-identity --profile "$AWS_PROFILE" || {
-  echo "Configure a training profile first (§2.2) — do not proceed as root"
+command -v aws >/dev/null || {
+  echo "Install AWS CLI v2 first: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   exit 1
 }
+aws --version
+
+command -v terraform >/dev/null || echo "terraform optional until you reuse D05 outputs (§2.4)"
+test -d "$HARBOUR_ROOT" || echo "Set HARBOUR_ROOT to your Harbour repo"
 ```
+
+You need: a **training** AWS account (or OU) you may bill, console access to create IAM users/roles and a budget, and MFA ability on human users. Do **not** run labs as the root user.
 
 ---
 
@@ -105,17 +112,24 @@ Exact managed-policy ARNs change; prefer **customer-managed** policies you can r
 
 This is **read-mostly**. It must **not** include `AdministratorAccess`. If your demo needs one mutating action (e.g. scale a service), add that single action with a resource ARN — do not widen to `*`.
 
-### 2.2.2 Worked example — CLI profiles without committing keys
+### 2.2.2 Worked example — configure CLI profiles, then validate STS
 
 ```bash
 # Prefer aws configure sso if your org supports it.
-# Otherwise: create access keys ONLY for harbour-training-admin temporarily,
+# Otherwise: create access keys ONLY for harbour-training-admin / demo-operator,
 # store in the shared credentials file — never in the Harbour repo.
 aws configure --profile harbour-training
 aws configure --profile harbour-demo
 
-aws sts get-caller-identity --profile harbour-training
-aws sts get-caller-identity --profile harbour-demo
+# Mandatory identity checks — run these immediately after configure:
+aws sts get-caller-identity --profile harbour-training | tee docs/cloud/sts-training.json
+aws sts get-caller-identity --profile harbour-demo | tee docs/cloud/sts-demo.json
+```
+
+Confirm the ARNs match the principals you created (training-admin vs demo-operator). If either call fails, fix credentials **before** budgets/VPC work.
+
+```bash
+export AWS_PROFILE=harbour-training   # default for bootstrap sections below
 ```
 
 Add to `.gitignore` if not already present: any local override files; never commit `~/.aws`. Document in `docs/cloud/iam-baseline.md` which profile is admin vs demo.
@@ -123,23 +137,42 @@ Add to `.gitignore` if not already present: any local override files; never comm
 ### 2.2.3 Worked example — MFA expectation
 
 ```bash
-# Console: enable MFA on both human users. CLI check (IAM):
+# Console: enable MFA on both human users. CLI check (IAM) as training-admin:
 aws iam list-mfa-devices --user-name harbour-demo-operator --profile harbour-training
-# Expect at least one device when MFA is configured (admin may need iam:ListMFADevices).
+# Expect at least one device when MFA is configured.
 ```
 
-If MFA listing is denied to the demo user, verify MFA in the console as admin and record “MFA verified visually / by admin” — still do not skip MFA.
+If MFA listing is denied, verify MFA in the console as admin and record “MFA verified visually / by admin” — still do not skip MFA.
 
-### 2.2.4 Practice — prove the happy path is not admin
+### 2.2.4 Practice — prove the happy path is not admin (non-mutating)
+
+Do **not** use `aws iam create-user` as the deny test. If the demo profile were accidentally overprivileged, that command could **create a real user**.
+
+**Positive evidence** (demo may do these):
 
 ```bash
 export AWS_PROFILE=harbour-demo
 aws sts get-caller-identity
-# Attempt something admin-only; expect AccessDenied:
-aws iam create-user --user-name should-fail 2>&1 | head -n 20
+aws ec2 describe-vpcs --region "$AWS_REGION" --max-items 1 2>&1 | head -n 20
 ```
 
-**Verify:** `docs/cloud/iam-baseline.md` states explicitly: *demo path uses `harbour-demo` / `harbour-demo-operator`; standing admin is not required for health checks and describe operations.*
+**Negative evidence** — prefer IAM policy simulation as **training-admin** evaluating the demo principal (no side effects):
+
+```bash
+export AWS_PROFILE=harbour-training
+DEMO_ARN="$(aws sts get-caller-identity --profile harbour-demo --query Arn --output text)"
+# If DEMO_ARN is an assumed-role ARN, use the role ARN as PolicySourceArn instead.
+aws iam simulate-principal-policy \
+  --policy-source-arn "$DEMO_ARN" \
+  --action-names iam:CreateUser iam:CreateAccessKey ec2:DescribeVpcs \
+  --output table | tee docs/cloud/iam-simulate-demo.txt
+```
+
+Expect `iam:CreateUser` / `iam:CreateAccessKey` → **implicitDeny** or **explicitDeny**, and `ec2:DescribeVpcs` → **allowed** (if your demo policy includes describe).
+
+**Alternative negative check** (still non-mutating): as `harbour-demo`, run `aws iam list-users` and expect **AccessDenied** — never create/delete.
+
+**Verify:** `docs/cloud/iam-baseline.md` records STS ARNs, simulation (or AccessDenied) output, and states explicitly: *demo path uses `harbour-demo`; standing admin is not required for health checks and describe operations.*
 
 ---
 
@@ -197,24 +230,52 @@ Internet
 
 ### 2.4.2 Worked example — sketch then implement (or import from D05)
 
-If D05 `infra/` already has a VPC:
+D05’s staging root is **`infra/envs/staging`**, not `infra/`. Use `-chdir` (or `cd` there) so outputs resolve.
+
+If D05 staging is applied:
 
 ```bash
-cd "$HARBOUR_ROOT/infra"  # adjust to your layout
-terraform output 2>/dev/null | tee "$HARBOUR_ROOT/docs/cloud/vpc-outputs.txt" || true
+export AWS_PROFILE=harbour-training
+export TF_STAGING="$HARBOUR_ROOT/infra/envs/staging"
+test -d "$TF_STAGING" || echo "No D05 staging env yet — use minimal VPC path below"
+
+# Capture outputs with absolute evidence path:
+terraform -chdir="$TF_STAGING" output | tee "$HARBOUR_ROOT/docs/cloud/vpc-outputs.txt"
+
+# D05 runtime module exposes (names may be nested under module outputs — adjust):
+#   service_url              → http://<alb-dns>   (HTTP listener — see §2.4.4)
+#   alb_dns_name
+#   alb_security_group_id
+ALB_SG="$(terraform -chdir="$TF_STAGING" output -raw alb_security_group_id 2>/dev/null || true)"
+SERVICE_URL="$(terraform -chdir="$TF_STAGING" output -raw service_url 2>/dev/null || true)"
+ALB_DNS="$(terraform -chdir="$TF_STAGING" output -raw alb_dns_name 2>/dev/null || true)"
+
+# Tasks SG may not be a root output in D05 — discover from the running service ENI/SG:
+# (Set CLUSTER/SERVICE to your names, e.g. harbour-stg-cluster / harbour-stg-api)
+APP_SG="$(aws ecs describe-services --profile harbour-training --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[0]' \
+  --output text 2>/dev/null || true)"
+
+echo "ALB_SG=${ALB_SG}" | tee "$HARBOUR_ROOT/docs/cloud/sg-ids.txt"
+echo "APP_SG=${APP_SG}" | tee -a "$HARBOUR_ROOT/docs/cloud/sg-ids.txt"
+echo "SERVICE_URL=${SERVICE_URL}" | tee -a "$HARBOUR_ROOT/docs/cloud/sg-ids.txt"
 ```
 
-Copy VPC ID, subnet IDs, SG IDs into `docs/cloud/network-baseline.md` with a diagram:
+If `alb_security_group_id` is nested (e.g. only on a module), run `terraform -chdir="$TF_STAGING" output` and copy the value into `ALB_SG` manually — still record the source. Prefer adding a root output later rather than guessing IDs.
+
+Copy VPC ID, subnet IDs, SG IDs into `docs/cloud/network-baseline.md` with a diagram matching the **actual** listener scheme:
 
 ```text
-[Client] --HTTPS--> [ALB SG] --HTTP--> [Task SG] --5432--> [DB SG or none]
+[Client] --HTTP--> [ALB SG] --HTTP--> [Task SG]     # D05 training baseline
+# Later (enhancement): [Client] --HTTPS--> [ALB TLS listener] --HTTP--> [Task SG]
 ```
 
-If you have **no** VPC yet, create a **minimal** one (console or a small Terraform root) with:
+If you have **no** VPC yet, create a **minimal** one (console or a small Terraform root under `infra/envs/staging`) with:
 
 - One VPC CIDR (e.g. `10.50.0.0/16`)  
 - Two public subnets in different AZs (ALB requirement)  
-- One SG for an HTTP/HTTPS entry and one for app tasks allowing only from the entry SG  
+- One SG for an HTTP entry and one for app tasks allowing only from the entry SG  
 - **No** NAT Gateway unless you accept the cost in writing  
 
 Do not open `0.0.0.0/0` to SSH on the app SG.
@@ -223,28 +284,37 @@ Do not open `0.0.0.0/0` to SSH on the app SG.
 
 ```bash
 export AWS_PROFILE=harbour-training
-# Replace with your SG ids from outputs/docs:
-aws ec2 describe-security-groups --group-ids "$ALB_SG" "$APP_SG" \
+test -n "$ALB_SG" && test -n "$APP_SG" || {
+  echo "Set ALB_SG and APP_SG from §2.4.2 before describing"
+  exit 1
+}
+aws ec2 describe-security-groups \
+  --profile harbour-training \
+  --region "$AWS_REGION" \
+  --group-ids "$ALB_SG" "$APP_SG" \
   --query 'SecurityGroups[].{Name:GroupName,Id:GroupId,Ingress:IpPermissions}' \
-  --output json | tee docs/cloud/sg-ingress.json
+  --output json > "$HARBOUR_ROOT/docs/cloud/sg-ingress.json"
 ```
 
 **Practice — reproduce:** Using C01 hop language, write which SG corresponds to the “TCP port hop” for the client and for the task.
 
-### 2.4.4 Worked example — C01 diagnostics against an AWS endpoint
+### 2.4.4 Worked example — C01 diagnostics against an AWS endpoint (HTTP first)
 
-Once Harbour (or a placeholder health target) is reachable via an ALB DNS name or public IP:
+D05’s training ALB uses an **HTTP** listener (`service_url = http://…`). Do **not** assume HTTPS until you add a TLS listener and a valid certificate (links to C01 TLS lessons).
 
 ```bash
-# Set explicitly, e.g. export HARBOUR_HEALTH_URL="https://YOUR-ALB-DNS/health"
+# Prefer Terraform output; HTTP is the D05 baseline:
+export HARBOUR_HEALTH_URL="${SERVICE_URL}/health"
+# e.g. http://harbour-xxxx.eu-west-1.elb.amazonaws.com/health
+# Only use https://… after you have configured an HTTPS listener + cert (enhancement below).
+
 test -n "${HARBOUR_HEALTH_URL:-}" || {
-  echo "Set HARBOUR_HEALTH_URL to your ALB health URL, or skip until D05 apply"
+  echo "Set HARBOUR_HEALTH_URL from service_url, or skip until D05 Stage C apply"
   exit 1
 }
 curl -v --connect-timeout 5 --max-time 15 "$HARBOUR_HEALTH_URL" \
-  2>&1 | tee docs/cloud/aws-health-curl.txt | tail -n 40
+  2>&1 | tee "$HARBOUR_ROOT/docs/cloud/aws-health-curl.txt" | tail -n 40
 
-# DNS for the hostname in the URL:
 python3 - <<'PY'
 from urllib.parse import urlparse
 import os, subprocess
@@ -254,11 +324,13 @@ subprocess.run(["dig", "+short", host], check=False)
 PY
 ```
 
-Apply the C01 ordered checks: DNS → route (your laptop) → TLS → HTTP status. Record refused vs timeout vs 5xx vs ready/health split if applicable.
+Apply the C01 ordered checks: DNS → route (your laptop) → **HTTP** (or TLS if enhanced) → status. Record refused vs timeout vs 5xx vs ready/health split if applicable.
+
+**HTTPS enhancement (optional, explicit):** add an HTTPS listener + ACM (or imported) certificate for a hostname you control; then set `HARBOUR_HEALTH_URL=https://<hostname>/health` and reuse C01 verify/mismatch drills against that edge. Until then, keep evidence on **HTTP** so it matches D05.
 
 If you only have local Compose today, complete network **sketch + SG design** now and mark “AWS health curl” as blocked on D05 apply — still finish IAM and budget. Do not fake a public URL.
 
-**Verify:** `network-baseline.md` matches reality (or honestly says “pending apply”).
+**Verify:** `network-baseline.md` matches reality (or honestly says “pending apply”); health URL scheme matches the listener you actually have.
 
 ---
 
@@ -292,6 +364,47 @@ aws elbv2 describe-load-balancers --region "$AWS_REGION" 2>&1 | head
 
 **Verify:** Services map committed; no secret values in the table.
 
+### 2.5.3 Worked example — workload identity (ECS task role), not only humans
+
+Least privilege applies to **running services**, not only the demo CLI profile. After D05 runtime exists:
+
+```bash
+export AWS_PROFILE=harbour-training
+# CLUSTER / SERVICE from your staging names:
+TASK_DEF="$(aws ecs describe-services --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].taskDefinition' --output text)"
+echo "task_definition=${TASK_DEF}"
+
+TASK_ROLE_ARN="$(aws ecs describe-task-definition --region "$AWS_REGION" \
+  --task-definition "$TASK_DEF" \
+  --query 'taskDefinition.taskRoleArn' --output text)"
+EXEC_ROLE_ARN="$(aws ecs describe-task-definition --region "$AWS_REGION" \
+  --task-definition "$TASK_DEF" \
+  --query 'taskDefinition.executionRoleArn' --output text)"
+echo "taskRole=${TASK_ROLE_ARN}" | tee "$HARBOUR_ROOT/docs/cloud/workload-roles.txt"
+echo "executionRole=${EXEC_ROLE_ARN}" | tee -a "$HARBOUR_ROOT/docs/cloud/workload-roles.txt"
+
+# What can the task role do? (non-mutating simulation)
+aws iam simulate-principal-policy \
+  --policy-source-arn "$TASK_ROLE_ARN" \
+  --action-names ecr:GetAuthorizationToken logs:PutLogEvents iam:CreateUser s3:ListAllMyBuckets \
+  --output table | tee "$HARBOUR_ROOT/docs/cloud/iam-simulate-task-role.txt"
+```
+
+**Expected teaching outcome:**
+
+| Role | Typical allow | Typical deny |
+| --- | --- | --- |
+| Execution role | Pull image, write logs (execution policy) | Broad IAM/admin |
+| Task role | Only what the **app** needs (often minimal in D05 training) | `iam:CreateUser`, account-wide admin |
+
+Record in `iam-baseline.md`: human demo-operator vs task role vs execution role — three different trust boundaries.
+
+If runtime is not applied yet, write the intended role split from D05 module code (`aws_iam_role.task` / `execution`) and mark simulation as pending — do not skip the conceptual distinction.
+
+**Verify:** Docs name which identity Harbour’s task assumes and cite simulation (or attached-policy list) evidence.
+
 ---
 
 ## Section 2.6 — Landing-zone ADR and destroy policy
@@ -319,9 +432,8 @@ aws elbv2 describe-load-balancers --region "$AWS_REGION" 2>&1 | head
 ### 2.6.2 Worked example — idle and destroy
 
 ```bash
-# If Terraform-managed (preferred):
-cd "$HARBOUR_ROOT/infra"   # your path
-# AWS_PROFILE=harbour-training terraform plan -destroy
+# If Terraform-managed (preferred) — D05 staging root:
+# AWS_PROFILE=harbour-training terraform -chdir="$HARBOUR_ROOT/infra/envs/staging" plan -destroy
 # Only destroy when you intend to; capture the plan in evidence if you run it
 
 # Document the idle policy even if you keep a minimal always-on budget alarm only.
@@ -350,18 +462,20 @@ Align with [C02 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 ### Required deliverables
 
-1. `docs/cloud/iam-baseline.md` — root vs admin vs **demo-operator**; MFA notes; explicit “no admin for happy path.”  
-2. `docs/cloud/network-baseline.md` — diagram, VPC/SG summary (from D05 outputs or minimal VPC).  
-3. `docs/cloud/services-map.md` — Harbour placement table.  
-4. `docs/cloud/cost-guardrails.md` — budget + alert proof + idle/destroy policy.  
-5. Evidence that **`harbour-demo` profile** can perform the documented demo checks (STS identity + describe and/or health curl) while **admin-only** actions fail.  
-6. ADR 0102 committed.
+1. `docs/cloud/iam-baseline.md` — root vs admin vs **demo-operator** vs **ECS task/execution roles**; MFA notes; explicit “no admin for happy path.”  
+2. Positive + negative human permission evidence (STS/describe allowed; simulate or non-mutating deny — **not** `create-user`).  
+3. Workload role evidence (task role ARN + simulation or policy list).  
+4. `docs/cloud/network-baseline.md` — diagram, VPC/SG IDs from `terraform -chdir=…/envs/staging` (or minimal VPC).  
+5. `docs/cloud/services-map.md` — Harbour placement table.  
+6. `docs/cloud/cost-guardrails.md` — budget + alert proof + idle/destroy policy.  
+7. Health/demo check using **`http://`** D05 baseline URL unless HTTPS was explicitly added.  
+8. ADR 0102 committed.
 
 ### Rubric
 
 | Dimension | Developing | Competent | Advanced |
 | --- | --- | --- | --- |
-| IAM | Single admin key | Demo operator + MFA + denied admin action | SSO / no long-lived keys |
+| IAM | Single admin key | Demo operator + MFA + non-mutating deny proof + task role noted | SSO; task-role simulation filed |
 | Network | Console doodle | Documented VPC/SG matching live IDs | C01 hops against ALB with evidence |
 | Services | Vague “use ECS” | Map linked to real resources/outputs | No duplicate unmanaged stack |
 | Cost | Ignored | Budget alert before spend | Tags + teardown drill executed |
@@ -371,14 +485,16 @@ Align with [C02 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 ### Self-check
 
-- Can you open the health URL (or describe the service) **without** the admin profile?  
-- Is root unused for labs?  
-- Would a second engineer find VPC/SG IDs from `docs/cloud/` alone?  
-- Is there a budget alert you have actually received or can show configured?
+- Did STS succeed only **after** profiles were configured (§2.2)?  
+- Can you demo without admin, with non-mutating deny proof?  
+- Do you know the ECS **task role** ARN and what it cannot do?  
+- Is health evidence on **http://** unless you added TLS deliberately?  
+- Were Terraform outputs read via `infra/envs/staging`?  
+- Is there a budget alert before extra spend?
 
 ### Example conclusion (evidence still required)
 
-> Training account `…`, region `eu-west-1`. Profiles `harbour-training` (admin) and `harbour-demo` (read/describe). Demo `CreateUser` → AccessDenied. VPC/SG IDs from D05 outputs in `network-baseline.md`. Budget $20 @ 80% email configured before new subnets. Health curl via ALB as demo user documented. No admin keys in Git. Teardown runbook filed.
+> Training account `…`, region `eu-west-1`. Profiles configured then STS-validated. Demo: describe allowed; `simulate-principal-policy` denies `iam:CreateUser`. Task role ARN recorded; simulation shows no admin IAM. SG IDs from `terraform -chdir=infra/envs/staging` + ECS service query. Budget before spend. Health via `http://$ALB/health` (D05 HTTP listener). No admin keys in Git.
 
 ---
 
