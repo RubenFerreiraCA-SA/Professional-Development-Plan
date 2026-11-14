@@ -13,7 +13,7 @@
 
 A02 extends A01’s **read-only** `harbour-diag` into a **tool-using agent** with an **allow-list**. The model never gets a raw shell. Mutating or privileged tools are **blocked** unless an explicit **approval gate** passes. The checklist bar is: *a privileged or mutating action is blocked unless the designed approval gate passes; show a failed unauthorised attempt.*
 
-Work in order: **Concept → Worked example → Practice → Verify → Reflect**. Prefer `MOCK_LLM` / local stubs so labs run without paid APIs. Tools are **code you control** under `app/ai/diagnostics/`. Log every tool call (with sanitized arguments — never raw `args`). Secrets stay in the environment only.
+Work in order: **Concept → Worked example → Practice → Verify → Reflect**. Prefer `MOCK_LLM` / local stubs so labs run without paid APIs. Tools are **code you control** under `app/ai/diagnostics/`. Log every tool call with sanitized arguments **and** a sanitized result summary — never raw `args`, never raw result bodies (inputs and outputs are both untrusted for logging). Secrets stay in the environment only.
 
 This text teaches [A02 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/A02%20Agents%20and%20Orchestration.md).
 
@@ -254,7 +254,7 @@ PY
 | Deny-by-default | Unknown name → reject; do not “best effort” |
 | Schema validation | Arguments must satisfy the tool's schema (required keys, types, no extra keys) **before** approval or execution |
 | No raw shell | No `bash`, `eval`, or free-form command tool |
-| Audit | Every attempt (allow **and** deny) is logged — with **sanitized** args, never raw `args` |
+| Audit | Every attempt (allow **and** deny) is logged — with **sanitized** args (never raw `args`) and, on success, a **sanitized result summary** (never the raw result body) |
 
 **Dispatcher flow (fixed order):** name authorised → arguments valid → approval satisfied → execute. Each stage fails closed and writes a log entry.
 
@@ -388,6 +388,47 @@ def _audit_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+# --- Audit sanitisation for RESULTS: tool output is untrusted too (a runbook preview can hold secrets) ---
+# The log never stores a raw result body. Only these fields per tool are summarised; anything else is dropped.
+# A future tool gets NO logged result fields until you add it here.
+AUDIT_RESULT_FIELDS: dict[str, frozenset[str]] = {
+    "get_health": frozenset({"status", "source", "service"}),
+    "read_runbook": frozenset({"name", "chars"}),  # NO preview — it is file content
+    "list_known_services": frozenset(),            # summarised as a count instead
+    "restart_service": frozenset({"ok", "action", "service", "note"}),
+}
+MAX_AUDIT_RESULT_KEYS = 10
+
+
+def _audit_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _safe_str(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return f"<omitted:{type(value).__name__}>"
+
+
+def _audit_result(name: str, result: Any) -> dict[str, Any]:
+    """Sanitised summary of a tool result for the log. Never contains a raw result body."""
+    try:
+        size = len(json.dumps(result, default=str))
+    except (TypeError, ValueError):
+        size = len(str(result))
+    audit: dict[str, Any] = {"type": type(result).__name__, "chars": size, "preview": "omitted"}
+    if not isinstance(result, dict):
+        return audit
+    # Key names come from handlers, but a stub file or future tool could make them arbitrary: scrub + cap.
+    keys = sorted(_safe_str(str(k)[:MAX_AUDIT_KEY_LEN]) for k in result)
+    audit["keys"] = keys[:MAX_AUDIT_RESULT_KEYS]
+    keep = AUDIT_RESULT_FIELDS.get(name, frozenset())  # unknown tool -> summary of nothing
+    summary = {k: _audit_value(v) for k, v in result.items() if k in keep}
+    if name == "list_known_services" and isinstance(result.get("services"), list):
+        summary["count"] = len(result["services"])
+    if summary:
+        audit["summary"] = summary
+    return audit
+
+
 def _append_log(entry: dict[str, Any]) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as fh:
@@ -449,13 +490,18 @@ def execute_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any
     # 4) Execute
     try:
         result = HANDLERS[name](args)
-        out = {**base, "status": "ok", "result": result}
     except Exception as exc:  # noqa: BLE001 — surface to agent observe step
         # Exception text can echo caller input, so scrub it like any other logged string.
         out = {**base, "status": "error", "error": f"{type(exc).__name__}: {_safe_str(str(exc))}"}
-    _append_log(out)
-    return out
+        _append_log(out)
+        return out
+    # Split the two audiences: the LOG gets the sanitised audit form; the CALLER (agent observe step)
+    # gets the full result in-process. The full result is never persisted by this module.
+    _append_log({**base, "status": "ok", "result": _audit_result(name, result)})
+    return {**base, "status": "ok", "result": result}
 ```
+
+Both **inputs and outputs are untrusted for logging**: `_audit_args` sanitises what the model sends in, `_audit_result` sanitises what a tool sends back (a `read_runbook` preview is file content and may contain secrets). The caller still receives the full `result` so the agent can reason over it; only the persisted log is reduced to a summary. Callers must not write the returned `result` to disk themselves (see §2.3.4 and §2.5 evidence scripts).
 
 ### 2.3.3 Practice — reject unknown and mutating names
 
@@ -478,7 +524,7 @@ PY
 
 ### 2.3.4 Practice — schema validation + sanitized log evidence
 
-Prove the order *name → args → approval → execute*, and that the log never holds raw args or secrets. Note the invalid `restart_service` call is rejected for its **arguments** even though approval is also off — validation runs first.
+Prove the order *name → args → approval → execute*, and that the log never holds raw args, raw result bodies, or secrets. Note the invalid `restart_service` call is rejected for its **arguments** even though approval is also off — validation runs first.
 
 ```bash
 cd "$HARBOUR_ROOT"
@@ -509,6 +555,25 @@ assert SECRET not in blob and "a b " * 50 not in blob, "raw value leaked into lo
 assert SECRET not in LOG_PATH.read_text(encoding="utf-8"), "secret reached tool-call-log.jsonl"
 assert cases["extra_secret_key"]["args"]["_dropped_keys"] == ["[REDACTED]"]  # key name looks secret-like
 
+# Outputs are untrusted too: a secret planted in a runbook must reach the CALLER but never the LOG.
+# The planted value deliberately matches no SECRET_RE pattern, so only the structural rule can keep it out.
+PLANTED = "hunter2-planted-in-runbook"
+planted_path = root / "docs" / "runbooks" / "planted-runbook.md"
+planted_path.write_text(f"# planted\n\nadmin password is {PLANTED}\n", encoding="utf-8")
+try:
+    before = LOG_PATH.read_text(encoding="utf-8").splitlines()
+    ok = execute_tool("read_runbook", {"name": "planted-runbook.md"})
+finally:
+    planted_path.unlink()
+assert ok["status"] == "ok" and PLANTED in ok["result"]["preview"]  # full result returned in-process
+
+log_text = LOG_PATH.read_text(encoding="utf-8")
+assert PLANTED not in log_text, "runbook preview secret reached tool-call-log.jsonl"
+logged = json.loads(log_text.splitlines()[len(before)])  # the new read_runbook entry
+assert logged["status"] == "ok" and logged["tool"] == "read_runbook"
+assert logged["result"]["preview"] == "omitted" and "preview" not in logged["result"].get("summary", {})
+assert logged["result"]["summary"] == {"name": "planted-runbook.md", "chars": ok["result"]["chars"]}
+
 out_dir = root / "docs" / "ai" / "agents"
 (out_dir / "schema-validation-evidence.json").write_text(
     json.dumps({"checklist": "A02 — schema validated before approval/execute", "cases": cases},
@@ -516,13 +581,14 @@ out_dir = root / "docs" / "ai" / "agents"
 with (out_dir / "sanitized-log-sample.jsonl").open("w", encoding="utf-8") as fh:
     for label, entry in cases.items():
         fh.write(json.dumps({"case": label, **entry}, sort_keys=True) + "\n")
+    fh.write(json.dumps({"case": "ok_result_audit", **logged}, sort_keys=True) + "\n")  # LOG form, never `ok`
 print("wrote schema-validation-evidence.json and sanitized-log-sample.jsonl")
 PY
 ```
 
-**Verify:** The three schema cases are `denied` / `schema_validation_failed` with a short `detail` (no values echoed). Log entries show only allow-listed arg keys; the secret-like value is `[REDACTED]`, the 200-character value is `[TRUNCATED len=200]`, and unexpected keys appear only by name in `_dropped_keys` (secret-like names are themselves `[REDACTED]`). The secret string appears **nowhere** in `tool-call-log.jsonl`.
+**Verify:** The three schema cases are `denied` / `schema_validation_failed` with a short `detail` (no values echoed). Log entries show only allow-listed arg keys; the secret-like value is `[REDACTED]`, the 200-character value is `[TRUNCATED len=200]`, and unexpected keys appear only by name in `_dropped_keys` (secret-like names are themselves `[REDACTED]`). The secret string appears **nowhere** in `tool-call-log.jsonl`. For the planted-runbook call, `read_runbook` returns `ok` with the full `preview` to the caller (so the agent can read it), but the matching log entry holds only `result.summary = {name, chars}` and `preview: "omitted"` — the planted `hunter2-…` value appears nowhere in `tool-call-log.jsonl`, even though it matches no secret regex.
 
-**Reflect:** If you add a fifth tool tomorrow and forget `AUDIT_KEYS`, what gets logged? (Nothing but dropped key names — that is the point.)
+**Reflect:** If you add a fifth tool tomorrow and forget `AUDIT_KEYS` / `AUDIT_RESULT_FIELDS`, what gets logged? (Only dropped key names and a type/size/keys summary of the result — that is the point.) Both inputs **and** outputs are untrusted for logging.
 
 ---
 
@@ -570,7 +636,7 @@ export APPROVE_MUTATIONS=0
 
 ### 2.4.3 Practice — ADR note
 
-Add `docs/decisions/0102-harbour-agent-tool-policy.md` (adjust number to your scheme): allow-list, deny-by-default, approval gate, and that `restart_service` is a **stub** for assessment evidence — not a production operator. Also record that argument schemas are validated before approval, and that audit logs hold sanitized args only.
+Add `docs/decisions/0102-harbour-agent-tool-policy.md` (adjust number to your scheme): allow-list, deny-by-default, approval gate, and that `restart_service` is a **stub** for assessment evidence — not a production operator. Also record that argument schemas are validated before approval, and that audit logs hold sanitized args and sanitized result summaries only (no raw result bodies, e.g. runbook previews).
 
 Also write `docs/ai/agents/training-gate-disclaimer.md` stating, in your own words: (1) `APPROVE_MUTATIONS=1` / `APPROVE_INTERACTIVE` are **training stubs only**; (2) a real mutating handler requires approval bound to **exact tool name + args + actor identity + short expiry**, with **audit evidence**; (3) this lab does **not** implement that.
 
@@ -776,13 +842,13 @@ Align with [A02 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/
 ### Required deliverables
 
 1. **Tool permission model** — `docs/ai/agents/tool-schemas.json` + embedded `tool_schemas.py` + allow-list/`PRIVILEGED` under `app/ai/diagnostics/`.  
-2. **`execute_tool`** — flow is name authorised → arguments valid → approval satisfied → execute; unknown names denied; read-only tools succeed; every call logged to `docs/ai/agents/tool-call-log.jsonl` via `_audit_args` (never raw `args`).  
+2. **`execute_tool`** — flow is name authorised → arguments valid → approval satisfied → execute; unknown names denied; read-only tools succeed; every call logged to `docs/ai/agents/tool-call-log.jsonl` via `_audit_args` (never raw `args`) and `_audit_result` (never raw result bodies; the caller still gets the full result in-process).  
 3. **Approval gate** — `restart_service` blocked unless `APPROVE_MUTATIONS=1` or interactive yes (**training stub only**).  
 4. **Failed unauthorised attempt** — `docs/ai/agent-deny-evidence.json` with exact `status`/`reason` fields.  
 5. **Orchestration loop** — plan → tool → observe → answer with `MAX_STEPS`; `MOCK_LLM` path documented. Labelled as a **mock-agent implementation**; provider tool-calling is an advanced exercise and is **not** required.  
 6. **ADR / boundary note** — `docs/ai/agents/agent-boundary.md` + short ADR on tool policy.  
 7. **Schema validation evidence** — `docs/ai/agents/schema-validation-evidence.json` (§2.3.4): missing-required and wrong-type calls return `denied` / `schema_validation_failed`, checked before approval, handler never run.  
-8. **Sanitized log sample** — `docs/ai/agents/sanitized-log-sample.jsonl` (§2.3.4): allow-listed arg keys only, secret-like values redacted, long values truncated, no raw secret anywhere in `tool-call-log.jsonl`.  
+8. **Sanitized log sample** — `docs/ai/agents/sanitized-log-sample.jsonl` (§2.3.4): allow-listed arg keys only, secret-like values redacted, long values truncated, result logged as an audit summary (no `preview`), no raw secret — including one planted in a runbook — anywhere in `tool-call-log.jsonl`.  
 9. **Training-gate disclaimer** — `docs/ai/agents/training-gate-disclaimer.md` (§2.4.3): `APPROVE_MUTATIONS` is a training stub; real mutations need approval bound to tool + args + actor + short expiry + audit evidence.  
 10. Optional: one approved-path smoke with flag set, then flag cleared again.
 
@@ -807,13 +873,14 @@ Align with [A02 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/
 - Is there **no** tool that executes arbitrary shell?  
 - Do invalid args fail with `schema_validation_failed` *before* the approval gate, with evidence filed?  
 - Does the log hold only sanitized args (no secret-like values, no blind dump of unknown keys)?  
+- Does a secret planted in a runbook stay out of `tool-call-log.jsonl` after `read_runbook` (result logged via `_audit_result`, not raw)?  
 - Does `training-gate-disclaimer.md` say `APPROVE_MUTATIONS` is not production authorisation?  
 - Is the loop described as a mock-agent implementation (provider tool-calling not claimed)?  
 - Would a second engineer find schemas, log, and deny evidence without asking you?
 
 ### Example conclusion (evidence still required)
 
-> Extended A01 `harbour-diag` with allow-listed tools under `app/ai/diagnostics/`. `execute_tool` denies unknown names and blocks `restart_service` unless `APPROVE_MUTATIONS=1`. Unauthorised attempt filed at `docs/ai/agent-deny-evidence.json` (`approval_gate_failed`). Arguments are schema-validated before the (training-stub) approval gate, and audit logs hold sanitized args only (`docs/ai/agents/schema-validation-evidence.json`, `sanitized-log-sample.jsonl`). `APPROVE_MUTATIONS` is disclaimed as training-only in `training-gate-disclaimer.md`. The deterministic mock-agent loop completes health Q&A within max steps and refuses restart without approval; provider tool-calling is not claimed. No raw shell tool; secrets remain in env.
+> Extended A01 `harbour-diag` with allow-listed tools under `app/ai/diagnostics/`. `execute_tool` denies unknown names and blocks `restart_service` unless `APPROVE_MUTATIONS=1`. Unauthorised attempt filed at `docs/ai/agent-deny-evidence.json` (`approval_gate_failed`). Arguments are schema-validated before the (training-stub) approval gate, and audit logs hold sanitized args and sanitized result summaries only — no raw result bodies (`docs/ai/agents/schema-validation-evidence.json`, `sanitized-log-sample.jsonl`). `APPROVE_MUTATIONS` is disclaimed as training-only in `training-gate-disclaimer.md`. The deterministic mock-agent loop completes health Q&A within max steps and refuses restart without approval; provider tool-calling is not claimed. No raw shell tool; secrets remain in env.
 
 ---
 
@@ -826,7 +893,7 @@ Align with [A02 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/
 | Debug a deny | `tool-call-log.jsonl` last lines | Widening allow-list “temporarily” |
 | Call a paid model later | Keep `execute_tool` as the only executor | Passing API keys into prompts |
 | Leave the lab | `APPROVE_MUTATIONS=0` | Leaving mutations enabled overnight |
-| Log a tool call | `_audit_args(name, args)` | Dumping raw `args` into the log |
+| Log a tool call | `_audit_args(name, args)` + `_audit_result(name, result)` | Dumping raw `args` or raw `result` into the log |
 | Make a mutation real | Per-call approval: tool + args + actor + expiry + audit | Reusing `APPROVE_MUTATIONS=1` |
 
 ## Glossary
@@ -837,7 +904,8 @@ Align with [A02 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/
 | Deny-by-default | Anything not explicitly allowed is rejected |
 | Approval gate | Extra human/env check before privileged tools run (here: a **training stub**, not production authorisation) |
 | Schema validation | Checking tool args against the published schema (required keys, types) before approval/execution |
-| Sanitized audit log | Log entries with allow-listed arg keys only; secret-like/long values redacted or truncated |
+| Sanitized audit log | Log entries with allow-listed arg keys only, secret-like/long values redacted or truncated, and results reduced to a type/size/allow-listed-field summary (no raw bodies) |
+| Untrusted for logging | Both tool **inputs** (model-supplied args) and **outputs** (tool results, e.g. a runbook preview) may hold secrets; neither is logged raw |
 | Orchestration loop | Repeated plan → tool → observe until stop |
 | MOCK_LLM | Local deterministic planner so labs need no paid API |
 | Mock-agent implementation | The deterministic `mock_plan` loop assessed here; provider tool-calling is an advanced extra |
