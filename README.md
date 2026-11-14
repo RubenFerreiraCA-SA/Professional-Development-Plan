@@ -1,25 +1,24 @@
-# Platform Engineering Professional Development Plan
+# Professional Development Plan
 
-A **reusable PDP framework with an estimated 571–753 hours of study** for developers building skills in **Platform Engineering and its enabling disciplines**: DevOps, Cloud and AI.
+A self-directed educational programme across **DevOps, Cloud, AI and Platform Engineering**.
 
-Follow the learning pathway, complete hands-on labs and build an Internal Developer Platform. Add your own dates, goals and pace.
+You self-assess every topic as Beginner, Intermediate, Professional or Expert; follow only the matching course modules; study from an independent master textbook; and complete a separately documented practical project — including prerequisite project tasks for theory you skipped.
 
 ## Start here
 
-- [Programme Overview](1%20Foundational%20Documents/1.1%20Programme%20Overview.md) — what the programme aims to achieve
-- [Course Outline](1%20Foundational%20Documents/1.2%20Course%20Outline.md) — modules and estimated study hours
-- [How To Guide](1%20Foundational%20Documents/1.3%20How%20To%20Guide.md) — how to personalise and follow it
-- [PDP Templates](2%20PDP%20templates/) — hours/week → timeline and detailed plan
-- [Final Project](1%20Foundational%20Documents/1.4%20Final%20Project.md) — practical application of the learning
-- [Final Project Checklist](1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) — acceptance criteria for what Harbour / the IDP can do
+1. [Programme Vision](1%20Foundation%20Documents/1.1%20Programme%20Vision.md)
+2. [Programme Structure](1%20Foundation%20Documents/1.2%20Programme%20Structure.md)
+3. [How To Use The PDP](1%20Foundation%20Documents/1.3%20How%20To%20Use%20The%20PDP.md)
+4. [Topic Self Assessment](2%20PDP%20Development/2.2%20Topic%20Self%20Assessment.md)
 
-## Repository
+## Five sections
 
-- **[Foundational Documents](1%20Foundational%20Documents/)** — purpose, pathway and guide
-- **[PDP Templates](2%20PDP%20templates/)** — personal profile, capacity planner and progress log
-- **[Course Detail](3%20Course%20Detail/)** — syllabuses, module outlines, outcomes and assessments
-- **[Study Materials](4%20Study%20Materials/)** — progressively written, textbook-style teaching chapters
+| Section | Contents |
+| --- | --- |
+| [1 Foundation Documents](1%20Foundation%20Documents/) | Vision, structure, rules |
+| [2 PDP Development](2%20PDP%20Development/) | Profile, assessment, pathway, schedule, progress |
+| [3 Course Material](3%20Course%20Material/) | 24 topics × 4 levels = 96 modules |
+| [4 Project Document](4%20Project%20Document/Project.md) | Independent project steps PRJ-001–PRJ-096 |
+| [5 Textbook](5%20Textbook/Master%20Textbook.md) | One independent master textbook |
 
-The DevOps textbook is complete for **[D01](4%20Study%20Materials/4.1%20DevOps/D01%20Repository%20Fundamentals.md)**–**[D08 — Datadog](4%20Study%20Materials/4.1%20DevOps/D08%20Datadog.md)** (documentation approved). The Cloud Engineering textbook is complete for **[C01](4%20Study%20Materials/4.2%20Cloud%20Engineering/C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md)**–**[C03](4%20Study%20Materials/4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)** ([Cloud syllabus](3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)). The AI Engineering textbook is documentation-signed-off for **[A01](4%20Study%20Materials/4.3%20AI%20Engineering/A01%20Applied%20AI%20and%20LLM%20Engineering.md)**–**[A03](4%20Study%20Materials/4.3%20AI%20Engineering/A03%20LLMOps%20and%20AI%20Infrastructure.md)** ([AI syllabus](3%20Course%20Detail/3.3%20AI%20Engineering/A00%20AI%20Syllabus.md); optional track). The Platform Engineering textbook is authored for **[P01](4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)**–**[P04](4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md)** ([Platform syllabus](3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md); **documentation sign-off withheld**). Canonical Harbour examples: [reference/harbour/](reference/harbour/). Clean-room reproducibility and independent acceptance remain Gates 2–3. Authoritative dispositions: [review-status.yaml](1%20Foundational%20Documents/review-status.yaml) (audit baseline `c37e25d`).
-
-**Use and redistribution:** These materials are provided for personal professional-development study. All rights reserved unless a separate licence file is added to this repository.
+This repository is **educational text and planning worksheets only**. Implement practical work in your own project workspace.
