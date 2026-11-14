@@ -262,24 +262,24 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -subj "/CN=harbour-tls.local" \
   -addext "subjectAltName=DNS:harbour-tls.local"
 
-# Terminal 1 — TLS listener on 8443 (openssl s_server is enough for this drill):
-openssl s_server -quiet -accept 8443 -cert cert.pem -key key.pem >/tmp/harbour-tls-s_server.log 2>&1 &
+# Terminal 1 — TLS listener on 8443 (-www serves a simple HTTP response so curl does not hang):
+openssl s_server -www -accept 8443 -cert cert.pem -key key.pem >/tmp/harbour-tls-s_server.log 2>&1 &
 echo $! > /tmp/harbour-tls-s_server.pid
 sleep 1
 
 # Terminal 2 — trust this cert as a CA for the test, but use the WRONG hostname:
-curl -v --connect-timeout 5 \
+curl -v --connect-timeout 5 --max-time 10 \
   --cacert /tmp/harbour-tls-c01/cert.pem \
   https://localhost:8443/ 2>&1 | tee /tmp/harbour-tls-mismatch.txt | tail -n 30
 # Expected: certificate verify failed / hostname mismatch / "does not match" (wording varies).
 # Do NOT add -k. If you add -k, the drill is invalid.
 
 # Optional positive control — same cert, matching name via --resolve:
-curl -v --connect-timeout 5 \
+curl -v --connect-timeout 5 --max-time 10 \
   --cacert /tmp/harbour-tls-c01/cert.pem \
   --resolve harbour-tls.local:8443:127.0.0.1 \
   https://harbour-tls.local:8443/ 2>&1 | tail -n 15
-# May still show HTTP errors from s_server; the TLS handshake should succeed.
+# Expect TLS success and a basic HTTP body from s_server -www.
 
 kill "$(cat /tmp/harbour-tls-s_server.pid)" 2>/dev/null || true
 cd "$HARBOUR_ROOT"
