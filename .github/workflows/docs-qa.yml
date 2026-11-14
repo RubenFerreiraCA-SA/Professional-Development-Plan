@@ -14,6 +14,15 @@ jobs:
           python-version: "3.12"
       - name: Install test deps
         run: pip install pyyaml
+      - name: Syntax check extracted scripts (G1-05)
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q reference/harbour/platform/bin
+          while IFS= read -r -d '' f; do
+            if head -n1 "$f" | grep -qE '^#!.*bash'; then
+              bash -n "$f"
+            fi
+          done < <(find reference/harbour/platform -type f \( -name '*.sh' -o -perm -u+x \) -print0)
       - name: Offline Harbour reference unit tests
         run: python3 -m unittest discover -s reference/harbour/tests -v
       - name: Check relative Markdown links to existing paths

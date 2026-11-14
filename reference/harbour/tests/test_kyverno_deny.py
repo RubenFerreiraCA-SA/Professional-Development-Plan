@@ -180,7 +180,7 @@ results:
 
 
 class TestPromoteVerifyImages(unittest.TestCase):
-    def test_shared_digest_two_refs(self):
+    def test_shared_digest_two_refs_unsupported_v1(self):
         dig = "sha256:" + "a" * 64
         yaml_text = f"""
 apiVersion: apps/v1
@@ -205,9 +205,9 @@ spec:
         - name: c
           image: registry.example/two@{dig}
 """
-        data = _extract_from_yaml(yaml_text)
-        self.assertEqual(data["action"], "verify")
-        self.assertEqual(len(data["verified_refs"]), 2)
+        with self.assertRaises(SystemExit) as ctx:
+            _extract_from_yaml(yaml_text)
+        self.assertIn("unsupported in v1", str(ctx.exception))
 
     def test_base_second_workload_not_skipped(self):
         dig = "sha256:" + "b" * 64

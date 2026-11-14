@@ -1,0 +1,57 @@
+# Representative pinned Kyverno CLI (--policy-report) sample for Gate 1 offline tests.
+# Format: wgpolicyk8s.io/v1alpha2 ClusterPolicyReport as emitted by Kyverno CLI 1.13.4.
+# Captured structure for a rendered Deployment (autogen Pod) + init-capable Pod.
+# Live CLI capture may replace this file; do not invent incompatible schemas.
+apiVersion: wgpolicyk8s.io/v1alpha2
+kind: ClusterPolicyReport
+metadata:
+  name: harbour-sample
+results:
+  - policy: harbour-baseline
+    rule: require-image-digest
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: ledger
+        namespace: ledger-staging
+  - policy: harbour-baseline
+    rule: require-nonroot-memory-limit
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: ledger
+        namespace: ledger-staging
+  - policy: harbour-baseline
+    rule: require-ephemeral-no-privilege
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: ledger
+        namespace: ledger-staging
+  - policy: harbour-baseline
+    rule: require-image-digest
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: good-ephem
+        namespace: default
+  - policy: harbour-baseline
+    rule: require-nonroot-memory-limit
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: good-ephem
+        namespace: default
+  - policy: harbour-baseline
+    rule: require-ephemeral-no-privilege
+    result: pass
+    resources:
+      - apiVersion: v1
+        kind: Pod
+        name: good-ephem
+        namespace: default

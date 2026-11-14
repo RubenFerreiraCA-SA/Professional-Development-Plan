@@ -36,7 +36,7 @@ Authoritative record: [review-status.yaml](../../1%20Foundational%20Documents/re
 
 | | |
 | --- | --- |
-| **P01–P04** | Authored; Gate 1 remediations against audit of `c37e25d` — **awaiting re-review (not signed off)** |
+| **P01–P04** | Authored; Gate 1 suites implemented against charter — **documentation review pending** (not signed off; clean-room not implied) |
 | **Remediation focus** | Tenant CI enforcement; render-first promotion; restore-before-resume; Kyverno warn reject; pinned Helm; pullable admit digests; shared JSON restore compare |
 | **Canonical examples** | [reference/harbour/](../../reference/harbour/) |
 | **Not claimed** | Clean-room lab execution (Gate 2); independent platform-user acceptance (Gate 3); full programme operational sign-off |

@@ -71,49 +71,12 @@ print("OK: structural Deployment security/resources")
 ' "$ALLOW" || bad "structural Deployment/securityContext check failed"
 fi
 
-# Manifest contract (always — before merge): PSA + NetPol + quota keys via YAML.
+# Manifest contract (always — before merge): production YAML validator (G1-01).
+# Text grep is NOT authoritative for PSA/NetPol correctness.
 TENANT="platform/tenants/$NAME/tenant.yaml"
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$TENANT" ]; then
-  grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" \
-    || bad "tenant manifest missing PSA enforce=restricted"
-  grep -q 'name: default-deny-all' "$TENANT" \
-    || bad "tenant manifest missing default-deny-all"
-  # Also require a NetworkPolicy kind named default-deny-all (not a comment).
-  python3 - "$TENANT" <<'PY' || bad "tenant NetworkPolicy/PSA inspect failed"
-import sys, yaml
-from pathlib import Path
-docs = list(yaml.safe_load_all(Path(sys.argv[1]).read_text()))
-ns_docs = [d for d in docs if d and d.get("kind") == "Namespace"]
-nps = [d for d in docs if d and d.get("kind") == "NetworkPolicy"]
-quotas = [d for d in docs if d and d.get("kind") == "ResourceQuota"]
-ok = False
-for n in ns_docs:
-    labels = (n.get("metadata") or {}).get("labels") or {}
-    if labels.get("pod-security.kubernetes.io/enforce") == "restricted":
-        ok = True
-if not ok and ns_docs:
-    # Labels may be on a separate patch document; string check already done.
-    pass
-elif not ns_docs:
-    pass
-deny = [n for n in nps if (n.get("metadata") or {}).get("name") == "default-deny-all"]
-if not deny:
-    print("FAIL: no NetworkPolicy named default-deny-all"); sys.exit(1)
-spec = deny[0].get("spec") or {}
-# default-deny: empty podSelector and no ingress/egress allow-all
-if "ingress" in spec or "egress" in spec:
-    # Explicit empty lists are OK; non-empty rules would weaken default-deny.
-    if spec.get("ingress") or spec.get("egress"):
-        print("FAIL: default-deny-all has allow rules — contract weakened"); sys.exit(1)
-if not quotas:
-    print("FAIL: no ResourceQuota in tenant manifest"); sys.exit(1)
-for q in quotas:
-    hard = (q.get("spec") or {}).get("hard") or {}
-    if "limits.cpu" in hard:
-        print(f"FAIL: ResourceQuota sets hard[limits.cpu]={hard['limits.cpu']}")
-        sys.exit(1)
-print("OK: tenant PSA/NetworkPolicy/ResourceQuota contract")
-PY
+  python3 "$BIN_DIR/tenant_contract.py" "$TENANT" "$NAME" || bad "tenant contract failed"
 else
   bad "missing tenant manifest $TENANT"
 fi

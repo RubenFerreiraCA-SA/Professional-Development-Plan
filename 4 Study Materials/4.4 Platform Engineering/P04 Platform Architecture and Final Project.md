@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; Gate 1 remediations against audit baseline `c37e25d` — **awaiting re-review (not signed off)**. See [review-status.yaml](../../1%20Foundational%20Documents/review-status.yaml). Canonical scripts: [reference/harbour/](../../reference/harbour/) |
+| **Status** | Authored; Gate 1 suites ready — **documentation review pending** (not signed off; clean-room not implied). Charter: [GATE1-ACCEPTANCE-CHARTER.md](../../1%20Foundational%20Documents/GATE1-ACCEPTANCE-CHARTER.md). Canonical scripts: [reference/harbour/](../../reference/harbour/) |
 
 > **Canonical Harbour examples** live in [`../../reference/harbour/`](../../reference/harbour/) — textbooks cite those files as source of truth. When a fenced example and a reference file diverge, trust the reference tree.
 
@@ -508,7 +508,7 @@ Policy in CI gives fast feedback; policy at admission catches everything that by
 
 ```bash
 helm repo add kyverno https://kyverno.github.io/kyverno/ && helm repo update
-helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace --version 3.3.4
+helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace --version 3.3.6
 kubectl -n kyverno rollout status deploy --timeout=180s
 ```
 
@@ -987,6 +987,8 @@ Targets (training, state yours): **RTO ≤ 3 min** until `/ready` is `query_ok` 
 Delete one `$SVC` pod; with two replicas the Service keeps serving (D06 §6.8.1). Record time to full readiness. This is C03-class evidence — necessary, not sufficient.
 
 ### 4.6.4 Stateful drills — the script
+
+**Canonical runnable script:** copy [`reference/harbour/platform/drills/stateful-drill.sh`](../../reference/harbour/platform/drills/stateful-drill.sh) into `platform/drills/stateful-drill.sh` (G1-04). Any shortened outline below is **illustrative** — the reference file is authoritative for `suspend`/`copy`/`pg_restore` injection, backup checksum verification, and compare-before-resume.
 
 `platform/drills/stateful-drill.sh` (run phases in order). Evidence is **application HTTP**; SQL is support only. Completed Job pods are **never** `exec`'d — backups are copied via a running helper that mounts the backup PVC.
 

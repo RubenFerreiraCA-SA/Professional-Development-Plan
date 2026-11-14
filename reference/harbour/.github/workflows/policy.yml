@@ -27,12 +27,12 @@ jobs:
         run: |
           set -euo pipefail
           # Enumerate tenants from the tree — not from git diff — so removing
-          # PSA / NetworkPolicy without touching deploy/ still fails.
+          # PSA / NetworkPolicy without touching deploy/ still fails (T09).
+          [ -d platform/tenants ] || { echo "FAIL: missing platform/tenants directory"; exit 1; }
           mapfile -t TENANTS < <(find platform/tenants -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -u)
           [ "${#TENANTS[@]}" -ge 1 ] || { echo "FAIL: no platform/tenants/* definitions"; exit 1; }
           for t in "${TENANTS[@]}"; do
             ALLOW=""
-            # Unpromoted scaffolds may pass with --allow-unpromoted when deploy exists.
             if [ -f "deploy/${t}/overlays/staging/kustomization.yaml" ]; then
               if grep -q 'sha256:0000000000000000000000000000000000000000000000000000000000000000' \
                    "deploy/${t}/overlays/staging/kustomization.yaml" 2>/dev/null; then

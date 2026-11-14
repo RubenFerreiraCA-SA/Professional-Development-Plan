@@ -1,205 +1,113 @@
-# Authoritative programme review status — edit this file; render human summaries from it.
-# Audit baseline: c37e25d (14 November 2026 comprehensive PDP repository review).
-
+# Authoritative programme review status.
 schema_version: 1
 programme: Professional-Development-Plan
 audit_date: "2026-11-14"
 audit_baseline_commit: c37e25d
+gate1_baseline_commit: d8573e168f7390fd104a9fa69dc33460601bdfb8
 audit_title: "Comprehensive PDP Repository Review"
-remediation_wave: gate1-reference-harbour
-remediation_notes: >
-  Gate 1 controls implemented under reference/harbour/; textbooks cite canonical files.
-  Platform documentation re-review requested. Clean-room (Gate 2) and independent
-  trials (Gate 3) remain pending. Stateful recovery classified author-verified-only.
+remediation_wave: gate1-definitive-completion
+charter: 1 Foundational Documents/GATE1-ACCEPTANCE-CHARTER.md
+acceptance_record: 1 Foundational Documents/GATE1-ACCEPTANCE-RECORD.md
+
+in_scope:
+  - P03/P04 vs reference/harbour contradictions
+  - Bypassable mandatory Harbour teaching controls
+  - Tests that pass without exercising claimed checks
+  - Restore instruction determinism
+  - Accurate statuses and version pins
+out_of_scope:
+  - Multi-tenant commercial IDP
+  - Production HA / distributed tracing at scale
+  - Expanded Kyverno policy catalogues
+  - Reopening DevOps/Cloud/AI documentation approval
+  - Gate 2/3 as prerequisites for documentation sign-off
 
 components:
-  - id: programme-architecture
-    name: Programme concept and architecture
-    disposition: accept
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
-    next_gate: none
-
-  - id: foundational-documents
-    name: Foundational documents
-    disposition: accept
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
-    next_gate: routine-maintenance
-
-  - id: course-outline
-    name: Course outline and learning progression
-    disposition: accept
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
-    next_gate: none
-
-  - id: pdp-templates
-    name: PDP template design
-    disposition: accept-conceptual
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    notes: Workbook formulas not audited at formula level.
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
-    next_gate: optional-workbook-formula-audit
-
   - id: devops-textbook
-    name: DevOps textbook D01–D08
     disposition: documentation-approved
     reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
     next_gate: validate-lab-hours-cleanroom
-
   - id: cloud-textbook
-    name: Cloud textbook C01–C03
     disposition: documentation-approved
     reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
     next_gate: cloud-account-baseline-teardown-verify
-
   - id: ai-textbook
-    name: AI textbook A01–A03
     disposition: documentation-approved
     reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
     next_gate: reproducible-exit-scenario-evidence
-
   - id: platform-textbook
     name: Platform textbook P01–P04
-    disposition: withhold-signoff
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
+    disposition: documentation-review-pending
+    reviewed_commit: d8573e1
+    gate1_accepted_commit: null
+    reviewer: null
+    accepted_at: null
+    verified_by: offline-unit-suites-T-P-K-R
     findings:
       - id: C-01
-        severity: critical
-        summary: Required CI does not enforce full tenant security contract
-        status: remediated-pending-rereview
-        fix: reference/harbour/.github/workflows/policy.yml + harbour-check-service
+        original_status: critical
+        remediation: G1-01 tenant_contract.py
+        disposition: remediated-awaiting-g1-07
       - id: C-02
-        severity: critical
-        summary: Unpromoted shortcut bypasses rendered-image verification
-        status: remediated-pending-rereview
-        fix: harbour-promote-verify-images.py render-first skip logic
+        original_status: critical
+        remediation: G1-02 all-overlay promotion + Pods
+        disposition: remediated-awaiting-g1-07
       - id: H-01
-        severity: high
-        summary: Normal restore resumes writers before proving restored data equivalence
-        status: remediated-pending-rereview
-        fix: platform/drills/restore-verify-before-resume.sh
+        original_status: high
+        remediation: G1-04 stateful-drill compare-before-resume
+        disposition: remediated-awaiting-g1-07
       - id: H-02
-        severity: high
-        summary: Promotion verifies distinct digests, not every distinct image reference
-        status: remediated-pending-rereview
-        fix: verify every complete image ref in promotion-verify.yml
+        original_status: high
+        remediation: G1-02 every image ref + dual-ref reject
+        disposition: remediated-awaiting-g1-07
       - id: H-03
-        severity: high
-        summary: Kyverno positive-result parser can accept mixed pass/warn outcomes
-        status: remediated-pending-rereview
-        fix: kyverno_deny.py assert_expected_passes rejects warn; tests expanded
+        original_status: high
+        remediation: G1-03 coverage inventory + mandatory fixtures
+        disposition: remediated-awaiting-g1-07
       - id: H-04
-        severity: high
-        summary: Live Kyverno Helm installation is unpinned
-        status: remediated-pending-rereview
-        fix: TOOLCHAIN.md + helm --version 3.3.4
+        original_status: high
+        remediation: G1-05 chart 3.3.6 + CLI 1.13.4
+        disposition: remediated-awaiting-g1-07
       - id: M-01
-        severity: medium
-        summary: Live admission examples use non-pullable placeholder digests
-        status: remediated-pending-rereview
-        fix: harbour-policy-admit requires HARBOUR_PULLABLE_* env
+        original_status: medium
+        remediation: pullable admit env
+        disposition: remediated-awaiting-g1-07
       - id: M-02
-        severity: medium
-        summary: Operator restore comparison relies on lossy TSV parsing
-        status: remediated-pending-rereview
-        fix: harbour-restore-compare.py + db-export-json.sh
+        original_status: medium
+        remediation: JSON restore compare
+        disposition: remediated-awaiting-g1-07
       - id: M-03
-        severity: medium
-        summary: Audit metadata stale across Outline/syllabus/README
-        status: remediated-pending-rereview
-        fix: this review-status.yaml as single source of truth
-    remediation_commit: pending-commit  # set to SHA after this wave is committed
+        original_status: medium
+        remediation: review-status.yaml + charter
+        disposition: remediated-awaiting-g1-07
     evidence_paths:
       - reference/harbour/
+      - 1 Foundational Documents/GATE1-ACCEPTANCE-RECORD.md
       - 1 Foundational Documents/evidence-register.yaml
-    next_gate: platform-documentation-rereview
-    rereview_requested: true
-
+    next_gate: g1-07-bounded-review
   - id: harbour-executable
-    name: Harbour executable reference
     disposition: not-verified
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths:
-      - reference/harbour/
+    notes: Teaching subset only; full monorepo = Gate 2
     next_gate: gate2-cleanroom
-    notes: Teaching subset extracted; full monorepo clean-room still pending.
-
   - id: cleanroom-reproducibility
-    name: Clean-room Harbour reproducibility
     disposition: not-verified
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths:
-      - reference/harbour/CLEANROOM.md
-      - 1 Foundational Documents/evidence-register.yaml
     next_gate: gate2-cleanroom
-
   - id: independent-acceptance
-    name: Independent learner and platform-user acceptance
     disposition: not-verified
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    notes: Stateful recovery classified author-verified-only until independent operator trial.
-    findings: []
-    remediation_commit: null
-    evidence_paths:
-      - reference/harbour/INDEPENDENT-TRIAL.md
+    notes: Stateful recovery author-verified-only until Gate 3
     next_gate: gate3-independent-trials
-
   - id: programme-operational
-    name: Full programme operational sign-off
     disposition: not-approved
-    reviewed_commit: c37e25d
-    reviewer: audit-2026-11-14
-    findings: []
-    remediation_commit: null
-    evidence_paths: []
     next_gate: gate2-and-gate3
 
 gates:
   gate1:
-    name: Correct security and recovery blockers
-    status: remediated-awaiting-documentation-rereview
+    name: Documentation remediation (finite)
+    status: suites-implemented-awaiting-reviewer
     required_for: platform-documentation-signoff
   gate2:
-    name: Clean-room technical QA
-    status: protocol-ready
-    required_for: harbour-executable-verified
-    notes: Offline unit suite green; full kind clean-room still pending.
+    name: Clean-room Harbour
+    status: pending-after-gate1
   gate3:
-    name: Independent learner and platform-user QA
-    status: protocol-ready
-    required_for: programme-operational-signoff
-    notes: Trial protocol published; no independent participant runs recorded yet.
+    name: Independent acceptance
+    status: pending-after-gate2

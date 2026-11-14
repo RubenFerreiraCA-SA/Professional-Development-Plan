@@ -4,22 +4,26 @@ Pin these versions for labs and CI. Do **not** float `latest`.
 
 | Component | Version | Notes |
 | --- | ---: | --- |
-| Kubernetes (kind node image / cluster) | **1.31.x** | Match `kubectl` minor |
+| Kubernetes (kind node / cluster) | **1.31.x** | Match `kubectl` minor |
 | kubectl | **v1.31.0** | CI: `azure/setup-kubectl@v4` |
 | Kyverno CLI | **1.13.4** | Checksum in `policy.yml` |
-| Kyverno Helm chart | **3.3.4** | App version aligns with CLI 1.13.4 |
+| Kyverno Helm chart | **3.3.6** | Pair with controller/appVersion **1.13.4** (verify: `helm show chart kyverno/kyverno --version 3.3.6`) |
 | GitHub CLI (`gh`) | **2.102.0** | Attestation fixes; checksum in `promotion-verify.yml` |
 | Flux | version recorded in learner ADR | Keep consistent within a clean-room run |
 | Helm | 3.x | Required for Kyverno install |
+| Python deps | **PyYAML** | Required by extracted validators |
+
+> Chart `3.3.4` maps to controller `1.13.2` in published packaging history. This programme pins **chart 3.3.6 ↔ CLI/controller 1.13.4**.
 
 ## Install Kyverno (pinned)
 
 ```bash
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
+helm show chart kyverno/kyverno --version 3.3.6   # confirm appVersion
 helm upgrade --install kyverno kyverno/kyverno \
   -n kyverno --create-namespace \
-  --version 3.3.4
+  --version 3.3.6
 kubectl -n kyverno rollout status deploy --timeout=180s
 ```
 
@@ -34,7 +38,6 @@ export HARBOUR_PULLABLE_DBG_IMG="$(
   docker buildx imagetools inspect busybox:1.36 --format '{{.Manifest.Digest}}' \
   | awk '{print "busybox@"$0}'
 )"
-# Optional: validate pull before admission lab
 docker pull "$HARBOUR_PULLABLE_DIGEST_IMG"
 platform/bin/harbour-policy-admit "${SVC}-staging"
 ```
