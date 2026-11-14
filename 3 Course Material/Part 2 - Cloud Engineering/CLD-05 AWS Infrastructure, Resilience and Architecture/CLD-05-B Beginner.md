@@ -2,7 +2,9 @@
 
 Required project state: **PRJ-001 through PRJ-044**.
 
-If any required step is incomplete, **STOP**. Open the independent [Project Document](../../../4%20Project%20Document/Project.md), complete the missing steps, record their completion, then return here. Do not begin this module until the gate is satisfied.
+A prerequisite step is satisfied when it is marked **Completed** or **Out of scope**. Use **Out of scope** only when your PDP excludes a whole optional track (for example Datadog or AI), never to skip one step inside an active route.
+
+If any required step is neither **Completed** nor **Out of scope**, **STOP**. Open the independent [Project Document](../../../4%20Project%20Document/Project.md), complete the missing steps, record their status, then return here. Do not begin this module until the gate is satisfied.
 
 Exact tasks: see [PRJ-001 through PRJ-044](../../../4%20Project%20Document/Project.md#prj-001).
 
@@ -10,31 +12,31 @@ Exact tasks: see [PRJ-001 through PRJ-044](../../../4%20Project%20Document/Proje
 
 ### 1. Topic and Scope
 
-**In scope for this level:** Foundations and vocabulary for this topic. You recognise core terms, can explain the basic mental model, and complete a guided first task. Focus: foundations, vocabulary, mental models and guided first practice.
+**In scope for this level:** Describing common AWS infrastructure components and resilience vocabulary: availability, resilience, HA, RTO, RPO, stateless versus stateful; the reference shape (load balancer across two AZs, container service with identical tasks and a scheduler, managed database, central logs); the self-healing test of stopping a task; and honest wording about what a deployment does and does not tolerate.
 
-**Out of scope:** Content belonging to other levels of `CLD-05`, and any implementation steps that belong only in the Project Document.
+**Out of scope:** Architecture decision records and infrastructure-as-code changes (CLD-05-I), RTO/RPO set per component with runbooks and tested restores (CLD-05-P), availability mathematics, failure-mode analysis and multi-region patterns (CLD-05-E), and IAM or VPC configuration (CLD-04). Implementation steps stay in the Project Document.
 
 ### 2. Learning Objectives
 
-1. Explain the core ideas of **AWS Infrastructure, Resilience and Architecture** at the beginner competency standard.
-2. Apply those ideas to a bounded learning scenario without undocumented help.
-3. Recognise common mistakes and state how you would detect them.
-4. Connect this topic to adjacent subjects without confusing course navigation with textbook study.
-5. Prepare the evidence needed for the assigned project task **PRJ-045**.
+1. Define availability, resilience, HA, RTO and RPO and give a one-line example of each for the Harbour API.
+2. Label a reference diagram (load balancer, AZs, tasks, scheduler, database, logs) and say which parts are stateless and which stateful.
+3. Predict what users experience when one task stops with a desired count of one and with a desired count of two.
+4. Describe the self-healing drill and the commands that list tasks, stop a task and probe health.
+5. Write honest resilience statements and select the design that **PRJ-045** requires, with its limits.
 
 ### 3. Required Textbook Reading
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-05-B — AWS Infrastructure, Resilience and Architecture — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-cld-05-b-beginner-foundations)
+- [T-CLD-05-B — AWS Infrastructure, Resilience and Architecture — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-cld-05-b)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 
 ### 4. Knowledge Assessment
 
-**Task:** In your own words, demonstrate beginner-level understanding of AWS Infrastructure, Resilience and Architecture.
+**Task:** Choose a deployable AWS design for Harbour from at least two options and justify the choice. For three failures in your diagram (task stops, AZ unavailable, database lost) write what the user would experience, the recovery mechanism and the RTO/RPO you can honestly claim. Rewrite one overclaiming sentence ("the system is highly available") into a defensible one.
 
-**Pass criteria:** Explain key terms accurately and demonstrate a simple guided exercise with recorded evidence.
+**Pass criteria:** Every failure has an experience, mechanism and honest objective; the diagram labels stateless versus stateful; the chosen design lists its limitations; no claim of HA is made without placement or test evidence.
 
 Record the result in your Learning Progress Record. Passing the knowledge assessment does **not** by itself complete the module — the project assignment below is also required for a project-linked pathway.
 
@@ -42,4 +44,4 @@ Record the result in your Learning Progress Record. Passing the knowledge assess
 
 Complete **PRJ-045 — Select a deployable AWS design** in the [Project Document](../../../4%20Project%20Document/Project.md#prj-045).
 
-Evidence to record: follow the completion criteria on that project step. Mark the step completed in your progress record before opening the next module.
+Evidence to record: follow the completion criteria on that project step. Mark the step as Completed in your progress record before opening the next module.
