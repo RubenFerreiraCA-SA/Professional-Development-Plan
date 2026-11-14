@@ -242,29 +242,56 @@ echo | openssl s_client -connect example.com:443 -servername example.com 2>/dev/
 
 ### 1.3.3 Worked example — TLS failures you can reproduce
 
+Do **not** use `curl -k` / `--insecure` when the goal is to observe verification failure — that flag skips the check you are trying to learn.
+
 **A — HTTP spoken to HTTPS port (protocol mismatch):**
 
 ```bash
 curl -v --connect-timeout 5 http://example.com:443/ 2>&1 | tail -n 20
-# Often: empty reply / weird SSL errors — note the symptom class
+# Often: empty reply / SSL errors — note the symptom class
 ```
 
-**B — Wrong hostname / SNI mismatch (certificate name):**
+**B — Hostname mismatch (controlled local certificate — deterministic):**
+
+Create a short-lived self-signed cert whose **CN/SAN is `harbour-tls.local`**, serve HTTPS with it, then call the server as `localhost` so the name does not match. Verification must stay **on** (no `-k`).
 
 ```bash
-# Connect to example.com's IP but ask for a different server name:
-EX_IP="$(dig +short example.com | head -n 1)"
-echo "example.com -> ${EX_IP}"
-curl -vk --connect-timeout 5 --resolve "not-example.invalid:443:${EX_IP}" \
-  https://not-example.invalid/ 2>&1 | tail -n 25
-# Expect certificate verify failed / name mismatch in the verbose output
+mkdir -p /tmp/harbour-tls-c01 && cd /tmp/harbour-tls-c01
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+  -keyout key.pem -out cert.pem \
+  -subj "/CN=harbour-tls.local" \
+  -addext "subjectAltName=DNS:harbour-tls.local"
+
+# Terminal 1 — TLS listener on 8443 (openssl s_server is enough for this drill):
+openssl s_server -quiet -accept 8443 -cert cert.pem -key key.pem >/tmp/harbour-tls-s_server.log 2>&1 &
+echo $! > /tmp/harbour-tls-s_server.pid
+sleep 1
+
+# Terminal 2 — trust this cert as a CA for the test, but use the WRONG hostname:
+curl -v --connect-timeout 5 \
+  --cacert /tmp/harbour-tls-c01/cert.pem \
+  https://localhost:8443/ 2>&1 | tee /tmp/harbour-tls-mismatch.txt | tail -n 30
+# Expected: certificate verify failed / hostname mismatch / "does not match" (wording varies).
+# Do NOT add -k. If you add -k, the drill is invalid.
+
+# Optional positive control — same cert, matching name via --resolve:
+curl -v --connect-timeout 5 \
+  --cacert /tmp/harbour-tls-c01/cert.pem \
+  --resolve harbour-tls.local:8443:127.0.0.1 \
+  https://harbour-tls.local:8443/ 2>&1 | tail -n 15
+# May still show HTTP errors from s_server; the TLS handshake should succeed.
+
+kill "$(cat /tmp/harbour-tls-s_server.pid)" 2>/dev/null || true
+cd "$HARBOUR_ROOT"
 ```
 
-**C — Expired or untrusted CA (observe verify error):**
+Record the exact `curl` stderr line that proves **hostname verification** failed (not “untrusted CA” alone — you passed `--cacert`).
+
+**C — Untrusted / expired CA (observe verify error without `-k`):**
 
 ```bash
-curl -vI https://expired.badssl.com/ 2>&1 | tail -n 30
-# Without -k you should see a verify error; with -k you bypass trust (training only)
+curl -vI --connect-timeout 5 https://expired.badssl.com/ 2>&1 | tee /tmp/harbour-tls-expired.txt | tail -n 30
+# Expected: SSL certificate problem / verify failed. Using -k would hide this — do not.
 ```
 
 **Capture table** (fill with your actual stderr snippets):
@@ -272,10 +299,10 @@ curl -vI https://expired.badssl.com/ 2>&1 | tail -n 30
 | Drill | Symptom keywords | Hop |
 | --- | --- | --- |
 | A | | TLS/protocol |
-| B | | TLS/name |
+| B | | TLS/name (local cert) |
 | C | | TLS/trust |
 
-**Verify:** Runbook TLS section lists these three and says localhost Harbour may still be HTTP-only.
+**Verify:** Runbook TLS section lists these three, forbids `-k` for mismatch/trust drills, and notes localhost Harbour may still be HTTP-only.
 
 ---
 
@@ -386,44 +413,71 @@ ss -ltn | grep 8000
 curl -sf http://127.0.0.1:8000/health
 ```
 
-### 1.6.2 Path B — `nft` DROP on disposable VM (kernel firewall)
+### 1.6.2 Path B — firewall DROP against a **native** host listener (INPUT works here)
 
-**Only on a disposable VM with a snapshot.** Do not run this on your daily driver or a shared bastion.
+Docker-published ports are often **DNAT’d into a bridge** and evaluated on **FORWARD** / Docker’s own chains — **not** the host `INPUT` hook. Dropping `tcp dport 8000` on `INPUT` may leave `http://127.0.0.1:8000` working and teach the wrong lesson.
+
+**Competent path:** fire wall a **native** process on a dedicated port so `INPUT` is the correct control plane.
+
+**Only on a disposable VM/host you can snapshot** if you are unsure about firewall recovery.
 
 ```bash
-# Baseline on the VM hosting Harbour (Compose installed; HARBOUR_* set):
-curl -sf http://127.0.0.1:8000/health && echo baseline-ok
+# 1) Baseline — native listener on 18080 (not Docker-published Harbour):
+python3 -m http.server 18080 --bind 127.0.0.1 >/tmp/harbour-native-http.log 2>&1 &
+echo $! > /tmp/harbour-native-http.pid
+sleep 1
+curl -sf --connect-timeout 2 http://127.0.0.1:18080/ >/dev/null && echo native-baseline-ok
+ss -ltn | grep 18080
 
-# Controlled fault — drop TCP 8000 (nft syntax; adapt if your distro uses iptables-nft):
+# 2) Controlled fault — INPUT drop for 18080:
 sudo nft add table inet harbour_c01
-sudo nft 'add chain inet harbour_c01 input { type filter hook input priority 0; }'
-sudo nft add rule inet harbour_c01 input tcp dport 8000 drop
+sudo nft 'add chain inet harbour_c01 input { type filter hook input priority 0; policy accept; }'
+sudo nft add rule inet harbour_c01 input tcp dport 18080 drop
 
-# Evidence — often TIMEOUT rather than refused:
-curl -v --connect-timeout 3 http://127.0.0.1:8000/health 2>&1 | tail -n 20
-ss -ltn | grep 8000   # listener may STILL show — process is up; network path blocked
+# 3) Evidence — often TIMEOUT; listener still present:
+curl -v --connect-timeout 3 http://127.0.0.1:18080/ 2>&1 | tee /tmp/harbour-fw-drop.txt | tail -n 20
+ss -ltn | grep 18080
+# Contrast §1.5.1: process down → refused + no listener; firewall → timeout + listener present
 
-# Contrast with §1.5.1: process down → refused + no listener; firewall → timeout + listener present
-
-# Recovery:
+# 4) Recovery:
 sudo nft delete table inet harbour_c01
-curl -sf http://127.0.0.1:8000/health && echo recovered-ok
+curl -sf --connect-timeout 2 http://127.0.0.1:18080/ >/dev/null && echo native-recovered-ok
+kill "$(cat /tmp/harbour-native-http.pid)" 2>/dev/null || true
 ```
 
-If `nft` is unavailable, the equivalent `iptables -I INPUT -p tcp --dport 8000 -j DROP` / `-D` delete is acceptable — still snapshot first and record exact commands.
+If `nft` is unavailable: `sudo iptables -I INPUT -p tcp --dport 18080 -j DROP` then delete that rule on recovery — still snapshot first.
 
-### 1.6.3 Compare evidence classes
+### 1.6.3 Advanced — why INPUT often fails against Docker-published Harbour
+
+Optional, after Path B succeeds. Keep Harbour published on host `:8000`.
+
+```bash
+curl -sf http://127.0.0.1:8000/health && echo docker-publish-ok
+sudo nft add table inet harbour_c01_docker
+sudo nft 'add chain inet harbour_c01_docker input { type filter hook input priority 0; policy accept; }'
+sudo nft add rule inet harbour_c01_docker input tcp dport 8000 drop
+curl -v --connect-timeout 3 http://127.0.0.1:8000/health 2>&1 | tail -n 15
+# Frequently STILL succeeds — traffic to published ports may never hit this INPUT rule.
+sudo nft delete table inet harbour_c01_docker
+```
+
+**Record the outcome honestly.** If Harbour stayed reachable, you have evidence that **container publish ≠ a simple INPUT filter**. Production controls then live in security groups, `DOCKER-USER` (iptables), or CNI policies — not a naive host INPUT drop. Do **not** claim a Docker firewall drill passed unless you verified the block on the actual path (e.g. remote client through FORWARD, or a documented `DOCKER-USER` rule that you tested end-to-end).
+
+Assessment credit for “network failure” requires Path A and/or Path B (native). The Docker INPUT experiment is a learning add-on, not a substitute when it fails to block.
+
+### 1.6.4 Compare evidence classes
 
 | Failure | `ss` listener | `curl` symptom | Hop |
 | --- | --- | --- | --- |
 | `stop api` | Absent | Refused / CONNECT_FAIL | Process |
 | `stop db` | Present | health 200, ready 503 | Dependency |
 | Loopback-only publish | `127.0.0.1:8000` only | Remote fail / local OK | Publish/bind |
-| `nft` DROP | Often present | Timeout | Firewall |
+| Native `:18080` + INPUT DROP | Present on 18080 | Timeout | Firewall |
+| INPUT DROP on Docker `:8000` | Often present | Often **still OK** | Wrong hook — see §1.6.3 |
 
-**Practice — reproduce:** Without looking at your notes, be handed one of these four and name the hop from output alone.
+**Practice — reproduce:** Without looking at your notes, be handed app vs network evidence and name the hop from output alone.
 
-**Verify:** Progress Log contains paste of `ss` + `curl` for an **application** failure and a **network** failure.
+**Verify:** Progress Log contains paste of `ss` + `curl` for an **application** failure and a **network** failure (Path A or native Path B).
 
 ---
 
@@ -459,7 +513,7 @@ _Update to match YOUR lab._
 | Symptom | Likely hop | Next command |
 | --- | --- | --- |
 | Connection refused, no listener | Process | compose ps; logs api |
-| Timeout, listener present | Firewall/filter | nft/iptables/SG; ss |
+| Timeout, listener present | Firewall/filter | Prefer native-port INPUT drill; do not assume INPUT blocks Docker publish |
 | Works on 127.0.0.1 only | Bind/publish | ss -ltn; compose ports |
 | 503 on /ready only | Dependency | compose ps db; ready body |
 | TLS verify / name mismatch | TLS | openssl s_client; curl -v |
@@ -508,7 +562,7 @@ Align with [C01 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 ### Example conclusion (evidence still required)
 
-> Compose via `docker compose -f $HARBOUR_ROOT/app/docker-compose.yml`. App drill: `stop api` → refused, no `:8000` listener. Network drill: `127.0.0.1:8000:8000` publish → local OK, `ss` showed loopback-only bind; restored `8000:8000`. Peer restored `nft` DROP using runbook and correctly called it firewall (timeout + listener present). TLS drills A/B/C filed. Runbook committed.
+> Compose via `-f $HARBOUR_ROOT/app/docker-compose.yml`. App: `stop api` → refused, no listener. Network: Path B native `:18080` INPUT DROP → timeout with listener present; also noted INPUT on Docker `:8000` did not block (FORWARD/NAT lesson). TLS B: local CN=`harbour-tls.local` vs `https://localhost` without `-k` → hostname verify error. Runbook committed.
 
 ---
 
