@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; remediations after audits through `82e50a6` (fail-closed promotion, signer paths, gh≥2.102.0) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations addressing review of `6fbd29c` (effective rendered promotion, ephemeral coverage, shared deny parser, full-snapshot operator check, gh checksum) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -458,48 +458,49 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       HARBOUR_EXPECT_REPO: ${{ github.repository }}
       HARBOUR_REQUIRE_BRANCH: main
-      # Pin a patched GitHub CLI (≥ 2.102.0).
+      # Pin a patched GitHub CLI (≥ 2.102.0) with frozen checksum.
       GH_VERSION: "2.102.0"
+      GH_TARBALL_SHA256: "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386"
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Install pinned gh
+      - uses: azure/setup-kubectl@v4
+        with: {version: v1.31.0}
+      - name: Install pinned gh (checksum-verified)
         run: |
           set -euo pipefail
           curl -fsSL -o gh.tgz \
             "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_TARBALL_SHA256}  gh.tgz" | sha256sum -c -
           tar -xzf gh.tgz
           sudo install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
           gh --version | grep -F "$GH_VERSION"
-      - name: Substantive verify only when promotion overlays change
+      - name: Verify effective rendered images for affected services
         run: |
           set -euo pipefail
           # Fail closed on git diff errors — never || true into an empty skip.
           set +e
           DIFF_OUT="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
-            'deploy/*/overlays/*/kustomization.yaml' \
-            'deploy/*/base/*.yaml' 2>/tmp/harbour-diff.err)"
+            'deploy/' 2>/tmp/harbour-diff.err)"
           DIFF_RC=$?
           set -e
           [ "$DIFF_RC" -eq 0 ] || {
             echo "FAIL: git diff failed (cannot determine changed deploy files)"; cat /tmp/harbour-diff.err; exit 1; }
-          mapfile -t FILES <<< "$DIFF_OUT"
-          # Drop blank lines from <<< on empty DIFF_OUT
-          FILES=( "${FILES[@]/]}" )
-          if [ "${#FILES[@]}" -eq 0 ] || [ -z "${FILES[0]:-}" ]; then
-            echo "No deploy overlay/base changes — gate reports success (D04 always-on pattern)."
+          # Map every changed path under deploy/<svc>/… to a service name.
+          mapfile -t SVCS < <(printf '%s\n' "$DIFF_OUT" | awk -F/ '$1=="deploy" && NF>=2 {print $2}' | sort -u)
+          if [ "${#SVCS[@]}" -eq 0 ] || [ -z "${SVCS[0]:-}" ]; then
+            echo "No deploy/ changes — gate reports success (D04 always-on pattern)."
             exit 0
           fi
           ALLOW="platform/policy/approved-signer-workflows.txt"
           [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
           SENTINEL="sha256:0000000000000000000000000000000000000000000000000000000000000000"
-          for f in "${FILES[@]}"; do
-            case "$f" in
-              */overlays/*/kustomization.yaml) ;;
-              *) echo "base/manifest change $f — require overlay digest verification in same PR or fail"; continue ;;
-            esac
-            svc="$(echo "$f" | cut -d/ -f2)"
-            is_unpromoted="$(python3 - "$f" "$SENTINEL" <<'PY'
+          VERIFIED=0
+          for svc in "${SVCS[@]}"; do
+            OVERLAY="deploy/${svc}/overlays/staging/kustomization.yaml"
+            [ -f "$OVERLAY" ] || { echo "FAIL: changed deploy/${svc} but missing $OVERLAY"; exit 1; }
+            # Unpromoted scaffold: overlay still has sentinel + replicas count 0.
+            is_unpromoted="$(python3 - "$OVERLAY" "$SENTINEL" <<'PY'
 import sys, yaml
 from pathlib import Path
 doc = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
@@ -515,52 +516,78 @@ print("yes" if only_sentinel and all_disabled else "no")
 PY
 )"
             if [ "$is_unpromoted" = "yes" ]; then
-              echo "skip $f (single sentinel digest + all replicas count 0)"
+              echo "skip $svc (unpromoted sentinel + replicas 0)"
               continue
             fi
-            # Capture exit status — mapfile < <(...) does NOT fail closed on producer exit 1.
+            # Effective images = what Kubernetes receives after Kustomize (base + overlay).
+            # Checking only overlay images[] is NOT equivalent — base image refs can bypass.
             set +e
-            IMAGE_DATA="$(python3 - "$f" <<'PY'
+            kubectl kustomize "deploy/${svc}/overlays/staging" \
+              >/tmp/harbour-rendered.yaml 2>/tmp/kust.err
+            KUST_RC=$?
+            set -e
+            [ "$KUST_RC" -eq 0 ] || { echo "FAIL: kustomize deploy/${svc}/overlays/staging"; cat /tmp/kust.err; exit 1; }
+            set +e
+            # Heredoc owns stdin — pass rendered YAML as a file arg, not a pipe.
+            IMAGE_DATA="$(python3 - "$SENTINEL" /tmp/harbour-rendered.yaml <<'PY'
 import sys, yaml, json
 from pathlib import Path
-doc = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
-images = [i for i in (doc.get("images") or []) if isinstance(i, dict)]
-if len(images) != 1:
-    print(f"FAIL: golden-path overlays must declare exactly one images[] entry (got {len(images)})", file=sys.stderr)
-    sys.exit(1)
-i = images[0]
-name, digest = i.get("newName") or "", i.get("digest") or ""
-if not name or not digest:
-    print("FAIL: missing newName/digest", file=sys.stderr); sys.exit(1)
-print(json.dumps({"newName": name, "digest": digest}))
+sentinel = sys.argv[1]
+docs = list(yaml.safe_load_all(Path(sys.argv[2]).read_text()))
+refs = []
+for d in docs:
+    if not d or d.get("kind") not in {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}:
+        continue
+    if d["kind"] == "CronJob":
+        spec = (((d.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template", {}).get("spec") or {}
+    else:
+        spec = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
+    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
+        img = c.get("image") or ""
+        if "@sha256:" not in img:
+            print(f"FAIL: rendered {d.get('kind')}/{d.get('metadata',{}).get('name')} image not digest-pinned: {img}", file=sys.stderr)
+            sys.exit(1)
+        name, digest = img.rsplit("@", 1)
+        refs.append({"image": name, "digest": digest, "ref": img})
+if not refs:
+    print("FAIL: no workload containers in rendered overlay", file=sys.stderr); sys.exit(1)
+digests = sorted({r["digest"] for r in refs})
+if sentinel in digests:
+    print("FAIL: rendered workload still references UNPROMOTED sentinel digest", file=sys.stderr); sys.exit(1)
+print(json.dumps({"refs": refs, "digests": digests}))
 PY
 )"
             IMG_RC=$?
             set -e
-            [ "$IMG_RC" -eq 0 ] || { echo "FAIL: overlay image validation for $f"; exit 1; }
-            [ -n "$IMAGE_DATA" ] || { echo "FAIL: empty image validation result for $f"; exit 1; }
-            img="$(printf '%s' "$IMAGE_DATA" | jq -r .newName)"
-            d="$(printf '%s' "$IMAGE_DATA" | jq -r .digest)"
-            [ -n "$img" ] && [ -n "$d" ] && [ "$img" != null ] && [ "$d" != null ] \
-              || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
-            [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without all replicas count 0 in $f"; exit 1; }
-            MAN="docs/releases/${svc}/${d}.json"
-            [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN"; exit 1; }
-            commit="$(jq -r .commit "$MAN")"
-            [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
-              || { echo "FAIL: manifest image does not match overlay"; exit 1; }
-            platform/bin/harbour-verify-artifact "${img}@${d}" \
-              --approved-workflows-file "$ALLOW" \
-              --expect-commit "$commit" \
-              --require-branch "$HARBOUR_REQUIRE_BRANCH"
+            [ "$IMG_RC" -eq 0 ] || { echo "FAIL: rendered-image extraction for $svc"; exit 1; }
+            [ -n "$IMAGE_DATA" ] || { echo "FAIL: empty rendered-image result for $svc"; exit 1; }
+            # Verify every distinct digest against release manifest + attestation.
+            while IFS= read -r dig; do
+              [ -n "$dig" ] || continue
+              # Prefer the ref whose digest matches (newName@digest).
+              img="$(printf '%s' "$IMAGE_DATA" | jq -r --arg d "$dig" '.refs[] | select(.digest==$d) | .image' | head -1)"
+              [ -n "$img" ] && [ "$img" != null ] || { echo "FAIL: no image name for digest $dig"; exit 1; }
+              MAN="docs/releases/${svc}/${dig}.json"
+              [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (base or overlay changed effective image)"; exit 1; }
+              commit="$(jq -r .commit "$MAN")"
+              [ "$(jq -r .image "$MAN")" = "${img}@${dig}" ] \
+                || { echo "FAIL: manifest image does not match rendered ${img}@${dig}"; exit 1; }
+              platform/bin/harbour-verify-artifact "${img}@${dig}" \
+                --approved-workflows-file "$ALLOW" \
+                --expect-commit "$commit" \
+                --require-branch "$HARBOUR_REQUIRE_BRANCH"
+              VERIFIED=$((VERIFIED + 1))
+            done < <(printf '%s' "$IMAGE_DATA" | jq -r '.digests[]')
           done
+          # If every changed service was unpromoted-only, VERIFIED may be 0 — that is OK.
+          echo "OK: promotion-verify complete (attestations_run=$VERIFIED)"
 ```
 
-**Promotion hand-off (P03 → P04):** download artifact `release-manifest-<svc>-<sha>` into `docs/releases/<svc>/<digest>.json` before opening the promotion PR. Golden-path overlays declare **exactly one** `images[]` entry; multi-image / zero-image overlays fail closed.
+**Promotion hand-off (P03 → P04):** download artifact `release-manifest-<svc>-<sha>` into `docs/releases/<svc>/<digest>.json` before opening the promotion PR. The gate verifies **rendered** workload images (`kubectl kustomize`), so a base-only `deployment.yaml` change cannot silently skip provenance.
 
-Create and protect `platform/policy/approved-signer-workflows.txt` — one **fully-qualified signing-workflow path** per line, e.g. `your-org/harbour-platform/.github/workflows/service-release.yml` (the reusable workflow that signs). CODEOWNERS: platform reviewers only. Display names (`github.workflow`) are informational in the release manifest; they are **not** the allow-list principal.
+Create and protect `platform/policy/approved-signer-workflows.txt` — one **fully-qualified signing-workflow path** per line, e.g. `your-org/harbour-platform/.github/workflows/service-release.yml`. CODEOWNERS: platform reviewers only. Display names are informational only.
 
-**Required negative tests:** (1) fabricated digest fails; (2) missing manifest fails; (3) non-allow-listed **signer path** fails; (4) real digest + `UNPROMOTED` comment still verifies; (5) commit not on `main` fails; (6) multi-image overlay fails (exit nonzero — not silent skip); (7) broken git base-ref fails the gate; (8) docs-only PR succeeds.
+**Required negative tests:** (1) fabricated digest fails; (2) missing manifest fails; (3) non-allow-listed signer path fails; (4) real digest + `UNPROMOTED` comment still verifies; (5) commit not on `main` fails; (6) multi-image / undigested render fails; (7) **base-only** image change without matching release manifest fails; (8) broken git base-ref fails the gate; (9) docs-only PR succeeds.
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -677,7 +704,89 @@ Confirm autogen is active. If your Kyverno version does not autogen Pod→Deploy
 | PR CI (`policy` job) | `kyverno apply` + structured policy-report parse; negative fixtures | **No** |
 | Integration / disposable cluster | Live admission probes; distinguish Kyverno vs PSA vs RBAC messages | Yes (lab only) |
 
-`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (**v1.13.4** below) and **fail closed** on fail/skip/missing rules. That pin emits a YAML `ClusterPolicyReport` via `--policy-report`; parse `results[].rule` / `results[].result` (wgpolicyk8s.io/v1alpha2).
+**Shared report parser** — one module, used by the positive path, negative fixtures, and unit tests (do not duplicate denial rules inline):
+
+```python
+# platform/bin/kyverno_deny.py — single source of truth for PolicyReport acceptance
+"""Parse Kyverno --policy-report YAML; decide pass/denial outcomes."""
+from __future__ import annotations
+import sys
+from pathlib import Path
+import yaml
+
+# Every rule declared in harbour-baseline.yaml must appear here.
+EXPECTED_RULES = (
+    "require-image-digest",
+    "require-nonroot-memory-limit",
+    "require-ephemeral-no-privilege",
+)
+
+def result_of(r: dict) -> str:
+    return str(r.get("result") or r.get("status") or "").lower()
+
+def load_report(text: str) -> dict:
+    if not (text or "").strip():
+        raise ValueError("empty report")
+    idx = text.find("apiVersion:")
+    if idx < 0:
+        raise ValueError("no PolicyReport YAML")
+    docs = list(yaml.safe_load_all(text[idx:]))
+    rep = next((d for d in docs if isinstance(d, dict) and "results" in d), None)
+    if rep is None and docs:
+        rep = docs[0]
+    if not isinstance(rep, dict):
+        raise ValueError("unparseable report")
+    return rep
+
+def outcomes(rep: dict) -> list[tuple[str, str]]:
+    out = []
+    for r in (rep.get("results") or []):
+        if not isinstance(r, dict):
+            continue
+        rule = str(r.get("rule") or r.get("policy") or "")
+        result = result_of(r)
+        if rule and result in {"pass", "fail", "skip", "warn", "error"}:
+            out.append((rule, result))
+    return out
+
+def denial_verdict(want: str, rep: dict) -> str:
+    """accept | reject-missing | reject-mixed — fail alone is a clean denial."""
+    found_fail, bad = False, []
+    for rule, result in outcomes(rep):
+        if want not in rule:
+            continue
+        if result == "fail":
+            found_fail = True
+        elif result in {"error", "skip", "warn"}:
+            bad.append(result)
+    if bad:
+        return "reject-mixed"
+    if not found_fail:
+        return "reject-missing"
+    return "accept"
+
+def assert_expected_passes(rep: dict, apply_rc: int, expected=EXPECTED_RULES) -> None:
+    got = outcomes(rep)
+    if not got:
+        raise SystemExit("FAIL: PolicyReport.results empty — pin CLI and capture a real report sample")
+    by_rule = {r: [] for r in expected}
+    for rule, result in got:
+        for exp in expected:
+            if exp in rule or rule == exp:
+                by_rule[exp].append(result)
+    for exp in expected:
+        vals = by_rule[exp]
+        if not vals:
+            raise SystemExit(f"FAIL: expected rule {exp} never evaluated")
+        if any(r in {"fail", "error", "skip"} for r in vals):
+            raise SystemExit(f"FAIL: rule {exp} results={vals}")
+        if not any(r == "pass" for r in vals):
+            raise SystemExit(f"FAIL: rule {exp} has no pass result: {vals}")
+    if apply_rc != 0:
+        raise SystemExit(f"FAIL: kyverno apply exited {apply_rc}")
+```
+
+`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (**v1.13.4** below) and **fail closed** on fail/skip/missing rules. That pin emits a YAML `ClusterPolicyReport` via `--policy-report`; parse via `kyverno_deny.py` (wgpolicyk8s.io/v1alpha2).
 
 ```bash
 #!/usr/bin/env bash
@@ -686,15 +795,15 @@ NAME="${1:?service}"
 POLICY="platform/policy/harbour-baseline.yaml"
 FIXDIR="platform/policy/fixtures"
 KYVERNO_VERSION="${KYVERNO_VERSION:-1.13.4}"
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="${BIN_DIR}${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$FIXDIR" /tmp/harbour-policy
 command -v kyverno >/dev/null || {
   echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
 kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
 # Kyverno CLI (pinned v1.13.4): use --policy-report (YAML). Do NOT use -o (mutate path)
 # and do NOT return nonzero from a helper under set -e — that aborts before rc capture.
-# Capture status with an explicit if/else; keep errexit changes only in the caller.
 run_kyverno_report() {
-  # args: <resource> <out> <err> → prints integer rc to stdout; never uses return/exit for deny.
   local resource="$1" out="$2" err="$3" rc
   if kyverno apply "$POLICY" --resource "$resource" --policy-report >"$out" 2>"$err"; then
     rc=0
@@ -706,128 +815,51 @@ run_kyverno_report() {
 APPLY_RC="$(run_kyverno_report /tmp/harbour-policy/rendered.yaml \
   /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err)"
 python3 - "$APPLY_RC" <<'PY'
-import sys, yaml
+import sys
 from pathlib import Path
+from kyverno_deny import load_report, assert_expected_passes
 apply_rc = int(sys.argv[1])
 raw = Path("/tmp/harbour-policy/report.yaml").read_text()
-if not raw.strip():
-    print("FAIL: empty kyverno policy report"); sys.exit(1)
-idx = raw.find("apiVersion:")
-if idx < 0:
-    print("FAIL: no PolicyReport YAML in kyverno output; see apply.err"); sys.exit(1)
-docs = list(yaml.safe_load_all(raw[idx:]))
-rep = next((d for d in docs if isinstance(d, dict) and "results" in d), None)
-if rep is None and docs:
-    rep = docs[0]
-if not isinstance(rep, dict):
-    print("FAIL: could not parse ClusterPolicyReport"); sys.exit(1)
-EXPECTED = ("require-image-digest", "require-nonroot-memory-limit")
-
-def result_of(r):
-    # Pinned CLI / historical reports: prefer result, accept status as alias.
-    return str(r.get("result") or r.get("status") or "").lower()
-
-outcomes = []
-for r in (rep.get("results") or []):
-    if not isinstance(r, dict):
-        continue
-    rule = str(r.get("rule") or r.get("policy") or "")
-    result = result_of(r)
-    if rule and result in {"pass", "fail", "skip", "warn", "error"}:
-        outcomes.append((rule, result))
-if not outcomes:
-    print("FAIL: PolicyReport.results empty — pin CLI and capture a real report sample"); sys.exit(1)
-
-by_rule = {r: [] for r in EXPECTED}
-for rule, result in outcomes:
-    for exp in EXPECTED:
-        if exp in rule or rule == exp:
-            by_rule[exp].append(result)
-
-for exp in EXPECTED:
-    got = by_rule[exp]
-    if not got:
-        print(f"FAIL: expected rule {exp} never evaluated"); sys.exit(1)
-    if any(r in {"fail", "error", "skip"} for r in got):
-        print(f"FAIL: rule {exp} results={got}"); sys.exit(1)
-    if not any(r == "pass" for r in got):
-        print(f"FAIL: rule {exp} has no pass result: {got}"); sys.exit(1)
-
-if apply_rc != 0:
-    print(f"FAIL: kyverno apply exited {apply_rc}; see /tmp/harbour-policy/apply.err"); sys.exit(1)
-print("OK: offline PolicyReport — expected rules evaluated and passed")
+try:
+    rep = load_report(raw)
+except ValueError as e:
+    print(f"FAIL: {e}; see apply.err"); sys.exit(1)
+assert_expected_passes(rep, apply_rc)
+print("OK: offline PolicyReport — all EXPECTED_RULES evaluated and passed")
 PY
 
 # Negative fixtures — prove the *intended* rule *failed* the fixture.
 # Kyverno: fail = policy violation; error = evaluation could not complete.
-# Only result==fail counts as a successful denial proof. error/skip/missing → harness failure.
+# Only denial_verdict==accept (clean result=fail) counts. error/skip/missing → harness failure.
 must_deny_rule() {
   local f="$1" rule="$2" rc
   rc="$(run_kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err)"
   python3 - "$rule" "$rc" <<'PY'
-import sys, yaml
+import sys
 from pathlib import Path
+from kyverno_deny import load_report, denial_verdict, outcomes
 want, apply_rc = sys.argv[1], int(sys.argv[2])
 raw = Path("/tmp/harbour-policy/neg.yaml").read_text()
 err = Path("/tmp/harbour-policy/neg.err").read_text()
-if not raw.strip():
-    print("FAIL: tool error (empty report), not a policy denial:", err[:400]); sys.exit(1)
-idx = raw.find("apiVersion:")
-if idx < 0:
-    print("FAIL: tool error (no PolicyReport YAML), not a policy denial:", err[:200]); sys.exit(1)
-docs = list(yaml.safe_load_all(raw[idx:]))
-rep = next((d for d in docs if isinstance(d, dict) and "results" in d), docs[0] if docs else None)
-if not isinstance(rep, dict):
-    print("FAIL: tool error (unparseable report), not a policy denial"); sys.exit(1)
-
-def result_of(r):
-    return str(r.get("result") or r.get("status") or "").lower()
-
-found_fail = False
-bad_side = []
-matched = []
-for r in (rep.get("results") or []):
-    if not isinstance(r, dict):
-        continue
-    rule = str(r.get("rule") or r.get("policy") or "")
-    result = result_of(r)
-    matched.append((rule, result))
-    if want not in rule:
-        continue
-    if result == "fail":
-        found_fail = True
-    elif result in {"error", "skip", "warn"}:
-        bad_side.append(result)
-# A successful denial requires fail and *no* error/skip/warn for that rule.
-if bad_side:
-    print(f"FAIL: rule {want} has non-fail outcomes {bad_side} (mixed reports are not a clean denial); saw={matched[:12]}")
+try:
+    rep = load_report(raw)
+except ValueError as e:
+    print(f"FAIL: tool error ({e}), not a policy denial:", err[:400]); sys.exit(1)
+verdict = denial_verdict(want, rep)
+matched = outcomes(rep)[:12]
+if verdict == "reject-mixed":
+    print(f"FAIL: rule {want} has non-fail outcomes (mixed reports are not a clean denial); saw={matched}")
     sys.exit(1)
-if not found_fail:
-    print(f"FAIL: did not observe rule {want} result=fail; saw={matched[:12]} rc={apply_rc}")
+if verdict != "accept":
+    print(f"FAIL: did not observe rule {want} result=fail; saw={matched} rc={apply_rc}")
     sys.exit(1)
 print(f"OK: rule {want} denied fixture with clean result=fail (kyverno_rc={apply_rc})")
 PY
 }
-# Unit-test the report parser (pass-only, fail-only, error-only, fail+error, skip, empty).
+# Unit-test the *same* denial_verdict implementation (no inline copy).
 python3 <<'PY'
-import sys, tempfile, textwrap, subprocess, os, yaml
-from pathlib import Path
-
-def parse(want, report_yaml):
-    # Inline copy of denial acceptance rules for fixture coverage.
-    docs = list(yaml.safe_load_all(report_yaml))
-    rep = next((d for d in docs if isinstance(d, dict) and "results" in d), docs[0] if docs else {})
-    found_fail, bad = False, []
-    for r in (rep.get("results") or []):
-        rule = str(r.get("rule") or "")
-        result = str(r.get("result") or r.get("status") or "").lower()
-        if want not in rule: continue
-        if result == "fail": found_fail = True
-        elif result in {"error", "skip", "warn"}: bad.append(result)
-    if bad: return "reject-mixed"
-    if not found_fail: return "reject-missing"
-    return "accept"
-
+import yaml
+from kyverno_deny import denial_verdict, load_report
 cases = [
     ("pass-only", [{"rule": "require-image-digest", "result": "pass"}], "reject-missing"),
     ("fail-only", [{"rule": "require-image-digest", "result": "fail"}], "accept"),
@@ -841,9 +873,9 @@ cases = [
 ]
 for name, results, expect in cases:
     doc = {"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReport", "results": results}
-    got = parse("require-image-digest", yaml.safe_dump(doc))
+    got = denial_verdict("require-image-digest", load_report(yaml.safe_dump(doc)))
     assert got == expect, f"{name}: want {expect} got {got}"
-print("OK: denial-parser unit fixtures")
+print("OK: denial-parser unit fixtures (shared kyverno_deny)")
 PY
 cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
 apiVersion: v1
@@ -887,9 +919,54 @@ spec:
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
   securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
 EOF
+# Compliant app + privileged ephemeral container must fail require-ephemeral-no-privilege.
+cat > "$FIXDIR/bad-ephemeral-privileged.yaml" <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: bad-ephem, namespace: default}
+spec:
+  containers:
+    - name: c
+      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
+      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+  ephemeralContainers:
+    - name: dbg
+      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002
+      securityContext: {allowPrivilegeEscalation: true}
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+EOF
+# Positive ephemeral fixture — digest + no privilege escalation must pass all three rules.
+cat > "$FIXDIR/good-ephemeral.yaml" <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: good-ephem, namespace: default}
+spec:
+  containers:
+    - name: c
+      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
+      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+  ephemeralContainers:
+    - name: dbg
+      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002
+      securityContext: {allowPrivilegeEscalation: false}
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+EOF
+GOOD_RC="$(run_kyverno_report "$FIXDIR/good-ephemeral.yaml" \
+  /tmp/harbour-policy/good-ephem.yaml /tmp/harbour-policy/good-ephem.err)"
+python3 - "$GOOD_RC" <<'PY'
+import sys
+from pathlib import Path
+from kyverno_deny import load_report, assert_expected_passes
+rep = load_report(Path("/tmp/harbour-policy/good-ephem.yaml").read_text())
+assert_expected_passes(rep, int(sys.argv[1]))
+print("OK: good-ephemeral fixture — all three rules passed")
+PY
 must_deny_rule "$FIXDIR/bad-mutable-tag.yaml" "require-image-digest"
 must_deny_rule "$FIXDIR/bad-no-memory-limit.yaml" "require-nonroot-memory-limit"
 must_deny_rule "$FIXDIR/bad-init-mutable-tag.yaml" "require-image-digest"
+must_deny_rule "$FIXDIR/bad-ephemeral-privileged.yaml" "require-ephemeral-no-privilege"
 # Broken-policy fixture: harness must fail closed on evaluation errors (not treat as denial).
 cat > "$FIXDIR/broken-policy.yaml" <<'EOF'
 apiVersion: kyverno.io/v1
@@ -975,13 +1052,15 @@ jobs:
 
 **Required-check tests:** (1) PR that introduces `image: nginx:latest` must fail `policy`; (2) docs-only PR must still get a completed `policy` check (always-on). Live `harbour-policy-admit` stays lab-only.
 
-`platform/bin/harbour-policy-admit` — **lab/integration only** (not the PR required check). Isolates Kyverno digest denial from PSA rejection by using a restricted-compliant Pod that only violates the image rule:
+`platform/bin/harbour-policy-admit` — **lab/integration only** (not the PR required check). Isolates Kyverno digest denial from PSA rejection by using a restricted-compliant Pod that only violates the image rule, then proves the ephemeral rule against the real `pods/ephemeralcontainers` subresource (`kubectl debug` / patch), not offline Pod YAML alone:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 NS="${1:?namespace}"
-kubectl -n "$NS" delete pod policy-probe-tag --ignore-not-found --wait=false
+DIGEST_IMG="nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001"
+DBG_IMG="busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002"
+kubectl -n "$NS" delete pod policy-probe-tag policy-probe-ephem --ignore-not-found --wait=false
 set +e
 kubectl -n "$NS" apply -f - <<EOF 2>/tmp/adm-kyverno.txt
 apiVersion: v1
@@ -1002,9 +1081,41 @@ rc=$?; set -e
 grep -qiE 'harbour-baseline|require-image-digest|digest' /tmp/adm-kyverno.txt \
   || { echo "FAIL: rejection was not Kyverno digest rule (got: $(cat /tmp/adm-kyverno.txt))"; exit 1; }
 echo "OK: Kyverno admission denied mutable tag (distinct from PSA)"
+
+# Live ephemeralcontainers subresource — privileged debug must be denied.
+kubectl -n "$NS" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata: {name: policy-probe-ephem}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: ${DIGEST_IMG}
+      command: ["sleep", "3600"]
+      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+EOF
+kubectl -n "$NS" wait --for=condition=Ready pod/policy-probe-ephem --timeout=60s
+set +e
+kubectl -n "$NS" patch pod policy-probe-ephem --subresource=ephemeralcontainers --type=json \
+  -p="[
+    {\"op\":\"add\",\"path\":\"/spec/ephemeralContainers\",\"value\":[
+      {\"name\":\"dbg\",\"image\":\"${DBG_IMG}\",\"command\":[\"sleep\",\"60\"],
+       \"securityContext\":{\"allowPrivilegeEscalation\":true}}
+    ]}
+  ]" 2>/tmp/adm-ephem.txt
+ephem_rc=$?; set -e
+[ "$ephem_rc" -ne 0 ] || { echo "FAIL: ephemeralcontainers accepted privileged debug"; exit 1; }
+grep -qiE 'harbour-baseline|require-ephemeral-no-privilege|privilege' /tmp/adm-ephem.txt \
+  || { echo "FAIL: rejection was not ephemeral privilege rule (got: $(cat /tmp/adm-ephem.txt))"; exit 1; }
+echo "OK: Kyverno denied privileged pods/ephemeralcontainers update"
+kubectl -n "$NS" delete pod policy-probe-ephem --ignore-not-found --wait=false
 ```
 
-**Required standard:** same forbidden configuration fails offline CI and (in the lab) at admission; skipped rules are not passes; PSA vs Kyverno vs RBAC denials are distinguishable in evidence.
+**Required standard:** same forbidden configuration fails offline CI and (in the lab) at admission — including the ephemeralcontainers subresource path; skipped rules are not passes; PSA vs Kyverno vs RBAC denials are distinguishable in evidence. Replace placeholder digests with pullable digests in your lab registry.
 
 ### 4.5.3 Worked example — show what the controls deny
 
@@ -1022,7 +1133,7 @@ SA="system:serviceaccount:${SVC}-staging:reconciler"
   kubectl auth can-i delete pods -n "${SVC}-staging" --as=system:serviceaccount:platform-system:dev-viewer
   echo "# offline policy gate (no cluster) rejects forbidden fixtures"
   platform/bin/harbour-policy-check "$SVC"
-  echo "# live admission: Kyverno digest rule (restricted-compliant Pod, mutable tag only)"
+  echo "# live admission: Kyverno digest + ephemeralcontainers privilege denials"
   platform/bin/harbour-policy-admit "${SVC}-staging"
   echo "# promotion to an unapproved environment is refused"
   platform/bin/harbour-promote "$SVC" prod "sha256:$(printf '0%.0s' {1..64})" 2>&1
@@ -1694,21 +1805,55 @@ APP_PODS="$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | w
   || { echo "FAIL: writers still running after unsafe restore (pods=$APP_PODS)"; exit 1; }
 echo "OK: unsafe restore left Flux suspended and writers stopped" \
   | tee -a "$HARBOUR_DRILL_OUT/restore-fail-pg_restore.txt"
-# Operator recovery: verify DB consistency *before* resuming writers.
-kubectl -n "$NS" exec postgres-0 -- \
-  psql -U harbour -d harbour -tAc "SELECT count(*) FROM ledger_entries" \
-  | tee -a "$HARBOUR_DRILL_OUT/operator-db-check.txt"
-# Compare against the last known good snapshot count when available.
-if [ -f "$HARBOUR_DRILL_OUT/entries-at-backup.json" ]; then
-  WANT="$(python3 -c 'import json; print(json.load(open("'"$HARBOUR_DRILL_OUT"'/entries-at-backup.json"))["count"])')"
-  GOT="$(tail -1 "$HARBOUR_DRILL_OUT/operator-db-check.txt" | tr -d '[:space:]')"
-  [ "$GOT" = "$WANT" ] \
-    || { echo "FAIL: operator DB count $GOT != backup snapshot $WANT — do not resume"; exit 1; }
-fi
+# Operator recovery: full snapshot equivalence *before* resuming writers.
+# Count alone is insufficient after a deliberately partial pg_restore failure —
+# reuse the same (id, note) set check as the successful restore path.
+[ -f "$HARBOUR_DRILL_OUT/entries-at-backup.json" ] \
+  || { echo "FAIL: missing entries-at-backup.json — cannot authorise resume"; exit 1; }
+kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -v ON_ERROR_STOP=1 -tAc \
+  "SELECT column_name || ':' || data_type FROM information_schema.columns
+   WHERE table_name='ledger_entries' ORDER BY ordinal_position" \
+  | tee "$HARBOUR_DRILL_OUT/operator-schema.txt"
+grep -q '^id:' "$HARBOUR_DRILL_OUT/operator-schema.txt" \
+  && grep -q '^note:' "$HARBOUR_DRILL_OUT/operator-schema.txt" \
+  || { echo "FAIL: ledger_entries schema incomplete — do not resume"; exit 1; }
+kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -v ON_ERROR_STOP=1 -tAc \
+  "SELECT id || E'\\t' || note FROM ledger_entries ORDER BY id" \
+  > "$HARBOUR_DRILL_OUT/operator-db-rows.tsv"
+python3 - <<PY | tee -a "$HARBOUR_DRILL_OUT/operator-db-check.txt"
+import json, sys
+from pathlib import Path
+out = Path("$HARBOUR_DRILL_OUT")
+want = {(e["id"], e["note"]) for e in json.load(open(out / "entries-at-backup.json"))["entries"]}
+got = set()
+for line in open(out / "operator-db-rows.tsv"):
+    line = line.strip()
+    if not line:
+        continue
+    i, note = line.split("\t", 1)
+    got.add((int(i), note))
+if want != got:
+    print("FAIL: operator DB snapshot != backup (id,note) set — do not resume")
+    print("missing", sorted(want - got)[:10])
+    print("extra", sorted(got - want)[:10])
+    sys.exit(1)
+# Queryability: same projection the app uses.
+print(f"OK: operator full snapshot equivalence n={len(got)} — safe to resume writers")
+PY
 flux resume kustomization "$SVC" -n "$NS"
 kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite || true
 flux reconcile kustomization "$SVC" -n "$NS" --with-source
 kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
+# Post-resume: app must be queryable (/ready query_ok), not merely listening (/health).
+kubectl -n "$NS" port-forward "svc/$SVC" 18082:80 >/tmp/pf-operator-resume.log 2>&1 &
+PF_OP=$!
+sleep 2
+READY_CODE="$(curl -sS --max-time 5 -o /tmp/op-ready-body -w '%{http_code}' http://127.0.0.1:18082/ready || echo 000)"
+kill "$PF_OP" 2>/dev/null || true
+[ "$READY_CODE" = "200" ] || { echo "FAIL: /ready HTTP $READY_CODE after operator resume"; exit 1; }
+grep -q query_ok /tmp/op-ready-body \
+  || { echo "FAIL: /ready missing query_ok after operator resume"; exit 1; }
+echo "OK: operator resume → /ready query_ok" | tee -a "$HARBOUR_DRILL_OUT/operator-db-check.txt"
 ```
 
 What each drill proves — and what it does not:
