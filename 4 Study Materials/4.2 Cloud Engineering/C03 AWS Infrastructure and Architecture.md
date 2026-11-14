@@ -208,16 +208,19 @@ aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   --query 'services[0].{desired:desiredCount,running:runningCount}' \
   --output json | tee "$HARBOUR_ROOT/docs/cloud/ha-after-desired-2.json"
 
-# Actual AZ placement of running tasks (do not claim Multi-AZ HA without this):
-aws ecs list-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+# Actual AZ placement — one describe-tasks call → one JSON array (valid document):
+TASK_ARNS="$(aws ecs list-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   --cluster "$CLUSTER" --service-name "$SERVICE" --desired-status RUNNING \
-  --query 'taskArns' --output text | tr '\t' '\n' | while read -r t; do
-  test -n "$t" || continue
-  aws ecs describe-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
-    --cluster "$CLUSTER" --tasks "$t" \
-    --query 'tasks[0].{task:taskArn,az:availabilityZone,subnet:attachments[0].details[?name==`subnetId`].value|[0]}' \
-    --output json
-done | tee "$HARBOUR_ROOT/docs/cloud/task-az-placement.json"
+  --query 'taskArns' --output text)"
+test -n "$TASK_ARNS" && test "$TASK_ARNS" != "None" || {
+  echo "No running tasks to describe"
+  exit 1
+}
+# shellcheck disable=SC2086  # intentional word-split of ARN list for --tasks
+aws ecs describe-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --tasks $TASK_ARNS \
+  --query 'tasks[].{task:taskArn,az:availabilityZone,subnet:attachments[0].details[?name==`subnetId`].value|[0]}' \
+  --output json | tee "$HARBOUR_ROOT/docs/cloud/task-az-placement.json"
 ```
 
 Persist `desired_count = 2` in `terraform.tfvars` (or your usual var file) if the ADR keeps that claim; otherwise plan/apply back to `1` when idle.
@@ -307,7 +310,12 @@ case "$GOOD_IMAGE" in
     exit 1
     ;;
 esac
+# Preserve the known-good digest for the whole drill (do not overwrite this file):
+umask 077
+printf '%s\n' "$GOOD_IMAGE" > "$HARBOUR_ROOT/docs/cloud/recovery/good-image.txt"
 echo "GOOD_IMAGE=$GOOD_IMAGE" | tee "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
+cp -a "$HARBOUR_ROOT/docs/cloud/recovery/good-image.txt" \
+  "$HARBOUR_ROOT/docs/cloud/recovery/good-image.txt.bak"
 
 # 2) Syntactically valid but non-pullable digest (fails ECS pulls / never becomes healthy):
 ECR_REPO="${GOOD_IMAGE%@*}"
@@ -331,7 +339,20 @@ for i in 1 2 3 4; do
   sleep 20
 done
 
-# 4) Recover — revert digest with another recorded plan/apply (Terraform remains source of truth):
+# 3b) Safeguard — inspect ECS deployment / circuit-breaker state before Terraform recovery.
+# If the service already rolled back (circuit breaker) or a deployment is still IN_PROGRESS,
+# record it; then still drive recovery via Terraform so desired state matches GOOD_IMAGE.
+aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].{taskDef:taskDefinition,deployments:deployments[*].{status:status,rollout:rolloutState,reason:rolloutStateReason,running:runningCount,failed:failedTasks,td:taskDefinition}}' \
+  --output json | tee "$HARBOUR_ROOT/docs/cloud/recovery/deploy-state-before-revert.json"
+
+# 4) Recover — re-read the preserved digest; revert with another recorded plan/apply:
+GOOD_IMAGE="$(cat "$HARBOUR_ROOT/docs/cloud/recovery/good-image.txt")"
+test -n "$GOOD_IMAGE" || {
+  echo "Missing preserved good-image.txt — abort recovery"
+  exit 1
+}
 terraform -chdir="$TF_STAGING" plan \
   -var="enable_runtime=true" \
   -var="container_image=${GOOD_IMAGE}" \
@@ -346,9 +367,25 @@ for i in 1 2 3 4 5 6; do
   observe "rollback-wait-$i"
   sleep 20
 done
+
+# 5) Final service/deployment status — /health alone is not enough:
+aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].{taskDef:taskDefinition,desired:desiredCount,running:runningCount,deployments:deployments[*].{status:status,rollout:rolloutState,reason:rolloutStateReason,running:runningCount,td:taskDefinition}}' \
+  --output json | tee "$HARBOUR_ROOT/docs/cloud/recovery/deploy-state-after-revert.json"
+FINAL_IMAGE="$(aws ecs describe-task-definition --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --task-definition "$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+    --cluster "$CLUSTER" --services "$SERVICE" \
+    --query 'services[0].taskDefinition' --output text)" \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+echo "FINAL_IMAGE=$FINAL_IMAGE" | tee -a "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
+test "$FINAL_IMAGE" = "$GOOD_IMAGE" || {
+  echo "Service image still != preserved GOOD_IMAGE — recovery incomplete"
+  exit 1
+}
 ```
 
-**Verify:** Observe log shows unhealthy/failed during inject and HTTP 200 after revert; both plan files are filed; `terraform -chdir="$TF_STAGING" plan` (with restored tfvars) is empty or unrelated. If you use GitOps from [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), the same story is “bad digest commit → revert commit” with sync evidence — still attach the observe log.
+**Verify:** Observe log shows unhealthy/failed during inject; after revert you have HTTP 200 **and** `deploy-state-after-revert.json` with a completed/primary deployment on `GOOD_IMAGE` (not merely a lucky curl). File `good-image.txt`, both plan files, and both deploy-state snapshots. `terraform -chdir="$TF_STAGING" plan` (with restored tfvars) is empty or unrelated. If you use GitOps from [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), the same story is “bad digest commit → revert commit” with sync evidence — still attach the observe log and final deployment status.
 
 ### 3.3.3 Option B — task stop / unhealthy target (standard assessment)
 
