@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; remediations after audits through `366f6815` (promotion unpromoted-parse, reviewed-commit bind, Kyverno `--policy-report`, restore trap) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `fbd5030` (YAML unpromoted parse, Kyverno rc capture, DB-safe restore trap) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -348,16 +348,36 @@ esac
 # Reviewed-history gate: attested commit must be an ancestor of the protected branch tip.
 # (Attestation ≠ merge; workflow_dispatch on a feature branch must not promote.)
 STRIP_COMMIT="${COMMIT#sha1:}"; STRIP_COMMIT="${STRIP_COMMIT#sha256:}"
-git fetch origin "$REQUIRE_BRANCH" --depth=200 2>/dev/null || true
-git merge-base --is-ancestor "$STRIP_COMMIT" "origin/$REQUIRE_BRANCH" \
-  || { echo "FAIL: attested commit $STRIP_COMMIT is not on origin/$REQUIRE_BRANCH (unreviewed source)" >&2; exit 1; }
+# Fetch must succeed; never fall back to a stale local tip. Deepen until the commit is reachable.
+git fetch --no-tags origin "refs/heads/${REQUIRE_BRANCH}:refs/remotes/origin/${REQUIRE_BRANCH}" \
+  || { echo "FAIL: git fetch origin/$REQUIRE_BRANCH failed — refuse to verify against stale tips" >&2; exit 1; }
+TIP_BEFORE="$(git rev-parse "origin/$REQUIRE_BRANCH")"
+# If the attested commit is not yet local, deepen history (unshallow when needed).
+if ! git cat-file -e "${STRIP_COMMIT}^{commit}" 2>/dev/null; then
+  git fetch --no-tags --deepen=500 origin "$REQUIRE_BRANCH" \
+    || git fetch --no-tags --unshallow origin "$REQUIRE_BRANCH" \
+    || { echo "FAIL: cannot deepen history to reach $STRIP_COMMIT" >&2; exit 1; }
+fi
+# Ensure we have enough ancestry: retry deepen if merge-base cannot see the commit yet.
+TRIES=0
+while ! git merge-base --is-ancestor "$STRIP_COMMIT" "origin/$REQUIRE_BRANCH" 2>/dev/null; do
+  TRIES=$((TRIES + 1))
+  [ "$TRIES" -le 5 ] || {
+    echo "FAIL: attested commit $STRIP_COMMIT is not an ancestor of origin/$REQUIRE_BRANCH (unreviewed or history incomplete)" >&2
+    exit 1
+  }
+  git fetch --no-tags --deepen=500 origin "$REQUIRE_BRANCH" \
+    || { echo "FAIL: deepen fetch failed while locating $STRIP_COMMIT" >&2; exit 1; }
+done
+TIP="$(git rev-parse "origin/$REQUIRE_BRANCH")"
+echo "protected_branch_tip=$TIP (pre_fetch_tip=$TIP_BEFORE)" >&2
 if [ -n "$ATT_REF" ] && [ "$ATT_REF" != "refs/heads/$REQUIRE_BRANCH" ]; then
   echo "FAIL: attestation workflow ref '$ATT_REF' is not refs/heads/$REQUIRE_BRANCH" >&2; exit 1
 fi
 if [ -n "$ATT_TRIGGER" ] && [ "$ATT_TRIGGER" != "push" ]; then
   echo "FAIL: attestation trigger '$ATT_TRIGGER' is not push (reject workflow_dispatch builds)" >&2; exit 1
 fi
-echo "VERIFIED: $REF bound to $WANT_REPO / workflow=$WORKFLOW / $EXPECT_COMMIT on $REQUIRE_BRANCH"
+echo "VERIFIED: $REF bound to $WANT_REPO / workflow=$WORKFLOW / $EXPECT_COMMIT on $REQUIRE_BRANCH@$TIP"
 ```
 
 Always-on required check `.github/workflows/promotion-verify.yml`. The release manifest identifies **candidate commit and digest**; the **approved-workflow allow-list** is protected platform config; the attested commit must belong to **protected-branch history**:
@@ -394,28 +414,29 @@ jobs:
           SENTINEL="sha256:0000000000000000000000000000000000000000000000000000000000000000"
           for f in "${FILES[@]}"; do
             svc="$(echo "$f" | cut -d/ -f2)"
-            # Structural unpromoted detection — never substring-match the word UNPROMOTED.
+            # YAML-aware unpromoted detection (matches P03 flow/list forms). Never trust the word UNPROMOTED.
             is_unpromoted="$(python3 - "$f" "$SENTINEL" <<'PY'
-import sys, re, pathlib
-text = pathlib.Path(sys.argv[1]).read_text()
+import sys, yaml
+from pathlib import Path
+doc = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
 sentinel = sys.argv[2]
-digests = re.findall(r"(?m)^\s*digest:\s*(sha256:[0-9a-f]{64})", text)
-# Unpromoted only when *every* digest is the zero sentinel AND replicas are disabled (count: 0).
-# A comment containing the word UNPROMOTED must never cause a skip on its own.
-replicas_disabled = bool(re.search(r"(?ms)^\s*replicas:\s*(?:-|\n).*?\bcount:\s*0\b", text))
-only_sentinel = digests == [sentinel]
+images = doc.get("images") or []
+digests = [i.get("digest") for i in images if isinstance(i, dict) and i.get("digest")]
+replicas = doc.get("replicas") or []
+replicas_disabled = any(isinstance(r, dict) and r.get("count") == 0 for r in replicas)
+only_sentinel = bool(digests) and all(d == sentinel for d in digests)
 print("yes" if only_sentinel and replicas_disabled else "no")
 PY
 )"
             if [ "$is_unpromoted" = "yes" ]; then
-              echo "skip $f (exact zero-digest sentinel + replicas disabled)"
+              echo "skip $f (exact zero-digest sentinel + replicas count 0)"
               continue
             fi
             # Negative case: a real digest must never skip, even if a comment says UNPROMOTED.
-            img="$(sed -nE 's/^[[:space:]]+newName:[[:space:]]+(.*)$/\1/p' "$f" | head -1)"
-            d="$(grep -oE 'digest: sha256:[0-9a-f]{64}' "$f" | head -1 | cut -d' ' -f2)"
+            img="$(python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); print((d.get("images") or [{}])[0].get("newName",""))' "$f")"
+            d="$(python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); print((d.get("images") or [{}])[0].get("digest",""))' "$f")"
             [ -n "$img" ] && [ -n "$d" ] || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
-            [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without disabled replicas in $f"; exit 1; }
+            [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without replicas count 0 in $f"; exit 1; }
             MAN="docs/releases/${svc}/${d}.json"
             [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (download CI artifact into PR)"; exit 1; }
             commit="$(jq -r .commit "$MAN")"
@@ -538,23 +559,21 @@ mkdir -p "$FIXDIR" /tmp/harbour-policy
 command -v kyverno >/dev/null || {
   echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
 kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
-# Kyverno CLI (pinned v1.13.4): -o is mutate/generate output path — NOT a report format.
-# Use --policy-report (YAML ClusterPolicyReport on stdout). Do not invent --output-format
-# for this pin — that flag lands in later CLIs. Parse the YAML report with PyYAML.
-kyverno_report() {
-  local resource="$1" out="$2" err="$3"
-  set +e
-  kyverno apply "$POLICY" --resource "$resource" --policy-report \
-    >"$out" 2>"$err"
-  local rc=$?
-  set -e
-  return "$rc"
+# Kyverno CLI (pinned v1.13.4): use --policy-report (YAML). Do NOT use -o (mutate path)
+# and do NOT return nonzero from a helper under set -e — that aborts before rc capture.
+# Capture status with an explicit if/else; keep errexit changes only in the caller.
+run_kyverno_report() {
+  # args: <resource> <out> <err> → prints integer rc to stdout; never uses return/exit for deny.
+  local resource="$1" out="$2" err="$3" rc
+  if kyverno apply "$POLICY" --resource "$resource" --policy-report >"$out" 2>"$err"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  printf '%s' "$rc"
 }
-set +e
-kyverno_report /tmp/harbour-policy/rendered.yaml \
-  /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err
-APPLY_RC=$?
-set -e
+APPLY_RC="$(run_kyverno_report /tmp/harbour-policy/rendered.yaml \
+  /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err)"
 python3 - "$APPLY_RC" <<'PY'
 import sys, yaml
 from pathlib import Path
@@ -562,7 +581,6 @@ apply_rc = int(sys.argv[1])
 raw = Path("/tmp/harbour-policy/report.yaml").read_text()
 if not raw.strip():
     print("FAIL: empty kyverno policy report"); sys.exit(1)
-# CLI may emit log lines before the YAML document — keep from the first apiVersion/kind.
 idx = raw.find("apiVersion:")
 if idx < 0:
     print("FAIL: no PolicyReport YAML in kyverno output; see apply.err"); sys.exit(1)
@@ -573,17 +591,21 @@ if rep is None and docs:
 if not isinstance(rep, dict):
     print("FAIL: could not parse ClusterPolicyReport"); sys.exit(1)
 EXPECTED = ("require-image-digest", "require-nonroot-memory-limit")
-results = rep.get("results") or []
+
+def result_of(r):
+    # Pinned CLI / historical reports: prefer result, accept status as alias.
+    return str(r.get("result") or r.get("status") or "").lower()
+
 outcomes = []
-for r in results:
+for r in (rep.get("results") or []):
     if not isinstance(r, dict):
         continue
     rule = str(r.get("rule") or r.get("policy") or "")
-    result = str(r.get("result") or "").lower()
+    result = result_of(r)
     if rule and result in {"pass", "fail", "skip", "warn", "error"}:
         outcomes.append((rule, result))
 if not outcomes:
-    print("FAIL: PolicyReport.results empty — check CLI pin and --policy-report"); sys.exit(1)
+    print("FAIL: PolicyReport.results empty — pin CLI and capture a real report sample"); sys.exit(1)
 
 by_rule = {r: [] for r in EXPECTED}
 for rule, result in outcomes:
@@ -605,13 +627,10 @@ if apply_rc != 0:
 print("OK: offline PolicyReport — expected rules evaluated and passed")
 PY
 
-# Negative fixtures — prove the *intended* rule denied the fixture (not any CLI error).
+# Negative fixtures — prove the *intended* rule denied the fixture (not any CLI/tool error).
 must_deny_rule() {
-  local f="$1" rule="$2"
-  set +e
-  kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err
-  local rc=$?
-  set -e
+  local f="$1" rule="$2" rc
+  rc="$(run_kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err)"
   python3 - "$rule" "$rc" <<'PY'
 import sys, yaml
 from pathlib import Path
@@ -627,13 +646,17 @@ docs = list(yaml.safe_load_all(raw[idx:]))
 rep = next((d for d in docs if isinstance(d, dict) and "results" in d), docs[0] if docs else None)
 if not isinstance(rep, dict):
     print("FAIL: tool error (unparseable report), not a policy denial"); sys.exit(1)
+
+def result_of(r):
+    return str(r.get("result") or r.get("status") or "").lower()
+
 found_fail = False
 matched = []
 for r in (rep.get("results") or []):
     if not isinstance(r, dict):
         continue
     rule = str(r.get("rule") or r.get("policy") or "")
-    result = str(r.get("result") or "").lower()
+    result = result_of(r)
     matched.append((rule, result))
     if want in rule and result in {"fail", "error"}:
         found_fail = True
@@ -1145,6 +1168,8 @@ wait_until() { # usage: wait_until <seconds> <description> -- <command...>
   done
 }
 PF_PID=""
+MAINT=0
+DB_UNSAFE=0
 assert_pf_alive() {
   kill -0 "$PF_PID" 2>/dev/null || { log "INVALID MEASUREMENT: port-forward PID $PF_PID exited"; return 1; }
 }
@@ -1172,7 +1197,26 @@ app_pf() {
   assert_pf_alive
 }
 app_stop_pf() { [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null || true; PF_PID=""; }
-trap app_stop_pf EXIT
+# Combined EXIT trap: port-forward cleanup always; maintenance resume when safe.
+cleanup_on_exit() {
+  if [ "${MAINT:-0}" = "1" ]; then
+    if [ "${DB_UNSAFE:-0}" = "1" ]; then
+      # Incomplete restore: do NOT resume writers. Leave Flux suspended; require operator.
+      log "cleanup: DB_UNSAFE=1 — leaving Flux suspended and app scaled down; operator must verify DB"
+      echo "REQUIRES_OPERATOR db_unsafe $(date -u +%FT%TZ)" | tee -a "$OUT/maintenance-cleanup.txt"
+      kubectl -n "$NS" annotate kustomization "$SVC" \
+        harbour.example/maintenance=operator-required --overwrite || true
+    else
+      log "cleanup: safe resume after pre-restore failure (MAINT trap)"
+      flux resume kustomization "$SVC" -n "$NS" || log "cleanup: flux resume failed"
+      kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite || true
+      flux reconcile kustomization "$SVC" -n "$NS" --with-source || true
+      echo "trap-safe-resume $(date -u +%FT%TZ)" >> "$OUT/maintenance-cleanup.txt"
+    fi
+  fi
+  app_stop_pf
+}
+trap cleanup_on_exit EXIT
 http() { curl -sf --max-time 5 -H 'content-type: application/json' "$@"; }
 app_json() { http http://127.0.0.1:18080/v1/entries; }
 app_count() { app_json | python3 -c 'import sys,json; print(json.load(sys.stdin)["count"])'; }
@@ -1269,25 +1313,13 @@ case "$PHASE" in
     [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
     [ "$(sha256sum "$BACKUP" | awk '{print $1}')" = "$(cat "$OUT/backup.sha256")" ] \
       || { log "selected backup checksum changed since copy"; exit 1; }
-    # Failure-safe cleanup: never leave Flux suspended / app scaled to 0 on script error.
-    MAINT=0
-    cleanup_maint() {
-      if [ "${MAINT:-0}" = "1" ]; then
-        log "cleanup: resuming Flux after restore failure/exit (MAINT trap)"
-        flux resume kustomization "$SVC" -n "$NS" || log "cleanup: flux resume failed"
-        kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite \
-          || true
-        flux reconcile kustomization "$SVC" -n "$NS" --with-source || true
-        echo "trap-fired $(date -u +%FT%TZ)" >> "$OUT/maintenance-cleanup.txt"
-      fi
-    }
-    trap cleanup_maint EXIT
-    # GitOps-safe maintenance: suspend reconciliation *before* changing replicas.
     DESIRED="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
     echo "${DESIRED:-2}" > "$OUT/desired-replicas.txt"
+    # Arm maintenance cleanup *before* suspend so a failed annotate still resumes safely.
+    MAINT=1
+    DB_UNSAFE=0
     flux suspend kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance=restore --overwrite
-    MAINT=1
     kubectl -n "$NS" scale deploy/"$SVC" --replicas=0
     kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s
     [ "$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | wc -l)" = "0" ] \
@@ -1295,24 +1327,27 @@ case "$PHASE" in
     flux get kustomization "$SVC" -n "$NS" | tee -a "$OUT/maintenance-flux.txt" | grep -qi Suspended \
       || { log "FAIL: Flux Kustomization not Suspended — abort restore"; exit 1; }
     log "S3 maintenance: Flux suspended; $SVC replicas=0; desired=$(cat "$OUT/desired-replicas.txt")"
-    # Optional failure injection (lab): HARBOUR_RESTORE_FAIL_AFTER=suspend|copy|pg_restore
+    # Optional failure injection: HARBOUR_RESTORE_FAIL_AFTER=suspend|copy|pg_restore
     case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
-      suspend) log "injected failure after suspend"; exit 42 ;;
+      suspend) log "injected failure after suspend (DB unchanged → safe resume)"; exit 42 ;;
     esac
     kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
     case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
-      copy) log "injected failure after backup copy"; exit 42 ;;
+      copy) log "injected failure after backup copy (DB unchanged → safe resume)"; exit 42 ;;
     esac
+    # From here, a failure may leave the DB partially modified — do not auto-resume writers.
+    DB_UNSAFE=1
     kubectl -n "$NS" exec postgres-0 -- \
       pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
     case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
-      pg_restore) log "injected failure after pg_restore"; exit 42 ;;
+      pg_restore) log "injected failure after pg_restore (DB_UNSAFE → operator required)"; exit 42 ;;
     esac
+    DB_UNSAFE=0
     # Resume GitOps: restore desired state from Git (not a hardcoded replica count).
     flux resume kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite
     MAINT=0
-    trap - EXIT
+    # Keep port-forward EXIT trap; only clear the maintenance arm.
     flux reconcile kustomization "$SVC" -n "$NS" --with-source
     kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
     NOW="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
@@ -1376,14 +1411,29 @@ for p in backup write-after kill-db destroy restore; do
   platform/drills/stateful-drill.sh "$NS" "$p"
 done
 echo "Evidence: $HARBOUR_DRILL_OUT"
-# Failure-path proof (required once): inject a mid-restore abort and confirm Flux resumes.
-HARBOUR_RESTORE_FAIL_AFTER=suspend platform/drills/stateful-drill.sh "$NS" restore \
-  && { echo "FAIL: injected restore should have exited nonzero"; exit 1; } || true
-flux get kustomization "$SVC" -n "$NS" | tee -a "$HARBOUR_DRILL_OUT/restore-fail-after-suspend.txt"
-flux get kustomization "$SVC" -n "$NS" | grep -qi Suspended \
-  && { echo "FAIL: Flux still Suspended after failed restore trap"; exit 1; } \
-  || echo "OK: trap resumed Flux after injected restore failure" \
-       | tee -a "$HARBOUR_DRILL_OUT/restore-fail-after-suspend.txt"
+# Failure-path proofs (required): suspend/copy → safe resume; pg_restore → operator hold.
+for stage in suspend copy; do
+  HARBOUR_RESTORE_FAIL_AFTER="$stage" platform/drills/stateful-drill.sh "$NS" restore \
+    && { echo "FAIL: injected $stage should exit nonzero"; exit 1; } || true
+  flux get kustomization "$SVC" -n "$NS" | tee -a "$HARBOUR_DRILL_OUT/restore-fail-$stage.txt"
+  flux get kustomization "$SVC" -n "$NS" | grep -qi Suspended \
+    && { echo "FAIL: Flux still Suspended after safe-path failure ($stage)"; exit 1; } \
+    || echo "OK: trap resumed Flux after $stage failure" | tee -a "$HARBOUR_DRILL_OUT/restore-fail-$stage.txt"
+done
+# Re-enter maintenance then inject after pg_restore — must NOT auto-resume writers.
+flux suspend kustomization "$SVC" -n "$NS" || true
+HARBOUR_RESTORE_FAIL_AFTER=pg_restore platform/drills/stateful-drill.sh "$NS" restore \
+  && { echo "FAIL: injected pg_restore should exit nonzero"; exit 1; } || true
+grep -q REQUIRES_OPERATOR "$HARBOUR_DRILL_OUT/maintenance-cleanup.txt" \
+  || { echo "FAIL: missing operator-required marker after unsafe restore"; exit 1; }
+flux get kustomization "$SVC" -n "$NS" | tee -a "$HARBOUR_DRILL_OUT/restore-fail-pg_restore.txt" \
+  | grep -qi Suspended \
+  || { echo "FAIL: expected Flux still Suspended after unsafe restore"; exit 1; }
+echo "OK: unsafe restore left Flux suspended for operator" \
+  | tee -a "$HARBOUR_DRILL_OUT/restore-fail-pg_restore.txt"
+# Operator recovery after the unsafe drill (document in evidence): verify DB, then resume.
+flux resume kustomization "$SVC" -n "$NS"
+flux reconcile kustomization "$SVC" -n "$NS" --with-source
 ```
 
 What each drill proves — and what it does not:

@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; remediations after audits through `366f6815` (quota/CPU, structural capabilities, release=push-to-main) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `fbd5030` (YAML quota/PSA Pod dry-run, init-probe split) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -433,9 +433,9 @@ metadata:
 apiVersion: v1
 kind: ResourceQuota
 metadata: {name: default, namespace: $NS}
-# CPU limits are optional (P01/P02 ADR). Do NOT set limits.cpu here — without a
-# LimitRange, Kubernetes requires every container to declare a CPU limit when
-# the quota tracks limits.cpu, and Pods would stall Pending forever.
+# CPU limits are optional (P01/P02 ADR). Do NOT put a CPU-limit quota key in
+# hard: — without a LimitRange, that would force every container to declare a
+# CPU limit, and Pods would stall Pending forever.
 spec: {hard: {pods: "6", requests.cpu: "500m", requests.memory: 512Mi, limits.memory: 1Gi}}
 ---
 apiVersion: v1
@@ -585,32 +585,64 @@ platform/bin/harbour-new-service "$T" --owner template-test
 kubectl kustomize "deploy/$T/overlays/staging" >/dev/null
 # Structural securityContext (YAML-aware — not a fragile single-line grep).
 platform/bin/harbour-check-service "$T" --allow-unpromoted
-# Quota must not require CPU limits while the Deployment omits them.
-grep -q 'limits\.cpu' "platform/tenants/$T/tenant.yaml" \
-  && { echo "FAIL: tenant quota sets limits.cpu (blocks pods without CPU limits)"; exit 1; }
 echo "template OK (offline)"
 ```
 
-**`platform/bin/test-template-admission` — lab / disposable cluster only** (not a required PR check):
+**`platform/bin/test-template-admission` — lab / disposable cluster only** (not a required PR check). PSA enforce applies to **Pods**, not Deployments — extract the Pod template and dry-run a real Pod:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 T="${1:?usage: test-template-admission <generated-service-name>}"
-kubectl create namespace "psa-probe-$T" --dry-run=client -o yaml \
+NS="psa-probe-$T"
+kubectl create namespace "$NS" --dry-run=client -o yaml \
   | kubectl label --local -f - \
       pod-security.kubernetes.io/enforce=restricted \
       pod-security.kubernetes.io/enforce-version=latest -o yaml \
   | kubectl apply -f -
-kubectl kustomize "deploy/$T/overlays/staging" \
-  | sed "s/namespace: .*/namespace: psa-probe-$T/" \
+# Build a Pod from the Deployment template (PSA evaluates Pod admission).
+kubectl kustomize "deploy/$T/overlays/staging" | python3 - "$NS" <<'PY' \
   | kubectl apply --dry-run=server -f -
-kubectl delete namespace "psa-probe-$T" --wait=false
-echo "template OK (admission dry-run)"
+import sys, yaml, copy
+ns = sys.argv[1]
+docs = list(yaml.safe_load_all(sys.stdin))
+dep = next(d for d in docs if d and d.get("kind") == "Deployment")
+pod = {
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": f"{dep['metadata']['name']}-psa",
+    "namespace": ns,
+    "labels": copy.deepcopy(dep["spec"]["template"].get("metadata", {}).get("labels") or {}),
+  },
+  "spec": copy.deepcopy(dep["spec"]["template"]["spec"]),
+}
+pod["spec"]["restartPolicy"] = "Never"
+yaml.safe_dump(pod, sys.stdout)
+PY
+# Negative: privileged Pod must be rejected by restricted PSA.
+set +e
+kubectl -n "$NS" apply --dry-run=server -f - <<'EOF' 2>/tmp/psa-deny.txt
+apiVersion: v1
+kind: Pod
+metadata: {name: psa-bad}
+spec:
+  containers:
+    - name: c
+      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000001
+      command: ["sleep", "1"]
+      securityContext: {privileged: true}
+EOF
+rc=$?; set -e
+[ "$rc" -ne 0 ] || { echo "FAIL: privileged Pod was admitted under restricted PSA"; exit 1; }
+grep -qiE 'privileged|pod security|violat' /tmp/psa-deny.txt \
+  || { echo "FAIL: rejection was not PSA (got: $(cat /tmp/psa-deny.txt))"; exit 1; }
+kubectl delete namespace "$NS" --wait=false
+echo "template OK (Pod PSA dry-run + privileged denial)"
 ```
 
-Wire `test-template` into a workflow on every change to `platform/` or the reusable workflows. Run `test-template-admission` on kind after Flux is up. (`.venv/` must be gitignored.) **Verify:** offline passes; breaking the template fails; admission dry-run rejects a Privileged copy.
+Wire `test-template` into a workflow on every change to `platform/` or the reusable workflows. Run `test-template-admission` on kind after Flux is up. (`.venv/` must be gitignored.) **Verify:** offline passes; breaking the template fails; valid Pod dry-run passes; privileged Pod is rejected.
 
 **Practice — reproduce:** Generate `hello-docs`, run its tests and `kubectl kustomize` its staging overlay. **Challenge:** resist adding a `--db` flag; write down why stateful services are *not* in v1 (P04 §4.6 shows the cost of getting this wrong).
 
@@ -692,44 +724,66 @@ deploys = [d for d in docs if d and d.get("kind") == "Deployment"]
 if not deploys:
     print("FAIL: no Deployment in rendered overlay"); sys.exit(1)
 SENTINEL = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+def check_container(c, *, require_probes):
+    name = c.get("name", "?")
+    img = c.get("image", "")
+    if ":latest" in img.split("@")[0]:
+        print(f"FAIL: container {name} uses :latest"); sys.exit(1)
+    if "@sha256:" not in img:
+        print(f"FAIL: container {name} image not digest-pinned: {img}"); sys.exit(1)
+    digest = img.rsplit("@", 1)[-1]
+    if digest == SENTINEL and allow != "--allow-unpromoted":
+        print(f"FAIL: container {name} still has UNPROMOTED sentinel digest"); sys.exit(1)
+    sc = c.get("securityContext") or {}
+    if sc.get("allowPrivilegeEscalation") is not False:
+        print(f"FAIL: container {name} missing allowPrivilegeEscalation: false"); sys.exit(1)
+    drop = [str(x) for x in ((sc.get("capabilities") or {}).get("drop") or [])]
+    if "ALL" not in drop:
+        print(f"FAIL: container {name} capabilities.drop missing ALL (got {drop})"); sys.exit(1)
+    res = c.get("resources") or {}
+    if "memory" not in (res.get("limits") or {}):
+        print(f"FAIL: container {name} missing memory limit"); sys.exit(1)
+    req = res.get("requests") or {}
+    if "cpu" not in req or "memory" not in req:
+        print(f"FAIL: container {name} missing cpu/memory requests"); sys.exit(1)
+    if require_probes:
+        if not c.get("readinessProbe"):
+            print(f"FAIL: container {name} missing readinessProbe"); sys.exit(1)
+        if not c.get("livenessProbe"):
+            print(f"FAIL: container {name} missing livenessProbe"); sys.exit(1)
+
 for d in deploys:
     spec = d["spec"]["template"]["spec"]
     psc = spec.get("securityContext") or {}
     if psc.get("runAsNonRoot") is not True:
         print("FAIL: pod runAsNonRoot != true"); sys.exit(1)
-    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
-        name = c.get("name", "?")
-        img = c.get("image", "")
-        if ":latest" in img.split("@")[0]:
-            print(f"FAIL: container {name} uses :latest"); sys.exit(1)
-        if "@sha256:" not in img:
-            print(f"FAIL: container {name} image not digest-pinned: {img}"); sys.exit(1)
-        digest = img.rsplit("@", 1)[-1]
-        if digest == SENTINEL and allow != "--allow-unpromoted":
-            print(f"FAIL: container {name} still has UNPROMOTED sentinel digest"); sys.exit(1)
-        sc = c.get("securityContext") or {}
-        if sc.get("allowPrivilegeEscalation") is not False:
-            print(f"FAIL: container {name} missing allowPrivilegeEscalation: false"); sys.exit(1)
-        drop = [str(x) for x in ((sc.get("capabilities") or {}).get("drop") or [])]
-        if "ALL" not in drop:
-            print(f"FAIL: container {name} capabilities.drop missing ALL (got {drop})"); sys.exit(1)
-        res = c.get("resources") or {}
-        if "memory" not in (res.get("limits") or {}):
-            print(f"FAIL: container {name} missing memory limit"); sys.exit(1)
-        req = res.get("requests") or {}
-        if "cpu" not in req or "memory" not in req:
-            print(f"FAIL: container {name} missing cpu/memory requests"); sys.exit(1)
-        if not c.get("readinessProbe"):
-            print(f"FAIL: container {name} missing readinessProbe"); sys.exit(1)
-        if not c.get("livenessProbe"):
-            print(f"FAIL: container {name} missing livenessProbe"); sys.exit(1)
+    for c in (spec.get("containers") or []):
+        check_container(c, require_probes=True)
+    # Init containers share the security/resource bar but do not use app probes.
+    for c in (spec.get("initContainers") or []):
+        check_container(c, require_probes=False)
 print("OK: structural Deployment security/resources")
 ' "$ALLOW" || bad "structural Deployment/securityContext check failed"
-# Manifest contract (always — before merge): generated tenant YAML must declare PSA + NetPol + safe quota.
+# Manifest contract (always — before merge): PSA + NetPol + quota keys via YAML (not comment grep).
 TENANT="platform/tenants/$NAME/tenant.yaml"
 grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" || bad "tenant manifest missing PSA enforce=restricted"
 grep -q 'name: default-deny-all' "$TENANT" || bad "tenant manifest missing default-deny-all"
-grep -qE 'limits\.cpu' "$TENANT" && bad "tenant quota sets limits.cpu (conflicts with optional CPU limits)"
+python3 - "$TENANT" <<'PY' || bad "tenant ResourceQuota inspect failed"
+import sys, yaml
+from pathlib import Path
+docs = list(yaml.safe_load_all(Path(sys.argv[1]).read_text()))
+quotas = [d for d in docs if d and d.get("kind") == "ResourceQuota"]
+if not quotas:
+    print("FAIL: no ResourceQuota in tenant manifest"); sys.exit(1)
+for q in quotas:
+    hard = (q.get("spec") or {}).get("hard") or {}
+    # Keys may be strings like "limits.cpu" — inspect the hard map, ignore comments.
+    if "limits.cpu" in hard:
+        print(f"FAIL: ResourceQuota {q.get('metadata',{}).get('name')} sets hard[limits.cpu]={hard['limits.cpu']}")
+        sys.exit(1)
+print("OK: ResourceQuota has no hard limits.cpu")
+PY
 # Effective-policy test (after Flux reconciles) — required post-deploy; object existence alone is not isolation.
 TENANT_NS="$NAME-staging"
 if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then
