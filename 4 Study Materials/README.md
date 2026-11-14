@@ -16,4 +16,4 @@ This folder contains the **textbooks and progressive teaching materials** for th
 
 ## Platform Engineering textbook
 
-[Read the Platform Engineering textbook](4.4%20Platform%20Engineering/README.md) — **P01–P04** authored; remediations after audit `82e50a6` **awaiting re-review** (not signed off). Course-detail under [Platform Engineering](../3%20Course%20Detail/3.4%20Platform%20Engineering/).
+[Read the Platform Engineering textbook](4.4%20Platform%20Engineering/README.md) — **P01–P04** authored; Gate 1 remediations against audit baseline `c37e25d` **awaiting re-review** (not signed off). See [review-status.yaml](../1%20Foundational%20Documents/review-status.yaml). Course-detail under [Platform Engineering](../3%20Course%20Detail/3.4%20Platform%20Engineering/).

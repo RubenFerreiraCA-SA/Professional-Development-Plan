@@ -1,0 +1,48 @@
+# Evidence register for Gates 2–3. Append runs; do not delete history.
+schema_version: 1
+programme: Professional-Development-Plan
+audit_baseline_commit: c37e25d
+
+entries:
+  - id: offline-unit-2026-11-14
+    gate: gate2-partial
+    date: "2026-11-14"
+    actor: author
+    toolchain: reference/harbour/TOOLCHAIN.md
+    commands:
+      - python3 -m unittest discover -s reference/harbour/tests -v
+    result: pass
+    notes: Offline parser, promote-verify, restore-compare, tenant-contract tests.
+    artifacts:
+      - reference/harbour/tests/
+
+  - id: cleanroom-full
+    gate: gate2
+    date: null
+    actor: null
+    result: pending
+    notes: Full kind-based Harbour clean-room not yet executed.
+
+  - id: independent-trial-p03
+    gate: gate3
+    date: null
+    actor: null
+    result: pending
+    notes: See reference/harbour/INDEPENDENT-TRIAL.md
+
+  - id: independent-trial-p04-gate5
+    gate: gate3
+    date: null
+    actor: null
+    result: pending
+    notes: ACCEPT-001 / Gate-5 protocol
+
+  - id: stateful-recovery
+    gate: gate3
+    date: null
+    actor: author
+    result: author-verified-only
+    classification: author-verified-only
+    notes: >
+      Until an independent operator trial is recorded, stateful recovery remains
+      author-verified-only per audit recommendation.

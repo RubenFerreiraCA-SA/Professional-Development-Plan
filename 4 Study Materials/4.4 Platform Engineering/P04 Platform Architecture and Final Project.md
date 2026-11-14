@@ -6,7 +6,18 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; remediations addressing review of `6fbd29c` (effective rendered promotion, ephemeral coverage, shared deny parser, full-snapshot operator check, gh checksum) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; Gate 1 remediations against audit baseline `c37e25d` — **awaiting re-review (not signed off)**. See [review-status.yaml](../../1%20Foundational%20Documents/review-status.yaml). Canonical scripts: [reference/harbour/](../../reference/harbour/) |
+
+> **Canonical Harbour examples** live in [`../../reference/harbour/`](../../reference/harbour/) — textbooks cite those files as source of truth. When a fenced example and a reference file diverge, trust the reference tree.
+
+### Dependency and deliverables map
+
+| | |
+| --- | --- |
+| **Prior chapters** | P01–P03 (golden path, tenants, Flux); D04/D06 (trusted build, GitOps); C03 optional |
+| **Files you create** | ADRs 0306–0312; `docs/final/INTEGRATED-OUTCOME.md`; policy + promotion workflows; Postgres component; stateful drill evidence; acceptance + defence packs |
+| **Copy from reference** | [`reference/harbour/`](../../reference/harbour/) scripts, workflows, fixtures, `TOOLCHAIN.md` |
+| **End state** | Five integrated outcomes evidenced; independent acceptance recorded; Final Project P04 rows defensible |
 
 ## How to study this chapter
 
@@ -179,7 +190,7 @@ Create `docs/final/LIMITATIONS.md` now, not the night before the demo. One row p
 
 ## Section 4.3 — Outcome 1: a developer creates a service
 
-> **Integrated pathway (run once before claiming P03+P04 together):** boundaries between chapters are where earlier audits found defects. Prefer this sequence over isolated chapter checks: (1) `harbour-new-service` from P03’s CLI; (2) rendered manifests pass restricted PSA dry-run **and** `harbour-policy-check` / Kyverno; (3) build + attest + release-manifest artifact; (4) promote with attestation checked against `platform/policy/approved-signer-workflows.txt` (fully-qualified signer paths, not display names); (5) Flux deploys the exact verified digest (`imageID` match); (6) add the Postgres dependency and re-run allow/deny NetworkPolicy matrix; (7) seed → verified backup → damage → Flux-suspended maintenance → restore with full snapshot equivalence; (8) resume reconciliation and confirm the app serves the restored records. Record the run under `docs/final/INTEGRATED-OUTCOME.md`.
+> **Integrated pathway (run once before claiming P03+P04 together):** boundaries between chapters are where earlier audits found defects. Prefer this sequence over isolated chapter checks: (1) `harbour-new-service` from P03’s CLI; (2) rendered manifests pass restricted PSA dry-run **and** `harbour-policy-check` / Kyverno; (3) build + attest + release-manifest artifact; (4) promote with attestation checked against `platform/policy/approved-signer-workflows.txt` (fully-qualified signer paths, not display names); (5) Flux deploys the exact verified digest (`imageID` match); (6) add the Postgres dependency and re-run allow/deny NetworkPolicy matrix; (7) seed → verified backup → damage → Flux-suspended maintenance → restore → prove snapshot equivalence with `restore-verify-before-resume.sh`; (8) only then resume reconciliation and confirm the app serves the restored records. Record the run under `docs/final/INTEGRATED-OUTCOME.md`.
 
 Use the **P03 scaffold** exactly as a trial user would. Create the integrated demo service on a feature branch:
 
@@ -443,151 +454,20 @@ echo "VERIFIED: $REF signer=$SIGNER commit=$EXPECT_COMMIT on $REQUIRE_BRANCH@$TI
 
 Always-on required check `.github/workflows/promotion-verify.yml`. Diff failures and multi-image overlays **fail closed** (never treat as docs-only / empty verification):
 
-```yaml
-name: promotion-verify
-on:
-  pull_request:
-permissions:
-  contents: read
-  attestations: read
-  packages: read
-jobs:
-  gate:
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      HARBOUR_EXPECT_REPO: ${{ github.repository }}
-      HARBOUR_REQUIRE_BRANCH: main
-      # Pin a patched GitHub CLI (≥ 2.102.0) with frozen checksum.
-      GH_VERSION: "2.102.0"
-      GH_TARBALL_SHA256: "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386"
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: azure/setup-kubectl@v4
-        with: {version: v1.31.0}
-      - name: Install pinned gh (checksum-verified)
-        run: |
-          set -euo pipefail
-          curl -fsSL -o gh.tgz \
-            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
-          echo "${GH_TARBALL_SHA256}  gh.tgz" | sha256sum -c -
-          tar -xzf gh.tgz
-          sudo install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
-          gh --version | grep -F "$GH_VERSION"
-      - name: Verify effective rendered images for affected services
-        run: |
-          set -euo pipefail
-          # Fail closed on git diff errors — never || true into an empty skip.
-          set +e
-          DIFF_OUT="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
-            'deploy/' 2>/tmp/harbour-diff.err)"
-          DIFF_RC=$?
-          set -e
-          [ "$DIFF_RC" -eq 0 ] || {
-            echo "FAIL: git diff failed (cannot determine changed deploy files)"; cat /tmp/harbour-diff.err; exit 1; }
-          # Map every changed path under deploy/<svc>/… to a service name.
-          mapfile -t SVCS < <(printf '%s\n' "$DIFF_OUT" | awk -F/ '$1=="deploy" && NF>=2 {print $2}' | sort -u)
-          if [ "${#SVCS[@]}" -eq 0 ] || [ -z "${SVCS[0]:-}" ]; then
-            echo "No deploy/ changes — gate reports success (D04 always-on pattern)."
-            exit 0
-          fi
-          ALLOW="platform/policy/approved-signer-workflows.txt"
-          [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
-          SENTINEL="sha256:0000000000000000000000000000000000000000000000000000000000000000"
-          VERIFIED=0
-          for svc in "${SVCS[@]}"; do
-            OVERLAY="deploy/${svc}/overlays/staging/kustomization.yaml"
-            [ -f "$OVERLAY" ] || { echo "FAIL: changed deploy/${svc} but missing $OVERLAY"; exit 1; }
-            # Unpromoted scaffold: overlay still has sentinel + replicas count 0.
-            is_unpromoted="$(python3 - "$OVERLAY" "$SENTINEL" <<'PY'
-import sys, yaml
-from pathlib import Path
-doc = yaml.safe_load(Path(sys.argv[1]).read_text()) or {}
-sentinel = sys.argv[2]
-images = [i for i in (doc.get("images") or []) if isinstance(i, dict)]
-digests = [i.get("digest") for i in images if i.get("digest")]
-replicas = [r for r in (doc.get("replicas") or []) if isinstance(r, dict)]
-if len(images) != 1:
-    print("no"); sys.exit(0)
-all_disabled = bool(replicas) and all(r.get("count") == 0 for r in replicas)
-only_sentinel = digests == [sentinel]
-print("yes" if only_sentinel and all_disabled else "no")
-PY
-)"
-            if [ "$is_unpromoted" = "yes" ]; then
-              echo "skip $svc (unpromoted sentinel + replicas 0)"
-              continue
-            fi
-            # Effective images = what Kubernetes receives after Kustomize (base + overlay).
-            # Checking only overlay images[] is NOT equivalent — base image refs can bypass.
-            set +e
-            kubectl kustomize "deploy/${svc}/overlays/staging" \
-              >/tmp/harbour-rendered.yaml 2>/tmp/kust.err
-            KUST_RC=$?
-            set -e
-            [ "$KUST_RC" -eq 0 ] || { echo "FAIL: kustomize deploy/${svc}/overlays/staging"; cat /tmp/kust.err; exit 1; }
-            set +e
-            # Heredoc owns stdin — pass rendered YAML as a file arg, not a pipe.
-            IMAGE_DATA="$(python3 - "$SENTINEL" /tmp/harbour-rendered.yaml <<'PY'
-import sys, yaml, json
-from pathlib import Path
-sentinel = sys.argv[1]
-docs = list(yaml.safe_load_all(Path(sys.argv[2]).read_text()))
-refs = []
-for d in docs:
-    if not d or d.get("kind") not in {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}:
-        continue
-    if d["kind"] == "CronJob":
-        spec = (((d.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template", {}).get("spec") or {}
-    else:
-        spec = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
-    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
-        img = c.get("image") or ""
-        if "@sha256:" not in img:
-            print(f"FAIL: rendered {d.get('kind')}/{d.get('metadata',{}).get('name')} image not digest-pinned: {img}", file=sys.stderr)
-            sys.exit(1)
-        name, digest = img.rsplit("@", 1)
-        refs.append({"image": name, "digest": digest, "ref": img})
-if not refs:
-    print("FAIL: no workload containers in rendered overlay", file=sys.stderr); sys.exit(1)
-digests = sorted({r["digest"] for r in refs})
-if sentinel in digests:
-    print("FAIL: rendered workload still references UNPROMOTED sentinel digest", file=sys.stderr); sys.exit(1)
-print(json.dumps({"refs": refs, "digests": digests}))
-PY
-)"
-            IMG_RC=$?
-            set -e
-            [ "$IMG_RC" -eq 0 ] || { echo "FAIL: rendered-image extraction for $svc"; exit 1; }
-            [ -n "$IMAGE_DATA" ] || { echo "FAIL: empty rendered-image result for $svc"; exit 1; }
-            # Verify every distinct digest against release manifest + attestation.
-            while IFS= read -r dig; do
-              [ -n "$dig" ] || continue
-              # Prefer the ref whose digest matches (newName@digest).
-              img="$(printf '%s' "$IMAGE_DATA" | jq -r --arg d "$dig" '.refs[] | select(.digest==$d) | .image' | head -1)"
-              [ -n "$img" ] && [ "$img" != null ] || { echo "FAIL: no image name for digest $dig"; exit 1; }
-              MAN="docs/releases/${svc}/${dig}.json"
-              [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (base or overlay changed effective image)"; exit 1; }
-              commit="$(jq -r .commit "$MAN")"
-              [ "$(jq -r .image "$MAN")" = "${img}@${dig}" ] \
-                || { echo "FAIL: manifest image does not match rendered ${img}@${dig}"; exit 1; }
-              platform/bin/harbour-verify-artifact "${img}@${dig}" \
-                --approved-workflows-file "$ALLOW" \
-                --expect-commit "$commit" \
-                --require-branch "$HARBOUR_REQUIRE_BRANCH"
-              VERIFIED=$((VERIFIED + 1))
-            done < <(printf '%s' "$IMAGE_DATA" | jq -r '.digests[]')
-          done
-          # If every changed service was unpromoted-only, VERIFIED may be 0 — that is OK.
-          echo "OK: promotion-verify complete (attestations_run=$VERIFIED)"
-```
+**Canonical workflow + helper** (copy into your Harbour repo; do not maintain a divergent textbook copy):
+- [`reference/harbour/.github/workflows/promotion-verify.yml`](../../reference/harbour/.github/workflows/promotion-verify.yml)
+- [`reference/harbour/platform/bin/harbour-promote-verify-images.py`](../../reference/harbour/platform/bin/harbour-promote-verify-images.py)
+
+> **Gate 1 remediations:** **C-02** — render the overlay first (`kubectl kustomize`); skip attestation only when **all** rendered workloads are disabled (unpromoted sentinel + replicas 0). **H-02** — verify **every** complete image reference (not merely distinct digests); fail closed if enumeration yields zero refs.
 
 **Promotion hand-off (P03 → P04):** download artifact `release-manifest-<svc>-<sha>` into `docs/releases/<svc>/<digest>.json` before opening the promotion PR. The gate verifies **rendered** workload images (`kubectl kustomize`), so a base-only `deployment.yaml` change cannot silently skip provenance.
 
 Create and protect `platform/policy/approved-signer-workflows.txt` — one **fully-qualified signing-workflow path** per line, e.g. `your-org/harbour-platform/.github/workflows/service-release.yml`. CODEOWNERS: platform reviewers only. Display names are informational only.
 
-**Required negative tests:** (1) fabricated digest fails; (2) missing manifest fails; (3) non-allow-listed signer path fails; (4) real digest + `UNPROMOTED` comment still verifies; (5) commit not on `main` fails; (6) multi-image / undigested render fails; (7) **base-only** image change without matching release manifest fails; (8) broken git base-ref fails the gate; (9) docs-only PR succeeds.
+**Required negative tests:** (1) fabricated digest fails; (2) missing manifest fails; (3) non-allow-listed signer path fails; (4) real digest + `UNPROMOTED` comment still verifies; (5) commit not on `main` fails; (6) multi-image / undigested render fails; (7) **base-only** image change without matching release manifest fails; (8) broken git base-ref fails the gate; (9) docs-only PR succeeds; (10) **base-only second runnable workload** (extra Deployment/Job with an unapproved digest) must fail; (11) **two repos sharing one digest** must both verify (per-ref, not per-digest-only).
+
+
+> **Checkpoint — promotion:** `promotion-verify` is always-on; rendered images are verified via the canonical helper; negative tests (1)–(11) recorded.
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -624,11 +504,11 @@ Document it in `docs/platform/environments.md`: environment, who may promote, re
 
 ### 4.5.2 Policy as code: CI and admission
 
-Policy in CI gives fast feedback; policy at admission catches everything that bypasses CI. Use the **same** rules in both. Install Kyverno (pin the chart version you tested):
+Policy in CI gives fast feedback; policy at admission catches everything that bypasses CI. Use the **same** rules in both. Install Kyverno with the pin from [`TOOLCHAIN.md`](../../reference/harbour/TOOLCHAIN.md) (**H-04** — never float `latest`):
 
 ```bash
 helm repo add kyverno https://kyverno.github.io/kyverno/ && helm repo update
-helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace
+helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace --version 3.3.4
 kubectl -n kyverno rollout status deploy --timeout=180s
 ```
 
@@ -706,416 +586,34 @@ Confirm autogen is active. If your Kyverno version does not autogen Pod→Deploy
 
 **Shared report parser** — one module, used by the positive path, negative fixtures, and unit tests (do not duplicate denial rules inline):
 
-```python
-# platform/bin/kyverno_deny.py — single source of truth for PolicyReport acceptance
-"""Parse Kyverno --policy-report YAML; decide pass/denial outcomes."""
-from __future__ import annotations
-import sys
-from pathlib import Path
-import yaml
+**Canonical module:** [`reference/harbour/platform/bin/kyverno_deny.py`](../../reference/harbour/platform/bin/kyverno_deny.py)
 
-# Every rule declared in harbour-baseline.yaml must appear here.
-EXPECTED_RULES = (
-    "require-image-digest",
-    "require-nonroot-memory-limit",
-    "require-ephemeral-no-privilege",
-)
+> **Gate 1 remediation (H-03):** `warn` is rejected (fail-closed); multi-document PolicyReports are merged; optional `expected_resources` coverage fails if a required resource never appears. Offline unit coverage: [`reference/harbour/tests/test_kyverno_deny.py`](../../reference/harbour/tests/test_kyverno_deny.py).
 
-def result_of(r: dict) -> str:
-    return str(r.get("result") or r.get("status") or "").lower()
+**Canonical offline checker:** [`reference/harbour/platform/bin/harbour-policy-check`](../../reference/harbour/platform/bin/harbour-policy-check) — for required PR checks. Pin the Kyverno CLI (**v1.13.4**, see `TOOLCHAIN.md`) and **fail closed** on fail/skip/warn/missing rules. That pin emits a YAML `ClusterPolicyReport` via `--policy-report`; parse via `kyverno_deny.py` (wgpolicyk8s.io/v1alpha2).
 
-def load_report(text: str) -> dict:
-    if not (text or "").strip():
-        raise ValueError("empty report")
-    idx = text.find("apiVersion:")
-    if idx < 0:
-        raise ValueError("no PolicyReport YAML")
-    docs = list(yaml.safe_load_all(text[idx:]))
-    rep = next((d for d in docs if isinstance(d, dict) and "results" in d), None)
-    if rep is None and docs:
-        rep = docs[0]
-    if not isinstance(rep, dict):
-        raise ValueError("unparseable report")
-    return rep
+Negative and positive fixtures live under [`reference/harbour/tests/fixtures/`](../../reference/harbour/tests/fixtures/) (mutable tag, missing memory limit, bad init, privileged ephemeral, good ephemeral). Copy them into `platform/policy/fixtures/` (or point the checker at the reference tree) and keep them in sync with the canonical suite.
 
-def outcomes(rep: dict) -> list[tuple[str, str]]:
-    out = []
-    for r in (rep.get("results") or []):
-        if not isinstance(r, dict):
-            continue
-        rule = str(r.get("rule") or r.get("policy") or "")
-        result = result_of(r)
-        if rule and result in {"pass", "fail", "skip", "warn", "error"}:
-            out.append((rule, result))
-    return out
+Complete required PR workflow `.github/workflows/policy.yml` (always-on; no cluster credentials). Pin CLI **and** verify the tarball checksum (record the SHA256 from the Kyverno release assets for your pin).
 
-def denial_verdict(want: str, rep: dict) -> str:
-    """accept | reject-missing | reject-mixed — fail alone is a clean denial."""
-    found_fail, bad = False, []
-    for rule, result in outcomes(rep):
-        if want not in rule:
-            continue
-        if result == "fail":
-            found_fail = True
-        elif result in {"error", "skip", "warn"}:
-            bad.append(result)
-    if bad:
-        return "reject-mixed"
-    if not found_fail:
-        return "reject-missing"
-    return "accept"
+**Canonical workflow:** [`reference/harbour/.github/workflows/policy.yml`](../../reference/harbour/.github/workflows/policy.yml)
 
-def assert_expected_passes(rep: dict, apply_rc: int, expected=EXPECTED_RULES) -> None:
-    got = outcomes(rep)
-    if not got:
-        raise SystemExit("FAIL: PolicyReport.results empty — pin CLI and capture a real report sample")
-    by_rule = {r: [] for r in expected}
-    for rule, result in got:
-        for exp in expected:
-            if exp in rule or rule == exp:
-                by_rule[exp].append(result)
-    for exp in expected:
-        vals = by_rule[exp]
-        if not vals:
-            raise SystemExit(f"FAIL: expected rule {exp} never evaluated")
-        if any(r in {"fail", "error", "skip"} for r in vals):
-            raise SystemExit(f"FAIL: rule {exp} results={vals}")
-        if not any(r == "pass" for r in vals):
-            raise SystemExit(f"FAIL: rule {exp} has no pass result: {vals}")
-    if apply_rc != 0:
-        raise SystemExit(f"FAIL: kyverno apply exited {apply_rc}")
-```
-
-`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (**v1.13.4** below) and **fail closed** on fail/skip/missing rules. That pin emits a YAML `ClusterPolicyReport` via `--policy-report`; parse via `kyverno_deny.py` (wgpolicyk8s.io/v1alpha2).
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-NAME="${1:?service}"
-POLICY="platform/policy/harbour-baseline.yaml"
-FIXDIR="platform/policy/fixtures"
-KYVERNO_VERSION="${KYVERNO_VERSION:-1.13.4}"
-BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
-export PYTHONPATH="${BIN_DIR}${PYTHONPATH:+:$PYTHONPATH}"
-mkdir -p "$FIXDIR" /tmp/harbour-policy
-command -v kyverno >/dev/null || {
-  echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
-kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
-# Kyverno CLI (pinned v1.13.4): use --policy-report (YAML). Do NOT use -o (mutate path)
-# and do NOT return nonzero from a helper under set -e — that aborts before rc capture.
-run_kyverno_report() {
-  local resource="$1" out="$2" err="$3" rc
-  if kyverno apply "$POLICY" --resource "$resource" --policy-report >"$out" 2>"$err"; then
-    rc=0
-  else
-    rc=$?
-  fi
-  printf '%s' "$rc"
-}
-APPLY_RC="$(run_kyverno_report /tmp/harbour-policy/rendered.yaml \
-  /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err)"
-python3 - "$APPLY_RC" <<'PY'
-import sys
-from pathlib import Path
-from kyverno_deny import load_report, assert_expected_passes
-apply_rc = int(sys.argv[1])
-raw = Path("/tmp/harbour-policy/report.yaml").read_text()
-try:
-    rep = load_report(raw)
-except ValueError as e:
-    print(f"FAIL: {e}; see apply.err"); sys.exit(1)
-assert_expected_passes(rep, apply_rc)
-print("OK: offline PolicyReport — all EXPECTED_RULES evaluated and passed")
-PY
-
-# Negative fixtures — prove the *intended* rule *failed* the fixture.
-# Kyverno: fail = policy violation; error = evaluation could not complete.
-# Only denial_verdict==accept (clean result=fail) counts. error/skip/missing → harness failure.
-must_deny_rule() {
-  local f="$1" rule="$2" rc
-  rc="$(run_kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err)"
-  python3 - "$rule" "$rc" <<'PY'
-import sys
-from pathlib import Path
-from kyverno_deny import load_report, denial_verdict, outcomes
-want, apply_rc = sys.argv[1], int(sys.argv[2])
-raw = Path("/tmp/harbour-policy/neg.yaml").read_text()
-err = Path("/tmp/harbour-policy/neg.err").read_text()
-try:
-    rep = load_report(raw)
-except ValueError as e:
-    print(f"FAIL: tool error ({e}), not a policy denial:", err[:400]); sys.exit(1)
-verdict = denial_verdict(want, rep)
-matched = outcomes(rep)[:12]
-if verdict == "reject-mixed":
-    print(f"FAIL: rule {want} has non-fail outcomes (mixed reports are not a clean denial); saw={matched}")
-    sys.exit(1)
-if verdict != "accept":
-    print(f"FAIL: did not observe rule {want} result=fail; saw={matched} rc={apply_rc}")
-    sys.exit(1)
-print(f"OK: rule {want} denied fixture with clean result=fail (kyverno_rc={apply_rc})")
-PY
-}
-# Unit-test the *same* denial_verdict implementation (no inline copy).
-python3 <<'PY'
-import yaml
-from kyverno_deny import denial_verdict, load_report
-cases = [
-    ("pass-only", [{"rule": "require-image-digest", "result": "pass"}], "reject-missing"),
-    ("fail-only", [{"rule": "require-image-digest", "result": "fail"}], "accept"),
-    ("error-only", [{"rule": "require-image-digest", "result": "error"}], "reject-mixed"),
-    ("fail+error", [
-        {"rule": "require-image-digest", "result": "fail"},
-        {"rule": "require-image-digest", "result": "error"},
-    ], "reject-mixed"),
-    ("skip", [{"rule": "require-image-digest", "result": "skip"}], "reject-mixed"),
-    ("empty", [], "reject-missing"),
-]
-for name, results, expect in cases:
-    doc = {"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReport", "results": results}
-    got = denial_verdict("require-image-digest", load_report(yaml.safe_dump(doc)))
-    assert got == expect, f"{name}: want {expect} got {got}"
-print("OK: denial-parser unit fixtures (shared kyverno_deny)")
-PY
-cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata: {name: bad-tag, namespace: default}
-spec:
-  containers:
-    - name: c
-      image: nginx:latest
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-EOF
-cat > "$FIXDIR/bad-no-memory-limit.yaml" <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata: {name: bad-mem, namespace: default}
-spec:
-  containers:
-    - name: c
-      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
-      resources: {requests: {cpu: 10m, memory: 16Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-EOF
-# Compliant app container + noncompliant init container (digest) must fail.
-cat > "$FIXDIR/bad-init-mutable-tag.yaml" <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata: {name: bad-init, namespace: default}
-spec:
-  initContainers:
-    - name: init
-      image: busybox:latest
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  containers:
-    - name: c
-      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-EOF
-# Compliant app + privileged ephemeral container must fail require-ephemeral-no-privilege.
-cat > "$FIXDIR/bad-ephemeral-privileged.yaml" <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata: {name: bad-ephem, namespace: default}
-spec:
-  containers:
-    - name: c
-      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  ephemeralContainers:
-    - name: dbg
-      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002
-      securityContext: {allowPrivilegeEscalation: true}
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-EOF
-# Positive ephemeral fixture — digest + no privilege escalation must pass all three rules.
-cat > "$FIXDIR/good-ephemeral.yaml" <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata: {name: good-ephem, namespace: default}
-spec:
-  containers:
-    - name: c
-      image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-  ephemeralContainers:
-    - name: dbg
-      image: busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002
-      securityContext: {allowPrivilegeEscalation: false}
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-EOF
-GOOD_RC="$(run_kyverno_report "$FIXDIR/good-ephemeral.yaml" \
-  /tmp/harbour-policy/good-ephem.yaml /tmp/harbour-policy/good-ephem.err)"
-python3 - "$GOOD_RC" <<'PY'
-import sys
-from pathlib import Path
-from kyverno_deny import load_report, assert_expected_passes
-rep = load_report(Path("/tmp/harbour-policy/good-ephem.yaml").read_text())
-assert_expected_passes(rep, int(sys.argv[1]))
-print("OK: good-ephemeral fixture — all three rules passed")
-PY
-must_deny_rule "$FIXDIR/bad-mutable-tag.yaml" "require-image-digest"
-must_deny_rule "$FIXDIR/bad-no-memory-limit.yaml" "require-nonroot-memory-limit"
-must_deny_rule "$FIXDIR/bad-init-mutable-tag.yaml" "require-image-digest"
-must_deny_rule "$FIXDIR/bad-ephemeral-privileged.yaml" "require-ephemeral-no-privilege"
-# Broken-policy fixture: harness must fail closed on evaluation errors (not treat as denial).
-cat > "$FIXDIR/broken-policy.yaml" <<'EOF'
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata: {name: harbour-broken}
-spec:
-  rules:
-    - name: broken-rule
-      match: {any: [{resources: {kinds: [Pod]}}]}
-      validate:
-        failureAction: Enforce
-        message: "intentionally broken CEL"
-        cel:
-          expressions:
-            - expression: "this.is.not.valid.cel{{{{"
-EOF
-set +e
-kyverno apply "$FIXDIR/broken-policy.yaml" --resource "$FIXDIR/bad-mutable-tag.yaml" --policy-report \
-  >/tmp/harbour-policy/broken.yaml 2>/tmp/harbour-policy/broken.err
-BROKEN_RC=$?
-set -e
-python3 - "$BROKEN_RC" <<'PY'
-import sys, yaml
-from pathlib import Path
-rc = int(sys.argv[1])
-raw = Path("/tmp/harbour-policy/broken.yaml").read_text()
-err = Path("/tmp/harbour-policy/broken.err").read_text()
-idx = raw.find("apiVersion:")
-statuses = []
-if idx >= 0:
-    docs = list(yaml.safe_load_all(raw[idx:]))
-    rep = next((d for d in docs if isinstance(d, dict)), {}) or {}
-    statuses = [str(r.get("result") or r.get("status") or "").lower()
-                for r in (rep.get("results") or []) if isinstance(r, dict)]
-# Fail closed: broken policy must not look like a clean result=fail denial proof.
-if "fail" in statuses and "error" not in statuses and rc == 0:
-    print("FAIL: broken policy looked like a clean denial", statuses, "rc", rc); sys.exit(1)
-if rc != 0 or "error" in statuses or not raw.strip():
-    print("OK: broken policy produced error/nonzero/empty — not counted as enforcement proof")
-    sys.exit(0)
-print("FAIL: broken policy outcome ambiguous", statuses, "rc", rc, err[:200]); sys.exit(1)
-PY
-echo "OK: offline policy check for $NAME"
-```
-
-Complete required PR workflow `.github/workflows/policy.yml` (always-on; no cluster credentials). Pin CLI **and** verify the tarball checksum (record the SHA256 from the Kyverno release assets for your pin):
-
-```yaml
-name: policy
-on:
-  pull_request:
-permissions: {contents: read}
-jobs:
-  harbour-policy:
-    runs-on: ubuntu-latest
-    env:
-      KYVERNO_VERSION: "1.13.4"
-      # Frozen for kyverno-cli_v1.13.4_linux_x86_64.tar.gz (GitHub release checksums.txt).
-      KYVERNO_TARBALL_SHA256: "abd318dbb971ab6de2bbe3b7226f4a03230d5c9c651df8a29b6b5e085a55aeeb"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-kubectl@v4
-        with: {version: v1.31.0}
-      - name: Install Kyverno CLI (checksum-verified)
-        run: |
-          set -euo pipefail
-          curl -fsSL -o kyverno.tar.gz \
-            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
-          echo "${KYVERNO_TARBALL_SHA256}  kyverno.tar.gz" | sha256sum -c -
-          tar -xzf kyverno.tar.gz kyverno
-          sudo install -m 0755 kyverno /usr/local/bin/kyverno
-          kyverno version | tee /tmp/kyverno-version.txt
-          grep -q "$KYVERNO_VERSION" /tmp/kyverno-version.txt
-      - name: Offline policy for every service overlay
-        run: |
-          set -euo pipefail
-          mapfile -t SVCS < <(find deploy -path '*/overlays/staging' -type d | sed -E 's#^deploy/([^/]+)/.*#\1#' | sort -u)
-          [ "${#SVCS[@]}" -ge 1 ] || { echo "no staging overlays"; exit 1; }
-          for s in "${SVCS[@]}"; do
-            platform/bin/harbour-policy-check "$s"
-          done
-```
+> **Gate 1 remediation (C-01):** the job now runs `harbour-check-service` for **every** tenant under `platform/tenants/` **and** `harbour-policy-check` for every staging overlay — not only when `deploy/` changes.
 
 **Required-check tests:** (1) PR that introduces `image: nginx:latest` must fail `policy`; (2) docs-only PR must still get a completed `policy` check (always-on). Live `harbour-policy-admit` stays lab-only.
 
-`platform/bin/harbour-policy-admit` — **lab/integration only** (not the PR required check). Isolates Kyverno digest denial from PSA rejection by using a restricted-compliant Pod that only violates the image rule, then proves the ephemeral rule against the real `pods/ephemeralcontainers` subresource (`kubectl debug` / patch), not offline Pod YAML alone:
+> **Checkpoint — policy CI:** `policy` always reports; tenant contract (C-01) + offline Kyverno fixtures green; mutable-tag PR fails the required check.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-NS="${1:?namespace}"
-DIGEST_IMG="nginx@sha256:0000000000000000000000000000000000000000000000000000000000000001"
-DBG_IMG="busybox@sha256:0000000000000000000000000000000000000000000000000000000000000002"
-kubectl -n "$NS" delete pod policy-probe-tag policy-probe-ephem --ignore-not-found --wait=false
-set +e
-kubectl -n "$NS" apply -f - <<EOF 2>/tmp/adm-kyverno.txt
-apiVersion: v1
-kind: Pod
-metadata: {name: policy-probe-tag}
-spec:
-  restartPolicy: Never
-  automountServiceAccountToken: false
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-  containers:
-    - name: c
-      image: nginx:latest
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-EOF
-rc=$?; set -e
-[ "$rc" -ne 0 ] || { echo "FAIL: admission accepted nginx:latest"; exit 1; }
-grep -qiE 'harbour-baseline|require-image-digest|digest' /tmp/adm-kyverno.txt \
-  || { echo "FAIL: rejection was not Kyverno digest rule (got: $(cat /tmp/adm-kyverno.txt))"; exit 1; }
-echo "OK: Kyverno admission denied mutable tag (distinct from PSA)"
+`platform/bin/harbour-policy-admit` — **lab/integration only** (not the PR required check). Isolates Kyverno digest denial from PSA rejection by using a restricted-compliant Pod that only violates the image rule, then proves the ephemeral rule against the real `pods/ephemeralcontainers` subresource (`kubectl debug` / patch), not offline Pod YAML alone.
 
-# Live ephemeralcontainers subresource — privileged debug must be denied.
-kubectl -n "$NS" apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata: {name: policy-probe-ephem}
-spec:
-  restartPolicy: Never
-  automountServiceAccountToken: false
-  securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
-  containers:
-    - name: c
-      image: ${DIGEST_IMG}
-      command: ["sleep", "3600"]
-      resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-EOF
-kubectl -n "$NS" wait --for=condition=Ready pod/policy-probe-ephem --timeout=60s
-set +e
-kubectl -n "$NS" patch pod policy-probe-ephem --subresource=ephemeralcontainers --type=json \
-  -p="[
-    {\"op\":\"add\",\"path\":\"/spec/ephemeralContainers\",\"value\":[
-      {\"name\":\"dbg\",\"image\":\"${DBG_IMG}\",\"command\":[\"sleep\",\"60\"],
-       \"securityContext\":{\"allowPrivilegeEscalation\":true}}
-    ]}
-  ]" 2>/tmp/adm-ephem.txt
-ephem_rc=$?; set -e
-[ "$ephem_rc" -ne 0 ] || { echo "FAIL: ephemeralcontainers accepted privileged debug"; exit 1; }
-grep -qiE 'harbour-baseline|require-ephemeral-no-privilege|privilege' /tmp/adm-ephem.txt \
-  || { echo "FAIL: rejection was not ephemeral privilege rule (got: $(cat /tmp/adm-ephem.txt))"; exit 1; }
-echo "OK: Kyverno denied privileged pods/ephemeralcontainers update"
-kubectl -n "$NS" delete pod policy-probe-ephem --ignore-not-found --wait=false
-```
+**Canonical script:** [`reference/harbour/platform/bin/harbour-policy-admit`](../../reference/harbour/platform/bin/harbour-policy-admit)
 
-**Required standard:** same forbidden configuration fails offline CI and (in the lab) at admission — including the ephemeralcontainers subresource path; skipped rules are not passes; PSA vs Kyverno vs RBAC denials are distinguishable in evidence. Replace placeholder digests with pullable digests in your lab registry.
+> **Gate 1 remediation (M-01):** require `HARBOUR_PULLABLE_DIGEST_IMG` and `HARBOUR_PULLABLE_DBG_IMG` (pullable `image@sha256:…` refs). Resolve them with the helpers in [`TOOLCHAIN.md`](../../reference/harbour/TOOLCHAIN.md); do not use non-pullable placeholder digests for live admission.
+
+**Required standard:** same forbidden configuration fails offline CI and (in the lab) at admission — including the ephemeralcontainers subresource path; skipped rules are not passes; PSA vs Kyverno vs RBAC denials are distinguishable in evidence. Live admit requires pullable digests via `HARBOUR_PULLABLE_*` (M-01 / `TOOLCHAIN.md`).
+
+
+> **Checkpoint — admission:** live `harbour-policy-admit` denies mutable tag and privileged ephemeral with pullable digests (M-01); PSA vs Kyverno messages distinguishable in evidence.
 
 ### 4.5.3 Worked example — show what the controls deny
 
@@ -1659,91 +1157,50 @@ case "$PHASE" in
     log "S3 damaged; http_count=$(app_count)"
     app_stop_pf ;;
   restore)
+    # SHORTENED OUTLINE — Gate 1 order (H-01). Do not resume before equivalence.
+    # Canonical gate: platform/drills/restore-verify-before-resume.sh
+    #   (uses harbour-restore-compare.py + db-export-json.sh)
     T0=$(date +%s)
     BACKUP="$(cat "$OUT/offcluster-backup.path")"
     [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
-    [ "$(sha256sum "$BACKUP" | awk '{print $1}')" = "$(cat "$OUT/backup.sha256")" ] \
-      || { log "selected backup checksum changed since copy"; exit 1; }
     DESIRED="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
     echo "${DESIRED:-2}" > "$OUT/desired-replicas.txt"
-    # Arm maintenance cleanup *before* suspend so a failed annotate still resumes safely.
     MAINT=1
     DB_UNSAFE=0
     flux suspend kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance=restore --overwrite
     kubectl -n "$NS" scale deploy/"$SVC" --replicas=0
     kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s
-    [ "$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | wc -l)" = "0" ] \
-      || { log "FAIL: app pods still present during maintenance"; exit 1; }
-    flux get kustomization "$SVC" -n "$NS" | tee -a "$OUT/maintenance-flux.txt" | grep -qi Suspended \
-      || { log "FAIL: Flux Kustomization not Suspended — abort restore"; exit 1; }
-    log "S3 maintenance: Flux suspended; $SVC replicas=0; desired=$(cat "$OUT/desired-replicas.txt")"
-    # Optional failure injection: HARBOUR_RESTORE_FAIL_AFTER=suspend|copy|pg_restore
-    case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
-      suspend) log "injected failure after suspend (DB unchanged → safe resume)"; exit 42 ;;
-    esac
+    # Optional: HARBOUR_RESTORE_FAIL_AFTER=suspend|copy|pg_restore
     kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
-    case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
-      copy) log "injected failure after backup copy (DB unchanged → safe resume)"; exit 42 ;;
-    esac
-    # From here, a failure may leave the DB partially modified — do not auto-resume writers.
     DB_UNSAFE=1
     kubectl -n "$NS" exec postgres-0 -- \
       pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
     case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
       pg_restore) log "injected failure after pg_restore (DB_UNSAFE → operator required)"; exit 42 ;;
     esac
+    # AFTER pg_restore and BEFORE DB_UNSAFE=0 / flux resume — prove equivalence.
+    NS="$NS" OUT="$OUT" platform/drills/restore-verify-before-resume.sh
     DB_UNSAFE=0
-    # Resume GitOps: restore desired state from Git (not a hardcoded replica count).
     flux resume kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite
     MAINT=0
-    # Keep port-forward EXIT trap; only clear the maintenance arm.
     flux reconcile kustomization "$SVC" -n "$NS" --with-source
     kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
-    NOW="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
-    [ "$NOW" = "$(cat "$OUT/desired-replicas.txt")" ] \
-      || { log "FAIL: replicas after resume=$NOW want=$(cat "$OUT/desired-replicas.txt")"; exit 1; }
     app_pf
     wait_until 180 "ready query_ok after restore" -- bash -c '
       kill -0 '"$PF_PID"' 2>/dev/null || exit 1
       curl -sf http://127.0.0.1:18080/ready | grep -q query_ok
     '
-    app_json > "$OUT/entries-after-restore.json"
-    python3 - <<PY | tee -a "$OUT/restore-equivalence.txt"
-import json, sys
-want = {(e["id"], e["note"]) for e in json.load(open("$OUT/entries-at-backup.json"))["entries"]}
-got = {(e["id"], e["note"]) for e in json.load(open("$OUT/entries-after-restore.json"))["entries"]}
-if want != got:
-    print("FAIL restore set mismatch")
-    print("missing", sorted(want - got)[:10])
-    print("extra", sorted(got - want)[:10])
-    sys.exit(1)
-print(f"OK full snapshot equivalence n={len(got)}")
-PY
-    if notes_include B-1; then log "unexpected post-backup note B-1 still present"; exit 1; fi
-    python3 - <<PY | tee -a "$OUT/rpo-report.txt"
-from datetime import datetime, timezone
-import json
-backup = datetime.fromisoformat(open("$OUT/backup_completed_at.txt").read().strip().replace("Z","+00:00"))
-incident = datetime.fromisoformat(open("$OUT/incident_at.txt").read().strip().replace("Z","+00:00"))
-acks = [datetime.fromisoformat(l.strip().replace("Z","+00:00"))
-        for l in open("$OUT/ack_timestamps_after_backup.txt") if l.strip()]
-last_ack = max(acks)
-at_b = json.load(open("$OUT/entries-at-backup.json"))
-print(f"estimated_recovery_point_time={backup.isoformat()} (approx: dump completion, not exact LSN)")
-print(f"incident_time={incident.isoformat()}")
-print(f"estimated_RPO_age_seconds={(incident - backup.astimezone(timezone.utc)).total_seconds():.1f}")
-print(f"acknowledged_writes_lost={len(acks)}")
-print(f"last_ack_after_backup={last_ack.isoformat()}")
-print(f"http_count_at_backup={at_b['count']}")
-print(f"backup_sha256={open('$OUT/backup.sha256').read().strip()}")
-PY
+    # Optional RPO report (incident − backup timestamps) — keep from prior evidence files.
     log "S3 restore service-RTO=$(( $(date +%s) - T0 ))s"
     app_stop_pf ;;
   *) echo "phases: seed backup write-after kill-db destroy restore" >&2; exit 2 ;;
 esac
 ```
+
+
+> **Gate 1 remediation (H-01 / M-02):** AFTER `pg_restore` and BEFORE clearing `DB_UNSAFE=0` / `flux resume`, call canonical [`platform/drills/restore-verify-before-resume.sh`](../../reference/harbour/platform/drills/restore-verify-before-resume.sh). Shared compare: [`harbour-restore-compare.py`](../../reference/harbour/platform/bin/harbour-restore-compare.py) + [`db-export-json.sh`](../../reference/harbour/platform/bin/db-export-json.sh). Do **not** treat resume-then-compare as the recommended path.
 
 Run it (Postgres and ledger must be healthy first; run `harbour-status "$SVC"` and confirm exit 0):
 
@@ -1806,40 +1263,10 @@ APP_PODS="$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | w
 echo "OK: unsafe restore left Flux suspended and writers stopped" \
   | tee -a "$HARBOUR_DRILL_OUT/restore-fail-pg_restore.txt"
 # Operator recovery: full snapshot equivalence *before* resuming writers.
-# Count alone is insufficient after a deliberately partial pg_restore failure —
-# reuse the same (id, note) set check as the successful restore path.
-[ -f "$HARBOUR_DRILL_OUT/entries-at-backup.json" ] \
-  || { echo "FAIL: missing entries-at-backup.json — cannot authorise resume"; exit 1; }
-kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -v ON_ERROR_STOP=1 -tAc \
-  "SELECT column_name || ':' || data_type FROM information_schema.columns
-   WHERE table_name='ledger_entries' ORDER BY ordinal_position" \
-  | tee "$HARBOUR_DRILL_OUT/operator-schema.txt"
-grep -q '^id:' "$HARBOUR_DRILL_OUT/operator-schema.txt" \
-  && grep -q '^note:' "$HARBOUR_DRILL_OUT/operator-schema.txt" \
-  || { echo "FAIL: ledger_entries schema incomplete — do not resume"; exit 1; }
-kubectl -n "$NS" exec postgres-0 -- psql -U harbour -d harbour -v ON_ERROR_STOP=1 -tAc \
-  "SELECT id || E'\\t' || note FROM ledger_entries ORDER BY id" \
-  > "$HARBOUR_DRILL_OUT/operator-db-rows.tsv"
-python3 - <<PY | tee -a "$HARBOUR_DRILL_OUT/operator-db-check.txt"
-import json, sys
-from pathlib import Path
-out = Path("$HARBOUR_DRILL_OUT")
-want = {(e["id"], e["note"]) for e in json.load(open(out / "entries-at-backup.json"))["entries"]}
-got = set()
-for line in open(out / "operator-db-rows.tsv"):
-    line = line.strip()
-    if not line:
-        continue
-    i, note = line.split("\t", 1)
-    got.add((int(i), note))
-if want != got:
-    print("FAIL: operator DB snapshot != backup (id,note) set — do not resume")
-    print("missing", sorted(want - got)[:10])
-    print("extra", sorted(got - want)[:10])
-    sys.exit(1)
-# Queryability: same projection the app uses.
-print(f"OK: operator full snapshot equivalence n={len(got)} — safe to resume writers")
-PY
+# Count alone is insufficient after a deliberately partial pg_restore failure.
+# Canonical compare (H-01 / M-02) — not ad-hoc TSV parsing:
+NS="$NS" OUT="$HARBOUR_DRILL_OUT" platform/drills/restore-verify-before-resume.sh
+# (wraps db-export-json.sh + harbour-restore-compare.py; see reference/harbour/)
 flux resume kustomization "$SVC" -n "$NS"
 kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite || true
 flux reconcile kustomization "$SVC" -n "$NS" --with-source
@@ -1865,6 +1292,9 @@ What each drill proves — and what it does not:
 | **Prune hazard** (read) | Remove StatefulSet from Git | Data PVC survives; annotated backup PVC not pruned | Why prune must never target data | Full platform GitOps rebuild (see P02 §2.7.4) |
 
 **Observe the difference:** S2 recovers automatically; S3 needs a human and a runbook, and it **loses data**. A status page that says HEALTHY during S3 is correct about the pod and wrong about the business — record this in the ADR.
+
+
+> **Checkpoint — restore:** equivalence proven via `restore-verify-before-resume.sh` **before** `DB_UNSAFE=0` / Flux resume; unsafe `pg_restore` injection left writers stopped.
 
 ### 4.6.5 Off-cluster copy and the rebuild drill (recommended)
 
@@ -2078,15 +1508,31 @@ Link it from your Personal Profile and record the demonstration in the [Progress
 
 ## Section 4.11 — Troubleshooting field guide
 
+**Index by failed command / error:**
+
+| Error / command | See row |
+| --- | --- |
+| `policy` + missing tenant PSA/NetPol | Tenant contract… |
+| `promotion-verify` + base-only second Deployment | Base-only… |
+| `assert_expected_passes` / `warn` | Kyverno report… |
+| `harbour-policy-admit` missing env | Pullable digest… |
+| `restore-verify-before-resume` mismatch | Restore fingerprint… |
+| Kyverno denies Postgres | Kyverno denies… |
+| `ImagePullBackOff` / attestation | `promotion-verify` fails… |
+
 | Symptom | Likely cause | First check |
 | --- | --- | --- |
+| Tenant contract / `policy` fails without `deploy/` change | PSA or `default-deny-all` removed (C-01) | `harbour-check-service`; restore tenant controls |
+| Base-only second runnable workload fails promotion | Unapproved image under disabled scaffold (C-02) | Render with `kubectl kustomize`; verify every ref |
+| Kyverno report accepts `warn` as pass | Parser bug — use canonical `kyverno_deny.py` (H-03) | [`reference/harbour/tests/test_kyverno_deny.py`](../../reference/harbour/tests/test_kyverno_deny.py) |
+| Pullable digest env missing for admit | Placeholder digests (M-01) | Set `HARBOUR_PULLABLE_*` per [`TOOLCHAIN.md`](../../reference/harbour/TOOLCHAIN.md) |
 | Kyverno denies the Postgres pod | Tag not digest, or missing `runAsNonRoot` / limits | Policy message; resolve and pin the image digest |
 | Postgres `CrashLoopBackOff` with permission error | Volume ownership vs `runAsUser: 70` | `kubectl logs`; `fsGroup`; local-path provisioner |
 | `promotion-verify` fails on a good digest | Attestation not pushed, repo plan lacks attestations, or wrong image name in overlay | `gh attestation verify` output; workflow permissions |
 | Release run cannot attest | Caller lacks `id-token: write` / `attestations: write` | Caller and reusable permissions |
 | `/ready` 503 but DB pod Ready | Service name/port wrong or NetworkPolicy blocking | `kubectl exec` into app pod; Service DNS |
 | Backup job never completes | Secret missing, PVC bound to other node, quota | `kubectl describe job`; quota usage |
-| Restore fingerprint mismatch | Backup taken before seed, or newer dump chosen | `ls -lt /backup`; phase order in timeline |
+| Restore fingerprint mismatch | Backup taken before seed, or newer dump chosen; or writers resumed too early | Run `restore-verify-before-resume.sh` **before** Flux resume (H-01) |
 | Flux reports prune warning on PVC | Missing prune-disabled annotation | Manifest annotation; Kustomization events |
 | Participant blocked on access | Token/context steps not in START-HERE | Docs defect — fix, new participant |
 | Demo cluster differs from docs | Hand-applied snowflake | `flux get`, `git diff`; reconcile from Git |

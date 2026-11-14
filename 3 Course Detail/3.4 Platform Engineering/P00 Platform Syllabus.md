@@ -50,11 +50,13 @@ Track Harbour increments on the [Final Project Checklist](../../1%20Foundational
 
 ## Learning content status
 
+Authoritative record: [review-status.yaml](../../1%20Foundational%20Documents/review-status.yaml) (audit baseline `c37e25d`).
+
 | Artifact | Status |
 | --- | --- |
-| This syllabus + module course-detail | Authored; remediations after audits through `82e50a6` — **awaiting re-review (not signed off)** |
-| Textbook chapters | [P01](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)–[P04](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) — remediation for policy/promotion equivalence, application-level stateful recovery, GitOps rebuild, status contracts |
-| Clean-room lab certification | Separate QA workstream — not implied by authorship |
-| Executable Harbour reference + Gate 5 user acceptance | Still required before full programme sign-off |
+| This syllabus + module course-detail | Authored; Gate 1 remediations against `c37e25d` — **awaiting re-review (not signed off)** |
+| Textbook chapters | [P01](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)–[P04](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) — canonical scripts under [reference/harbour/](../../reference/harbour/) |
+| Clean-room lab certification | Gate 2 — not implied by authorship |
+| Executable Harbour reference + independent acceptance | Gates 2–3 required before full programme operational sign-off |
 
 **Previous discipline:** [AI syllabus](../3.3%20AI%20Engineering/A00%20AI%20Syllabus.md) (optional) or [Cloud syllabus](../3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md) · **Next module:** [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)

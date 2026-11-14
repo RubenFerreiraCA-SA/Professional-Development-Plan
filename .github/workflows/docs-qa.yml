@@ -1,0 +1,86 @@
+name: docs-qa
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {contents: read}
+jobs:
+  markdown-links-and-reference-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: pip install pyyaml
+      - name: Offline Harbour reference unit tests
+        run: python3 -m unittest discover -s reference/harbour/tests -v
+      - name: Check relative Markdown links to existing paths
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import re, sys
+          from pathlib import Path
+          root = Path(".").resolve()
+          # Match markdown links to relative paths (skip http/https/mailto/#).
+          link_re = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+          broken = []
+          checked = 0
+          for md in root.rglob("*.md"):
+              if ".git" in md.parts:
+                  continue
+              text = md.read_text(encoding="utf-8", errors="replace")
+              # Strip fenced code blocks (examples often contain illustrative links).
+              lines, out, in_fence = text.splitlines(True), [], False
+              for line in lines:
+                  if line.lstrip().startswith("```"):
+                      in_fence = not in_fence
+                      continue
+                  if not in_fence:
+                      out.append(line)
+              text = "".join(out)
+              for m in link_re.finditer(text):
+                  target = m.group(2).strip()
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      continue
+                  # Strip anchors and query
+                  path_part = target.split("#", 1)[0].split("?", 1)[0]
+                  if not path_part:
+                      continue
+                  # Skip generated / example / regex prose often written as [text](pattern)
+                  if path_part.startswith("`") or "://" in path_part:
+                      continue
+                  if any(ch in path_part for ch in ("*", "[", "]", "^", "$", "%s", "{", "}")):
+                      continue
+                  # Only check path-like targets (relative or extension-bearing docs/code)
+                  from pathlib import PurePosixPath
+                  p = PurePosixPath(path_part)
+                  looks_relative = path_part.startswith(("./", "../")) or "/" in path_part
+                  looks_file = p.suffix.lower() in {
+                      ".md", ".yaml", ".yml", ".py", ".sh", ".json", ".txt", ".toml",
+                  }
+                  if not (looks_relative or looks_file):
+                      continue
+                  # URL-decode %20
+                  from urllib.parse import unquote
+                  path_part = unquote(path_part)
+                  dest = (md.parent / path_part).resolve()
+                  checked += 1
+                  try:
+                      dest.relative_to(root)
+                  except ValueError:
+                      # Outside repo — skip
+                      continue
+                  if not dest.exists():
+                      broken.append(f"{md.relative_to(root)}: {target}")
+          print(f"checked_relative_links={checked}")
+          if broken:
+              print("BROKEN LINKS:")
+              for b in broken[:50]:
+                  print(b)
+              if len(broken) > 50:
+                  print(f"... and {len(broken)-50} more")
+              sys.exit(1)
+          print("OK: no broken relative markdown links to missing paths")
+          PY

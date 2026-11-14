@@ -1,0 +1,93 @@
+name: promotion-verify
+on:
+  pull_request:
+permissions:
+  contents: read
+  attestations: read
+  packages: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HARBOUR_EXPECT_REPO: ${{ github.repository }}
+      HARBOUR_REQUIRE_BRANCH: main
+      GH_VERSION: "2.102.0"
+      GH_TARBALL_SHA256: "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386"
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: azure/setup-kubectl@v4
+        with: {version: v1.31.0}
+      - name: Install pinned gh (checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o gh.tgz \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_TARBALL_SHA256}  gh.tgz" | sha256sum -c -
+          tar -xzf gh.tgz
+          sudo install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+          gh --version | grep -F "$GH_VERSION"
+      - name: Verify effective rendered images for affected services
+        run: |
+          set -euo pipefail
+          set +e
+          DIFF_OUT="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- \
+            'deploy/' 2>/tmp/harbour-diff.err)"
+          DIFF_RC=$?
+          set -e
+          [ "$DIFF_RC" -eq 0 ] || {
+            echo "FAIL: git diff failed (cannot determine changed deploy files)"; cat /tmp/harbour-diff.err; exit 1; }
+          mapfile -t SVCS < <(printf '%s\n' "$DIFF_OUT" | awk -F/ '$1=="deploy" && NF>=2 {print $2}' | sort -u)
+          if [ "${#SVCS[@]}" -eq 0 ] || [ -z "${SVCS[0]:-}" ]; then
+            echo "No deploy/ changes — gate reports success (D04 always-on pattern)."
+            exit 0
+          fi
+          ALLOW="platform/policy/approved-signer-workflows.txt"
+          [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
+          VERIFIED=0
+          for svc in "${SVCS[@]}"; do
+            OVERLAY="deploy/${svc}/overlays/staging"
+            [ -d "$OVERLAY" ] || { echo "FAIL: changed deploy/${svc} but missing $OVERLAY"; exit 1; }
+            set +e
+            kubectl kustomize "$OVERLAY" >/tmp/harbour-rendered.yaml 2>/tmp/kust.err
+            KUST_RC=$?
+            set -e
+            [ "$KUST_RC" -eq 0 ] || { echo "FAIL: kustomize $OVERLAY"; cat /tmp/kust.err; exit 1; }
+
+            # Render first (C-02). Enumerate every complete image ref (H-02).
+            set +e
+            IMAGE_DATA="$(python3 platform/bin/harbour-promote-verify-images.py /tmp/harbour-rendered.yaml)"
+            IMG_RC=$?
+            set -e
+            [ "$IMG_RC" -eq 0 ] || { echo "FAIL: rendered-image extraction for $svc"; exit 1; }
+            [ -n "$IMAGE_DATA" ] || { echo "FAIL: empty rendered-image result for $svc"; exit 1; }
+
+            ACTION="$(printf '%s' "$IMAGE_DATA" | jq -r .action)"
+            if [ "$ACTION" = "skip" ]; then
+              echo "skip $svc ($(printf '%s' "$IMAGE_DATA" | jq -r .reason))"
+              continue
+            fi
+
+            # Fail closed: capture refs list with producer status already checked.
+            mapfile -t REFS < <(printf '%s' "$IMAGE_DATA" | jq -r '.verified_refs[]')
+            ENUM_RC=$?
+            [ "$ENUM_RC" -eq 0 ] || { echo "FAIL: jq enumeration of verified_refs"; exit 1; }
+            [ "${#REFS[@]}" -ge 1 ] || { echo "FAIL: zero verified refs for $svc"; exit 1; }
+
+            for ref in "${REFS[@]}"; do
+              [ -n "$ref" ] || continue
+              dig="${ref##*@}"
+              MAN="docs/releases/${svc}/${dig}.json"
+              [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN"; exit 1; }
+              commit="$(jq -r .commit "$MAN")"
+              [ "$(jq -r .image "$MAN")" = "$ref" ] \
+                || { echo "FAIL: manifest image does not match rendered $ref"; exit 1; }
+              platform/bin/harbour-verify-artifact "$ref" \
+                --approved-workflows-file "$ALLOW" \
+                --expect-commit "$commit" \
+                --require-branch "$HARBOUR_REQUIRE_BRANCH"
+              VERIFIED=$((VERIFIED + 1))
+            done
+          done
+          echo "OK: promotion-verify complete (attestations_run=$VERIFIED)"

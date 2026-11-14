@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Offline Kyverno apply for required PR checks. Pin CLI v1.13.4.
+set -euo pipefail
+NAME="${1:?service}"
+POLICY="platform/policy/harbour-baseline.yaml"
+FIXDIR="platform/policy/fixtures"
+KYVERNO_VERSION="${KYVERNO_VERSION:-1.13.4}"
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="${BIN_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+mkdir -p "$FIXDIR" /tmp/harbour-policy
+command -v kyverno >/dev/null || {
+  echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
+kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
+run_kyverno_report() {
+  local resource="$1" out="$2" err="$3" rc
+  if kyverno apply "$POLICY" --resource "$resource" --policy-report >"$out" 2>"$err"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  printf '%s' "$rc"
+}
+APPLY_RC="$(run_kyverno_report /tmp/harbour-policy/rendered.yaml \
+  /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err)"
+python3 - "$APPLY_RC" <<'PY'
+import sys
+from pathlib import Path
+from kyverno_deny import load_report, assert_expected_passes
+apply_rc = int(sys.argv[1])
+raw = Path("/tmp/harbour-policy/report.yaml").read_text()
+try:
+    rep = load_report(raw)
+except ValueError as e:
+    print(f"FAIL: {e}; see apply.err"); sys.exit(1)
+assert_expected_passes(rep, apply_rc)
+print("OK: offline PolicyReport — all EXPECTED_RULES evaluated and passed")
+PY
+
+must_deny_rule() {
+  local f="$1" rule="$2" rc
+  rc="$(run_kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err)"
+  python3 - "$rule" "$rc" <<'PY'
+import sys
+from pathlib import Path
+from kyverno_deny import load_report, denial_verdict, outcomes
+want, apply_rc = sys.argv[1], int(sys.argv[2])
+raw = Path("/tmp/harbour-policy/neg.yaml").read_text()
+err = Path("/tmp/harbour-policy/neg.err").read_text()
+try:
+    rep = load_report(raw)
+except ValueError as e:
+    print(f"FAIL: tool error ({e}), not a policy denial:", err[:400]); sys.exit(1)
+verdict = denial_verdict(want, rep)
+matched = outcomes(rep)[:12]
+if verdict == "reject-mixed":
+    print(f"FAIL: rule {want} has non-fail outcomes (mixed reports are not a clean denial); saw={matched}")
+    sys.exit(1)
+if verdict != "accept":
+    print(f"FAIL: did not observe rule {want} result=fail; saw={matched} rc={apply_rc}")
+    sys.exit(1)
+print(f"OK: rule {want} denied fixture with clean result=fail (kyverno_rc={apply_rc})")
+PY
+}
+
+# Unit fixtures for shared parser (also covered by tests/test_kyverno_deny.py).
+python3 <<'PY'
+import yaml
+from kyverno_deny import denial_verdict, load_report, assert_expected_passes
+cases = [
+    ("pass-only", [{"rule": "require-image-digest", "result": "pass"}], "reject-missing"),
+    ("fail-only", [{"rule": "require-image-digest", "result": "fail"}], "accept"),
+    ("error-only", [{"rule": "require-image-digest", "result": "error"}], "reject-mixed"),
+    ("fail+error", [
+        {"rule": "require-image-digest", "result": "fail"},
+        {"rule": "require-image-digest", "result": "error"},
+    ], "reject-mixed"),
+    ("skip", [{"rule": "require-image-digest", "result": "skip"}], "reject-mixed"),
+    ("empty", [], "reject-missing"),
+]
+for name, results, expect in cases:
+    doc = {"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReport", "results": results}
+    got = denial_verdict("require-image-digest", load_report(yaml.safe_dump(doc)))
+    assert got == expect, f"{name}: want {expect} got {got}"
+# warn must not pass positive assertion
+mixed = {
+    "apiVersion": "wgpolicyk8s.io/v1alpha2",
+    "kind": "ClusterPolicyReport",
+    "results": [
+        {"rule": "require-image-digest", "result": "pass"},
+        {"rule": "require-image-digest", "result": "warn"},
+        {"rule": "require-nonroot-memory-limit", "result": "pass"},
+        {"rule": "require-ephemeral-no-privilege", "result": "pass"},
+    ],
+}
+try:
+    assert_expected_passes(mixed, 0)
+except SystemExit:
+    pass
+else:
+    raise SystemExit("FAIL: pass+warn should be rejected")
+print("OK: denial-parser unit fixtures (shared kyverno_deny)")
+PY
+
+# Fixtures are materialised under platform/policy/fixtures/ in the Harbour repo;
+# the reference tree ships copies under tests/fixtures for offline CI.
+SCRIPT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FIXTURE_SRC="${SCRIPT_ROOT}/tests/fixtures"
+if [ -d "$FIXTURE_SRC" ]; then
+  mkdir -p "$FIXDIR"
+  cp -f "$FIXTURE_SRC"/bad-*.yaml "$FIXTURE_SRC"/good-*.yaml "$FIXDIR/" 2>/dev/null || true
+fi
+
+if [ -f "$FIXDIR/good-ephemeral.yaml" ]; then
+  GOOD_RC="$(run_kyverno_report "$FIXDIR/good-ephemeral.yaml" \
+    /tmp/harbour-policy/good-ephem.yaml /tmp/harbour-policy/good-ephem.err)"
+  python3 - "$GOOD_RC" <<'PY'
+import sys
+from pathlib import Path
+from kyverno_deny import load_report, assert_expected_passes
+rep = load_report(Path("/tmp/harbour-policy/good-ephem.yaml").read_text())
+assert_expected_passes(rep, int(sys.argv[1]))
+print("OK: good-ephemeral fixture — all three rules passed")
+PY
+fi
+
+for pair in \
+  "bad-mutable-tag.yaml:require-image-digest" \
+  "bad-no-memory-limit.yaml:require-nonroot-memory-limit" \
+  "bad-init-mutable-tag.yaml:require-image-digest" \
+  "bad-ephemeral-privileged.yaml:require-ephemeral-no-privilege"
+do
+  f="${pair%%:*}"; rule="${pair##*:}"
+  [ -f "$FIXDIR/$f" ] || continue
+  must_deny_rule "$FIXDIR/$f" "$rule"
+done
+echo "OK: offline policy check for $NAME"

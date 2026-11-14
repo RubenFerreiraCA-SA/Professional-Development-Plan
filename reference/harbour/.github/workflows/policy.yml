@@ -1,0 +1,51 @@
+name: policy
+on:
+  pull_request:
+permissions: {contents: read}
+jobs:
+  harbour-policy:
+    runs-on: ubuntu-latest
+    env:
+      KYVERNO_VERSION: "1.13.4"
+      # Frozen for kyverno-cli_v1.13.4_linux_x86_64.tar.gz (GitHub release checksums.txt).
+      KYVERNO_TARBALL_SHA256: "abd318dbb971ab6de2bbe3b7226f4a03230d5c9c651df8a29b6b5e085a55aeeb"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with: {version: v1.31.0}
+      - name: Install Kyverno CLI (checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kyverno.tar.gz \
+            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          echo "${KYVERNO_TARBALL_SHA256}  kyverno.tar.gz" | sha256sum -c -
+          tar -xzf kyverno.tar.gz kyverno
+          sudo install -m 0755 kyverno /usr/local/bin/kyverno
+          kyverno version | tee /tmp/kyverno-version.txt
+          grep -q "$KYVERNO_VERSION" /tmp/kyverno-version.txt
+      - name: Tenant contract for every tenant (always-on)
+        run: |
+          set -euo pipefail
+          # Enumerate tenants from the tree — not from git diff — so removing
+          # PSA / NetworkPolicy without touching deploy/ still fails.
+          mapfile -t TENANTS < <(find platform/tenants -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -u)
+          [ "${#TENANTS[@]}" -ge 1 ] || { echo "FAIL: no platform/tenants/* definitions"; exit 1; }
+          for t in "${TENANTS[@]}"; do
+            ALLOW=""
+            # Unpromoted scaffolds may pass with --allow-unpromoted when deploy exists.
+            if [ -f "deploy/${t}/overlays/staging/kustomization.yaml" ]; then
+              if grep -q 'sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+                   "deploy/${t}/overlays/staging/kustomization.yaml" 2>/dev/null; then
+                ALLOW="--allow-unpromoted"
+              fi
+            fi
+            platform/bin/harbour-check-service "$t" $ALLOW
+          done
+      - name: Offline Kyverno policy for every service overlay
+        run: |
+          set -euo pipefail
+          mapfile -t SVCS < <(find deploy -path '*/overlays/staging' -type d | sed -E 's#^deploy/([^/]+)/.*#\1#' | sort -u)
+          [ "${#SVCS[@]}" -ge 1 ] || { echo "no staging overlays"; exit 1; }
+          for s in "${SVCS[@]}"; do
+            platform/bin/harbour-policy-check "$s"
+          done

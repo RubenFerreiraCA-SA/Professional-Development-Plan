@@ -6,7 +6,18 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; remediations after audits through `82e50a6` (PSA file input, YAML quota) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; Gate 1 remediations against audit baseline `c37e25d` — **awaiting re-review (not signed off)**. See [review-status.yaml](../../1%20Foundational%20Documents/review-status.yaml). Canonical scripts: [reference/harbour/](../../reference/harbour/) |
+
+> **Canonical Harbour examples** live in [`../../reference/harbour/`](../../reference/harbour/). When a fenced example and a reference file diverge, trust the reference tree.
+
+### Dependency and deliverables map
+
+| | |
+| --- | --- |
+| **Prior chapters** | P01–P02 (workloads, RBAC, NetPol); D04/D06 (CI, GitOps) |
+| **Files you create** | Golden-path docs; `harbour-new-service` / promote CLI; tenant manifests; catalogue entries; trial protocol evidence |
+| **Copy from reference** | [`harbour-check-service`](../../reference/harbour/platform/bin/harbour-check-service); later wire into P04 [`policy.yml`](../../reference/harbour/.github/workflows/policy.yml) |
+| **End state** | Independent trial user completes create → deliver → status → investigate without undocumented author help |
 
 ## How to study this chapter
 
@@ -706,108 +717,21 @@ Note what it does **not** do: it does not run `kubectl`, hold cluster credential
 
 ### 3.4.3 Worked example — the policy check
 
-`platform/bin/harbour-check-service` is a *training-scale* conformance check. It uses simple rendered-manifest assertions; P04 §4.5 replaces the manifest checks with real policy-as-code (Kyverno) that also runs at admission.
+`platform/bin/harbour-check-service` is a *training-scale* conformance check. It uses simple rendered-manifest assertions; P04 §4.5 replaces the workload checks with real policy-as-code (Kyverno) that also runs at admission — **but the tenant contract (PSA + default-deny NetworkPolicy + quota) remains required in CI**.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-NAME="${1:?usage: harbour-check-service <name> [--allow-unpromoted]}"
-ALLOW="${2:-}"
-cd "$(git rev-parse --show-toplevel)"
-fail=0
-bad() { echo "FAIL: $*"; fail=1; }
-for f in "services/$NAME/Dockerfile" "services/$NAME/test_main.py" "catalog/$NAME.yaml" \
-         "docs/services/$NAME/README.md" "docs/services/$NAME/RUNBOOK.md" \
-         "platform/tenants/$NAME/tenant.yaml"; do
-  [ -f "$f" ] || bad "missing $f"
-done
-grep -qE '^  owner: .+' "catalog/$NAME.yaml" || bad "catalog: owner missing"
-R="$(kubectl kustomize "deploy/$NAME/overlays/staging")" || { echo "FAIL: kustomize build"; exit 1; }
-# Structural YAML parse — do not grep multiline securityContext fields.
-printf '%s\n' "$R" | python3 -c '
-import sys, yaml
-allow = sys.argv[1]
-docs = list(yaml.safe_load_all(sys.stdin))
-deploys = [d for d in docs if d and d.get("kind") == "Deployment"]
-if not deploys:
-    print("FAIL: no Deployment in rendered overlay"); sys.exit(1)
-SENTINEL = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+**Canonical script:** copy from [`reference/harbour/platform/bin/harbour-check-service`](../../reference/harbour/platform/bin/harbour-check-service) into your Harbour repo as `platform/bin/harbour-check-service`.
 
-def check_container(c, *, require_probes):
-    name = c.get("name", "?")
-    img = c.get("image", "")
-    if ":latest" in img.split("@")[0]:
-        print(f"FAIL: container {name} uses :latest"); sys.exit(1)
-    if "@sha256:" not in img:
-        print(f"FAIL: container {name} image not digest-pinned: {img}"); sys.exit(1)
-    digest = img.rsplit("@", 1)[-1]
-    if digest == SENTINEL and allow != "--allow-unpromoted":
-        print(f"FAIL: container {name} still has UNPROMOTED sentinel digest"); sys.exit(1)
-    sc = c.get("securityContext") or {}
-    if sc.get("allowPrivilegeEscalation") is not False:
-        print(f"FAIL: container {name} missing allowPrivilegeEscalation: false"); sys.exit(1)
-    drop = [str(x) for x in ((sc.get("capabilities") or {}).get("drop") or [])]
-    if "ALL" not in drop:
-        print(f"FAIL: container {name} capabilities.drop missing ALL (got {drop})"); sys.exit(1)
-    res = c.get("resources") or {}
-    if "memory" not in (res.get("limits") or {}):
-        print(f"FAIL: container {name} missing memory limit"); sys.exit(1)
-    req = res.get("requests") or {}
-    if "cpu" not in req or "memory" not in req:
-        print(f"FAIL: container {name} missing cpu/memory requests"); sys.exit(1)
-    if require_probes:
-        if not c.get("readinessProbe"):
-            print(f"FAIL: container {name} missing readinessProbe"); sys.exit(1)
-        if not c.get("livenessProbe"):
-            print(f"FAIL: container {name} missing livenessProbe"); sys.exit(1)
+It asserts:
+1. Scaffold files exist (Dockerfile, tests, catalogue, docs, tenant).
+2. Rendered Deployment security/resources/probes (when `deploy/` exists).
+3. Tenant manifest always has PSA `enforce=restricted`, NetworkPolicy `default-deny-all`, and ResourceQuota **without** `limits.cpu`.
+4. Optional effective checks when `HARBOUR_CHECK_EFFECTIVE=1`.
 
-for d in deploys:
-    spec = d["spec"]["template"]["spec"]
-    psc = spec.get("securityContext") or {}
-    if psc.get("runAsNonRoot") is not True:
-        print("FAIL: pod runAsNonRoot != true"); sys.exit(1)
-    for c in (spec.get("containers") or []):
-        check_container(c, require_probes=True)
-    # Init containers share the security/resource bar but do not use app probes.
-    for c in (spec.get("initContainers") or []):
-        check_container(c, require_probes=False)
-print("OK: structural Deployment security/resources")
-' "$ALLOW" || bad "structural Deployment/securityContext check failed"
-# Manifest contract (always — before merge): PSA + NetPol + quota keys via YAML (not comment grep).
-TENANT="platform/tenants/$NAME/tenant.yaml"
-grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" || bad "tenant manifest missing PSA enforce=restricted"
-grep -q 'name: default-deny-all' "$TENANT" || bad "tenant manifest missing default-deny-all"
-python3 - "$TENANT" <<'PY' || bad "tenant ResourceQuota inspect failed"
-import sys, yaml
-from pathlib import Path
-docs = list(yaml.safe_load_all(Path(sys.argv[1]).read_text()))
-quotas = [d for d in docs if d and d.get("kind") == "ResourceQuota"]
-if not quotas:
-    print("FAIL: no ResourceQuota in tenant manifest"); sys.exit(1)
-for q in quotas:
-    hard = (q.get("spec") or {}).get("hard") or {}
-    # Keys may be strings like "limits.cpu" — inspect the hard map, ignore comments.
-    if "limits.cpu" in hard:
-        print(f"FAIL: ResourceQuota {q.get('metadata',{}).get('name')} sets hard[limits.cpu]={hard['limits.cpu']}")
-        sys.exit(1)
-print("OK: ResourceQuota has no hard limits.cpu")
-PY
-# Effective-policy test (after Flux reconciles) — required post-deploy; object existence alone is not isolation.
-TENANT_NS="$NAME-staging"
-if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then
-  kubectl get ns "$TENANT_NS" >/dev/null 2>&1 || bad "effective check requested but namespace $TENANT_NS missing"
-  kubectl get ns "$TENANT_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}{"\n"}' \
-    | grep -qx 'restricted' || bad "live namespace missing PSA enforce=restricted"
-  kubectl -n "$TENANT_NS" get networkpolicy default-deny-all >/dev/null 2>&1 \
-    || bad "live namespace missing default-deny-all"
-  # Reuse P02 connectivity matrix (allow probe, deny lateral) — CNI enforcement, not YAML presence.
-  NS="$TENANT_NS" ./deploy/platform/staging/test-connectivity.sh "$TENANT_NS" \
-    || bad "connectivity matrix failed (CNI may not enforce NetworkPolicy)"
-fi
-[ "$fail" -eq 0 ] && echo "OK: $NAME conforms to golden path v1" || exit 1
-```
+**Wire into required CI (C-01):** the always-on PR job must call `harbour-check-service` for **every** tenant under `platform/tenants/` — not only when `deploy/` changes. Canonical workflow: [`reference/harbour/.github/workflows/policy.yml`](../../reference/harbour/.github/workflows/policy.yml).
 
-Wire offline checks into the required PR `policy` job (P04 `.github/workflows/policy.yml`). After reconcile: `HARBOUR_CHECK_EFFECTIVE=1 platform/bin/harbour-check-service "$NAME"`.
+**Negative test (required):** open a PR that deletes `default-deny-all` or PSA labels from a tenant file without touching `deploy/`; `policy` must fail. Offline fixture: [`reference/harbour/tests/fixtures/tenant-missing-deny.yaml`](../../reference/harbour/tests/fixtures/tenant-missing-deny.yaml).
+
+After reconcile: `HARBOUR_CHECK_EFFECTIVE=1 platform/bin/harbour-check-service "$NAME"`.
 
 ### 3.4.4 One-time platform wiring (author task, documented)
 
@@ -1169,10 +1093,25 @@ A passed trial is the start of the product, not the end.
 
 ## Section 3.10 — Troubleshooting field guide
 
+**Index by failed command / error** (jump to the row):
+
+| Error / command | Row |
+| --- | --- |
+| `harbour-new-service` name validation | Scaffold fails… |
+| `harbour-check-service` / `policy` + UNPROMOTED | `policy` check fails… |
+| `harbour-check-service` + missing `default-deny-all` / PSA | Tenant contract… |
+| Release workflow / digest summary | Release job green… |
+| `ImagePullBackOff` after promote | Promotion merged… |
+| `harbour-status` UNKNOWN | `harbour-status` says… |
+| Missing namespace after merge | Namespace missing… |
+| Trial stuck at access | Trial participant stuck… |
+| Template test CI vs local | Template test passes… |
+
 | Symptom | Likely cause | First check |
 | --- | --- | --- |
 | Scaffold fails with "name must be…" | Uppercase, underscore or too short | Naming rule in the error and in the golden path |
 | `policy` check fails: UNPROMOTED sentinel | New service not yet promoted | Use `--allow-unpromoted` only on the creation PR; then promote a real digest |
+| `policy` / `harbour-check-service` fails: missing PSA or `default-deny-all` | Tenant security contract weakened (C-01) | Restore restricted PSA labels and NetworkPolicy; see [reference fixture](../../reference/harbour/tests/fixtures/tenant-missing-deny.yaml) |
 | Release job green but no digest in summary | Path filter did not trigger or `workflow_call` output not wired | Actions run for `<name>-release`; `service-release` outputs |
 | Promotion merged but pod `ImagePullBackOff` | Private package or wrong owner in image name | GHCR package visibility; `kubectl describe pod` events; D06 §6.5.3 |
 | `harbour-status` says UNKNOWN | No read context or namespace not created | START-HERE §Access; tenant manifest reconciled? |
@@ -1180,6 +1119,8 @@ A passed trial is the start of the product, not the end.
 | Trial participant stuck at access | Access instructions rely on author | Rewrite §Access; this is a docs defect, not user error |
 | Template test passes locally but fails in CI | Dependency on local tools or `.venv` | Pinned installs (D04); clean-clone run |
 | Participant "didn't read the docs" | Docs not where they looked | Findability defect — move the step to START-HERE |
+
+> **Checkpoint — golden path:** scaffold + `harbour-check-service … --allow-unpromoted` green; tenant PSA/NetPol present; START-HERE copy-pasteable without author help.
 
 ---
 

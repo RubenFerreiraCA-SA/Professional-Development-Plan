@@ -32,10 +32,13 @@ Hour estimates in course detail are planning assumptions. Use disposable cluster
 
 ## Documentation status
 
+Authoritative record: [review-status.yaml](../../1%20Foundational%20Documents/review-status.yaml) (audit baseline `c37e25d`).
+
 | | |
 | --- | --- |
-| **P01–P04** | Authored; remediations addressing review of `6fbd29c` — **awaiting re-review (not signed off)** |
-| **Remediation focus (6fbd29c review)** | Effective Kustomize image verify (base+overlay); ephemeral rule CI+live subresource; shared `kyverno_deny.py`; full-snapshot operator release; gh tarball checksum |
-| **Not claimed** | Clean-room lab execution; independent Gate-5 platform-user acceptance; executable Harbour reference repository |
+| **P01–P04** | Authored; Gate 1 remediations against audit of `c37e25d` — **awaiting re-review (not signed off)** |
+| **Remediation focus** | Tenant CI enforcement; render-first promotion; restore-before-resume; Kyverno warn reject; pinned Helm; pullable admit digests; shared JSON restore compare |
+| **Canonical examples** | [reference/harbour/](../../reference/harbour/) |
+| **Not claimed** | Clean-room lab execution (Gate 2); independent platform-user acceptance (Gate 3); full programme operational sign-off |
 
 **Course detail:** [P00 Platform Syllabus](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) · **Checklist:** [Final Project Checklist · Platform](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
