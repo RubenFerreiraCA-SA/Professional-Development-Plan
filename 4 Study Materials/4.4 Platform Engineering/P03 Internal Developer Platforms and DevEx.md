@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; corrections after audit `ff921e0` — **not signed off** |
+| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06` — **not signed off** |
 
 ## How to study this chapter
 
@@ -656,20 +656,23 @@ for IMG in "${IMAGES[@]}"; do
     *) bad "image not pinned by digest: $IMG" ;;
   esac
 done
-# Effective tenant controls (namespace labels / NetworkPolicy presence) — not "namespace exists".
+# Manifest contract (always — before merge): generated tenant YAML must declare PSA + NetPol.
+TENANT="platform/tenants/$NAME/tenant.yaml"
+grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" || bad "tenant manifest missing PSA enforce=restricted"
+grep -q 'name: default-deny-all' "$TENANT" || bad "tenant manifest missing default-deny-all"
+# Effective-policy test (after Flux reconciles) — required in post-deploy / P04, not skipped silently:
 TENANT_NS="$NAME-staging"
-if kubectl get ns "$TENANT_NS" >/dev/null 2>&1; then
+if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then
+  kubectl get ns "$TENANT_NS" >/dev/null 2>&1 || bad "effective check requested but namespace $TENANT_NS missing"
   kubectl get ns "$TENANT_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}{"\n"}' \
-    | grep -qx 'restricted' || bad "tenant namespace missing PSA enforce=restricted"
+    | grep -qx 'restricted' || bad "live namespace missing PSA enforce=restricted"
   kubectl -n "$TENANT_NS" get networkpolicy default-deny-all >/dev/null 2>&1 \
-    || bad "tenant missing default-deny-all NetworkPolicy (P02 inheritance)"
+    || bad "live namespace missing default-deny-all"
 fi
 [ "$fail" -eq 0 ] && echo "OK: $NAME conforms to golden path v1" || exit 1
 ```
 
-Wire it into a required pull-request check (`policy`) so that a failing check blocks merge — mirroring D04's failed-gate proof. The sentinel is allowed only when the PR is the *creation* PR.
-
-**Honest limit:** grep/structure checks prove *shape*, not that admission will reject the same violation. P04 §4.5.2 requires negative fixtures that fail both `kyverno apply` and live admission.
+Wire the offline checks into the required PR `policy` job. After promotion/reconcile, run `HARBOUR_CHECK_EFFECTIVE=1 platform/bin/harbour-check-service "$NAME"` (needs cluster read). P04 §4.5.2 adds Kyverno offline fixtures + lab admission probes.
 
 ### 3.4.4 One-time platform wiring (author task, documented)
 
@@ -770,16 +773,15 @@ echo "image:    $(k -n "$NS" get deploy "$NAME" -o jsonpath='{.spec.template.spe
 echo "replicas: ready $READY / desired $DESIRED"
 echo "gitops:   Ready=$FLUX_READY"
 echo "recent events:"; k -n "$NS" get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 5 | sed 's/^/  /'
-# Exit codes are part of the contract: automation must not treat DOWN as success.
-# 0=HEALTHY, 2=DEGRADED, 3=DOWN, 4=UNKNOWN/no namespace, 5=GitOps not Ready.
+# Exit codes: 0=HEALTHY (app+Flux), 2=DEGRADED, 3=DOWN, 4=UNKNOWN, 5=PARTIAL (app Ready, Flux missing/not Ready).
 if [ "$READY" = "$DESIRED" ] && [ "$DESIRED" != "0" ]; then
-  if [ "$FLUX_READY" != "True" ] && [ "$FLUX_READY" != "n/a" ]; then
-    echo "VERDICT: DEGRADED — replicas Ready but Flux Kustomization is not Ready."
-    echo "Next step: kubectl -n $NS describe kustomization $NAME"
-    exit 2
+  if [ "$FLUX_READY" = "True" ]; then
+    echo "VERDICT: HEALTHY"
+    exit 0
   fi
-  echo "VERDICT: HEALTHY"
-  exit 0
+  echo "VERDICT: PARTIAL — replicas Ready but Flux evidence is '$FLUX_READY' (not True)."
+  echo "Next step: kubectl -n $NS get kustomization $NAME -o yaml; do not treat this as unqualified HEALTHY."
+  exit 5
 elif [ "$READY" != "0" ]; then
   echo "VERDICT: DEGRADED — some replicas not ready."
   echo "Next step: docs/services/$NAME/RUNBOOK.md, row 'Pods not Ready'. Read the events above."
@@ -791,9 +793,9 @@ else
 fi
 ```
 
-**Contract:** CI and scripts must check `$?` (and preferably the `VERDICT:` line). A printed `DOWN` with exit 0 is a defect — this version exits non-zero.
+**Contract:** Missing Flux (`n/a`) is **PARTIAL** (exit 5), never unqualified HEALTHY. CI must check `$?`.
 
-**Limitations to state honestly:** this reports *Kubernetes + Flux Ready* health, not user-journey health; link it to the D07 dashboard and SLO page for that. Treat it as the first screen, not the whole picture.
+**Limitations:** reports Kubernetes + Flux Ready, not user-journey health.
 
 ### 3.5.5 Portal options (decide with evidence)
 

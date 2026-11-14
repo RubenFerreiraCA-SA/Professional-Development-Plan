@@ -34,8 +34,8 @@ Hour estimates in course detail are planning assumptions. Use disposable cluster
 
 | | |
 | --- | --- |
-| **P01–P04** | Authored; **corrections required** after audit `ff921e0` (not signed off) |
-| **Remediation focus** | CI≡admission policy, bound attestations, always-on promotion gate, HTTP-level stateful recovery, full GitOps rebuild, status exit codes, tenant security inheritance |
+| **P01–P04** | Authored; **corrections required** after audits `ff921e0`/`ea9eb06` (not signed off) |
+| **Remediation focus** | P03↔P04 NetPol/PSA compatibility, `/health` retention, backup helper Pod, CPU-policy alignment, offline vs live policy gates, required commit binding, Flux bootstrap script |
 | **Not claimed** | Clean-room lab execution; independent Gate-5 platform-user acceptance; executable Harbour reference repository |
 
 **Course detail:** [P00 Platform Syllabus](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) · **Checklist:** [Final Project Checklist · Platform](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

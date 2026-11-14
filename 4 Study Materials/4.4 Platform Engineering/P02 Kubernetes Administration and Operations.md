@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 2 of 4*
 
-> **Status:** Authored; corrections after audit `ff921e0` — **not signed off**. Clean-room execution still not claimed.
+> **Status:** Authored; corrections after audits `ff921e0`/`ea9eb06` — **not signed off**. Clean-room execution still not claimed.
 
 | | |
 | --- | --- |
@@ -896,30 +896,46 @@ Distinguish what you prove. Do **not** call a manual `kubectl apply -k` of the a
 
 **Competent (this chapter):** levels 1–3. Level 4 is strengthened in P03–P04 but should not regress here.
 
+Commit `scripts/bootstrap-flux.sh` (pin versions you tested; fill `GIT_URL` / branch from your remote). This is the rebuild path — not a comment placeholder:
+
+```bash
+#!/usr/bin/env bash
+# scripts/bootstrap-flux.sh — install Flux and root reconciliation from Git.
+set -euo pipefail
+: "${GIT_URL:?set GIT_URL to the Harbour repo clone URL Flux can read}"
+GIT_BRANCH="${GIT_BRANCH:-main}"
+FLUX_VERSION="${FLUX_VERSION:-2.4.0}"   # pin; verify against flux releases
+command -v flux >/dev/null
+flux install --version="$FLUX_VERSION"
+flux create source git flux-system --url="$GIT_URL" --branch="$GIT_BRANCH" \
+  --interval=1m --export > /tmp/flux-source.yaml
+# Prefer committing the source+kustomization under clusters/harbour-local/ and applying from Git;
+# for first bootstrap on an empty cluster, apply the exported manifests then let Flux take over.
+kubectl apply -f /tmp/flux-source.yaml
+flux create kustomization flux-system --source=GitRepository/flux-system \
+  --path=./clusters/harbour-local --prune=true --interval=1m
+flux check
+```
+
+Rebuild sequence (fails closed — no `|| true` on required Ready waits):
+
 ```bash
 START=$(date +%s)
 kind delete cluster --name "$LAB_CLUSTER"
 kind create cluster --config infra/kind/harbour-lab.yaml --image "$KIND_NODE_IMAGE"   # or Calico config if required
 # re-run P01 §1.2.2 registry wiring (nodes lost their containerd config)
-# --- GitOps recovery (required for the GitOps claim) ---
-# Re-bootstrap Flux the same way D06/your runbook documents (pin versions).
-# Example shape — replace with your actual bootstrap script:
-#   ./scripts/bootstrap-flux.sh   # installs controllers, creates GitRepository + root Kustomization
-flux check
+GIT_URL="https://github.com/${GH_OWNER}/harbour-platform.git" ./scripts/bootstrap-flux.sh
 flux get sources git -A
 flux get kustomizations -A
-# Wait until the *platform* and *app* Kustomizations are Ready (reconciled from Git),
-# not merely until a one-shot kubectl apply finished.
-kubectl -n flux-system wait --for=condition=Ready kustomization/flux-system --timeout=300s || true
+kubectl -n flux-system wait --for=condition=Ready kustomization/flux-system --timeout=300s
+# Application and platform objects must appear via reconciliation, not a one-shot kubectl apply of the app.
 kubectl -n "$NS" wait --for=condition=Available deploy/harbour-api --timeout=300s
-# Cluster configuration recovery checks:
-kubectl apply -f deploy/platform/cluster/vap-require-digest.yaml  # only if this lives outside Flux; prefer Git
 ./deploy/platform/staging/test-rbac.sh "$NS"
 ./deploy/platform/staging/test-connectivity.sh "$NS"
 echo "RTO (cluster rebuild incl. GitOps): $(( $(date +%s) - START )) s" | tee docs/platform/recovery-cluster.txt
 ```
 
-If you only re-apply manifests with `kubectl apply -k` and never restore Flux, record the claim as **workload + config recovery** and mark GitOps recovery `Unproven` in your claims ledger (P04). Registry images survive (registry container outside the cluster). **alice's kubeconfig is invalid** after rebuild (new CA) — re-issue as part of the runbook.
+If you only re-apply manifests with `kubectl apply -k` and never restore Flux, record **workload + config recovery** and mark GitOps recovery `Unproven`. Registry images survive outside the cluster. **alice's kubeconfig is invalid** after rebuild — re-issue in the runbook.
 
 ### 2.7.5 Practice — reproduce
 

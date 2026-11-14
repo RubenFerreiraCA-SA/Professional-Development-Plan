@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 1 of 4*
 
-> **Status:** Authored; corrections after audit `ff921e0` — **not signed off**. Clean-room execution still not claimed. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
+> **Status:** Authored; corrections after audits `ff921e0`/`ea9eb06` — **not signed off**. Clean-room execution still not claimed. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
 
 | | |
 | --- | --- |
@@ -617,7 +617,7 @@ QoS class follows from these: `Guaranteed` (requests = limits for all), `Burstab
 | Choice | Harbour default | Trade-off |
 | --- | --- | --- |
 | Memory limit | Set (256Mi) | Protects the node; OOMKill is a visible failure rather than a noisy neighbour |
-| CPU limit | **Omitted** | Avoids latency from throttling; relies on requests and quotas to prevent starvation. Some organisations mandate limits — if so, set generously and measure throttling |
+| CPU limit | **Omitted** | Avoids latency from throttling; relies on requests and quotas to prevent starvation. **Platform policy (P04 Kyverno) must match this choice:** require memory limits + CPU/memory requests; do **not** later mandate CPU limits without migrating this workload. Record the same rule in ADR 0301 and ADR 0309 |
 | Requests | Measured, not guessed | Too low → overcommit and noisy neighbours; too high → wasted capacity |
 
 Measure with metrics-server (installed in D06 §6.8.2): `kubectl top pods -n "$NS"`. Production sizing needs load testing and history (D07 telemetry), not a number from this chapter.

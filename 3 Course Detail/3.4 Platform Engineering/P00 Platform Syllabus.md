@@ -52,7 +52,7 @@ Track Harbour increments on the [Final Project Checklist](../../1%20Foundational
 
 | Artifact | Status |
 | --- | --- |
-| This syllabus + module course-detail | Authored; **corrections in progress** after audit `ff921e0` — not signed off |
+| This syllabus + module course-detail | Authored; **corrections in progress** after audits `ff921e0`/`ea9eb06` — not signed off |
 | Textbook chapters | [P01](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md)–[P04](../../4%20Study%20Materials/4.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) — remediation for policy/promotion equivalence, application-level stateful recovery, GitOps rebuild, status contracts |
 | Clean-room lab certification | Separate QA workstream — not implied by authorship |
 | Executable Harbour reference + Gate 5 user acceptance | Still required before full programme sign-off |
