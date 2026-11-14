@@ -591,6 +591,6 @@ Align with [C01 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 - `ss(8)`, `ip(8)`, `curl(1)`, `nft(8)`  
 - [AWS shared responsibility](https://aws.amazon.com/compliance/shared-responsibility-model/)  
-- [D03 Docker](../4.1%20DevOps/D03%20Docker%20and%20Containerization.md) · [Cloud overview](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/CLOUD%20Overview.md)
+- [D03 Docker](../4.1%20DevOps/D03%20Docker%20and%20Containerization.md) · [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)
 
 **Course detail:** [C01](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) · **Next chapter:** [Chapter 2 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md) · **Checklist:** [Final Project Checklist · C01](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

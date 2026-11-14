@@ -95,4 +95,4 @@ Linux Foundation or CompTIA-style networking/Linux exams may reinforce vocabular
 
 **Textbook:** [Chapter 1 — Linux, Networking and Cloud Fundamentals](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md)
 
-**Previous:** [Cloud overview](CLOUD%20Overview.md) · **Next:** [C02 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md)
+**Previous:** [Cloud syllabus](C00%20Cloud%20Syllabus.md) · **Next:** [C02 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md)

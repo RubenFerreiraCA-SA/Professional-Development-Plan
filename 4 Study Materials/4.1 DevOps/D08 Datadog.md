@@ -824,4 +824,4 @@ Align with [D08 Course Detail](../../3%20Course%20Detail/3.1%20DevOps/D08%20Data
 - [Datadog Terraform provider](https://registry.terraform.io/providers/DataDog/datadog/latest/docs)
 - [OpenTelemetry](https://opentelemetry.io/docs/)
 
-**Previous chapter:** [Chapter 7 — Observability](D07%20Observability.md) · **Course detail:** [D08 — Datadog](../../3%20Course%20Detail/3.1%20DevOps/D08%20Datadog.md) · **Next:** [Cloud Engineering overview](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/CLOUD%20Overview.md) · **Checklist:** [Final Project Checklist · D08](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
+**Previous chapter:** [Chapter 7 — Observability](D07%20Observability.md) · **Course detail:** [D08 — Datadog](../../3%20Course%20Detail/3.1%20DevOps/D08%20Datadog.md) · **Next:** [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md) · **Checklist:** [Final Project Checklist · D08](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

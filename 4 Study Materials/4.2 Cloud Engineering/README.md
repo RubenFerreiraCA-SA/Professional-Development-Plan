@@ -2,7 +2,7 @@
 
 *Linux, networking, AWS foundations and architecture for Harbour.*
 
-This textbook accompanies the [Cloud Engineering overview](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/CLOUD%20Overview.md). Chapters align with modules **C01–C03**.
+This textbook accompanies the [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md). Chapters align with modules **C01–C03**.
 
 ## Table of contents
 

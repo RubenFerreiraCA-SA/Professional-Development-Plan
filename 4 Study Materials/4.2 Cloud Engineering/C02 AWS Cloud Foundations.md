@@ -545,6 +545,6 @@ Align with [C02 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 - [AWS IAM best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)  
 - [VPC security groups](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html)  
 - [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html)  
-- [D05 Terraform](../4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · [C01](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) · [Cloud overview](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/CLOUD%20Overview.md)
+- [D05 Terraform](../4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · [C01](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) · [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)
 
 **Previous chapter:** [Chapter 1 — Linux, Networking and Cloud Fundamentals](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) · **Course detail:** [C02](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C02%20AWS%20Cloud%20Foundations.md) · **Next chapter:** [Chapter 3 — AWS Infrastructure and Architecture](C03%20AWS%20Infrastructure%20and%20Architecture.md) · **Checklist:** [Final Project Checklist · C02](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)

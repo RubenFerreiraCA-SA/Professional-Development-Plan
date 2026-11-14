@@ -51,4 +51,4 @@ Service quotas, idle spend, NAT cost honesty, destroy scripts/runbooks.
 
 **Textbook:** [Chapter 3 — AWS Infrastructure and Architecture](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)
 
-**Previous:** [C02](C02%20AWS%20Cloud%20Foundations.md) · **Next:** [Platform Engineering](../3.4%20Platform%20Engineering/) (after Cloud milestone)
+**Previous:** [C02](C02%20AWS%20Cloud%20Foundations.md) · **Next:** [Platform Engineering](../3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) (after Cloud milestone)

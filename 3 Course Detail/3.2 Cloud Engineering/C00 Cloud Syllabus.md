@@ -1,4 +1,4 @@
-# Cloud Engineering
+# C00 — Cloud Engineering Syllabus
 
 **Estimated study time:** 128–160 hours  
 **Scope:** Linux and networking for operators, AWS foundations, and secure resilient architecture for Harbour.
@@ -45,7 +45,7 @@ Track Harbour increments on the [Final Project Checklist](../../1%20Foundational
 
 | Artifact | Status |
 | --- | --- |
-| This overview + module course-detail | Authored progressively with the textbook |
+| This syllabus + module course-detail | Authored progressively with the textbook |
 | Textbook chapters | [C01](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md), [C02](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C02%20AWS%20Cloud%20Foundations.md), [C03](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md) |
 | Clean-room lab certification | Separate QA workstream (same rule as DevOps) |
 

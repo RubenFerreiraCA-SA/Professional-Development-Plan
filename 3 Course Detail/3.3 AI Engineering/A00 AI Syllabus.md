@@ -1,4 +1,4 @@
-# AI Engineering
+# A00 — AI Engineering Syllabus
 
 > **Status:** Draft scaffold — unapproved.
 

@@ -1,4 +1,4 @@
-# Platform Engineering
+# P00 — Platform Engineering Syllabus
 
 > **Status:** Draft scaffold — unapproved.
 
