@@ -625,8 +625,12 @@ echo "$PID" > docs/ai/ops/harbour-diag.pid
     awk '{print "starttime="$22}' "/proc/$PID/stat"
   fi
 } > docs/ai/ops/harbour-diag.identity
-# Bounded readiness (not a fixed sleep):
+# Bounded readiness (not a fixed sleep). Confirm *this* PID is still alive so an
+# unrelated listener on :8088 is not mistaken for the process we just launched.
 for i in $(seq 1 30); do
+  if [[ ! -e "/proc/$PID" ]]; then
+    echo "pid $PID exited before readiness"; exit 1
+  fi
   if curl -sf http://127.0.0.1:8088/health >/dev/null; then
     echo "ready pid=$PID enabled=$ENABLED root=$ROOT"
     exit 0
@@ -697,6 +701,22 @@ stop_local_pid() {
   echo "pid $pid did not exit"; exit 1
 }
 
+capture_core() {
+  # Require HTTP success (2xx via curl -f), not merely parseable JSON.
+  local out="$1"
+  local code
+  code="$(curl -fsS --max-time 5 -o "$out" -w '%{http_code}' "$CORE_URL")" || {
+    echo "Core Harbour unhealthy at $CORE_URL (failed before writing usable evidence)"
+    exit 1
+  }
+  echo "core_http=$code file=$out"
+}
+
+# BEFORE any AI shutdown: capture true before-state when core is in the exit assessment.
+if [[ "$REQUIRE_CORE" == "1" ]]; then
+  capture_core docs/ai/ops/core-health-before-disable.json
+fi
+
 if [[ "$MODE" == "compose" ]]; then
   test -f deploy/ai/docker-compose.yml || { echo "missing deploy/ai/docker-compose.yml"; exit 1; }
   printf 'HARBOUR_AI_ENABLED=false\nMOCK_LLM=%s\n' "${MOCK_LLM:-1}" > deploy/ai/.env
@@ -710,21 +730,13 @@ else
   ./scripts/start-harbour-ai.sh   # writes new PID; bounded readiness; respects ENABLED=false
 fi
 
-curl -sS "$BASE/health" | tee docs/ai/ops/health-after-disable.json
+curl -fsS "$BASE/health" | tee docs/ai/ops/health-after-disable.json >/dev/null
 curl -sS -X POST "$BASE/v1/diagnose" -H 'content-type: application/json' \
   -d '{"question":"status?"}' | tee docs/ai/ops/diagnose-after-disable.json
 
-# Core Harbour: for exit assessment, always capture fresh before + after (not a stale file alone).
+# AFTER disable verified: independently re-check core (fresh measurement, not a reused baseline).
 if [[ "$REQUIRE_CORE" == "1" ]]; then
-  curl -sf --max-time 2 "$CORE_URL" >/dev/null || {
-    echo "HARBOUR_AI_REQUIRE_CORE_CHECK=1 but core not reachable at $CORE_URL"
-    exit 1
-  }
-  curl -sS "$CORE_URL" | tee docs/ai/ops/core-health-before-disable.json >/dev/null
-fi
-# Re-check after disable whenever core was in scope for this run:
-if [[ "$REQUIRE_CORE" == "1" ]] || [[ -f docs/ai/ops/core-health-before-disable.json ]]; then
-  curl -sS "$CORE_URL" | tee docs/ai/ops/core-health-still-up.json
+  capture_core docs/ai/ops/core-health-still-up.json
 fi
 
 python3 - <<'PY'
@@ -736,6 +748,7 @@ ok = a.get("ai", {}).get("enabled") is False and d.get("error") == "ai_disabled"
 if os.environ.get("HARBOUR_AI_REQUIRE_CORE_CHECK") == "1":
     before = json.loads((r / "core-health-before-disable.json").read_text())
     after = json.loads((r / "core-health-still-up.json").read_text())
+    # Bodies were only written after curl -f succeeded (HTTP 2xx).
     ok = ok and isinstance(before, dict) and isinstance(after, dict)
 print("disable_ok=", ok)
 sys.exit(0 if ok else 1)
