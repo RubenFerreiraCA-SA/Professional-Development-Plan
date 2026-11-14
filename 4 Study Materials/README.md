@@ -10,6 +10,10 @@ This folder contains the **textbooks and progressive teaching materials** for th
 
 [Read the Cloud Engineering textbook](4.2%20Cloud%20Engineering/README.md) — **C01–C03** authored. Course-detail for C01–C03 is available under [Cloud Engineering](../3%20Course%20Detail/3.2%20Cloud%20Engineering/).
 
+## AI Engineering textbook
+
+[Read the AI Engineering textbook](4.3%20AI%20Engineering/README.md) — **A01–A03** authored (**optional** Final Project track). Course-detail under [AI Engineering](../3%20Course%20Detail/3.3%20AI%20Engineering/).
+
 ## Other disciplines
 
-AI and Platform Engineering textbooks are not yet authored; their course-detail files remain working outlines.
+Platform Engineering textbook is not yet authored; its course-detail files remain working outlines.

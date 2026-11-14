@@ -50,3 +50,5 @@ Track Harbour increments on the [Final Project Checklist](../../1%20Foundational
 | Clean-room lab certification | Separate QA workstream (same rule as DevOps) |
 
 **Previous discipline:** [DevOps syllabus](../3.1%20DevOps/D00%20DevOps%20Syllabus.md) · **Next module:** [C01](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md)
+
+**Next discipline (optional):** [AI syllabus](../3.3%20AI%20Engineering/A00%20AI%20Syllabus.md) · **Or:** [Platform syllabus](../3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md)

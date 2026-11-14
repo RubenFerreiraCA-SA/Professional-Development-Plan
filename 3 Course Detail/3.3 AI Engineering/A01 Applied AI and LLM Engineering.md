@@ -3,32 +3,49 @@
 | | Details |
 | --- | --- |
 | **Estimated study time** | 32–40 hours |
-| **Prerequisites** | To be defined. |
+| **Prerequisites** | Working Harbour health/runbook path from DevOps (D03+) strongly recommended; provider API optional if using the mock LLM path. |
+| **Pathway** | Optional AI track — skip freely if AI is out of PDP scope. |
 
-> **Status:** Draft module scaffold — not yet signed off.
+## Objective
 
-**Purpose:** LLM integrations, retrieval, prompting and evaluation fundamentals.
+Build a **scoped, read-only** Harbour diagnostics assistant (`harbour-diag`): grounded answers over runbooks/health context, an evaluation harness, and user-visible limitations — without any path that mutates production state.
 
-## Module overview
+## Outcomes
 
-_TODO: Define professional relevance and scope._
+1. Separate system/user prompts and require structured answers (or explicit refusal) when out of scope.  
+2. Ground responses in Harbour docs/runbooks (lightweight retrieval is enough).  
+3. Run an evaluation suite and record pass/fail evidence.  
+4. Document feature boundaries so a peer user can see what the assistant must not do.  
+5. Keep provider secrets out of Git; prefer a mock/local path for core labs.
 
-## Learning outcomes
+## Suggested activities
 
-_TODO: Write measurable outcomes._
+| Activity | Estimated hours |
+| --- | ---: |
+| Scope, prompting and structured outputs | 8–10 |
+| Grounding / retrieval over runbooks | 8–10 |
+| Evaluation harness and boundary docs | 10–12 |
+| Practical Assessment | 6–8 |
+| **Total** | **32–40** |
 
-## Learning activities
+## 1. Prompting and scope
 
-_TODO: Add each activity's topics, learning outcomes and learning resources._
+Define `harbour-diag` as operator assistance, not a general chatbot. System prompts must refuse infra mutation, secret exfiltration and out-of-scope product advice.
 
-## Practical labs and deliverables
+## 2. Grounding
 
-_TODO: Specify reproducible exercises, outputs and evidence._
+Retrieve from `docs/runbooks/` (and related Harbour notes) before answering. Prefer simple, reproducible retrieval over an unmanaged vector-database snowflake.
 
-## Certifications and exam-objective mapping
+## 3. Evaluation
 
-_TODO: Check the current official provider syllabus and map objectives. Proposed certifications are not guarantees._
+Maintain golden cases under `app/ai/diagnostics/eval/`. Record results (e.g. `docs/ai/eval-a01.json`). Fail closed when the bar is not met.
 
-## Assessment and completion criteria
+## Practical Assessment — read-only diagnostics with eval
 
-_TODO: Define pass standards, practical assessment and review._
+**Required evidence:** Feature boundary docs, runnable assistant (mock OK), eval results meeting your bar, user-visible limitations text, no secrets in Git.
+
+**Acceptance:** Checklist A01 — the feature cannot mutate production state in the demo; agreed evaluation cases meet your bar; limitations are visible to a user.
+
+**Textbook:** [Chapter 1 — Applied AI and LLM Engineering](../../4%20Study%20Materials/4.3%20AI%20Engineering/A01%20Applied%20AI%20and%20LLM%20Engineering.md)
+
+**Previous:** [A00 — AI syllabus](A00%20AI%20Syllabus.md) · **Next:** [A02 — Agentic Systems and Orchestration](A02%20Agents%20and%20Orchestration.md)

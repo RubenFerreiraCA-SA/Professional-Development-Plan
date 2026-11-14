@@ -373,6 +373,7 @@ aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   --cluster "$CLUSTER" --services "$SERVICE" \
   --query 'services[0].{taskDef:taskDefinition,desired:desiredCount,running:runningCount,deployments:deployments[*].{status:status,rollout:rolloutState,reason:rolloutStateReason,running:runningCount,td:taskDefinition}}' \
   --output json | tee "$HARBOUR_ROOT/docs/cloud/recovery/deploy-state-after-revert.json"
+
 FINAL_IMAGE="$(aws ecs describe-task-definition --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   --task-definition "$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
     --cluster "$CLUSTER" --services "$SERVICE" \
@@ -383,9 +384,30 @@ test "$FINAL_IMAGE" = "$GOOD_IMAGE" || {
   echo "Service image still != preserved GOOD_IMAGE — recovery incomplete"
   exit 1
 }
+
+# Executable assertions: deploy finished, capacity matches (not only image + curl):
+PRIMARY_ROLLOUT="$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].deployments[?status==`PRIMARY`]|[0].rolloutState' --output text)"
+DESIRED="$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].desiredCount' --output text)"
+RUNNING="$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].runningCount' --output text)"
+echo "PRIMARY_ROLLOUT=$PRIMARY_ROLLOUT desired=$DESIRED running=$RUNNING" \
+  | tee -a "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
+test "$PRIMARY_ROLLOUT" = "COMPLETED" || {
+  echo "PRIMARY rolloutState is '$PRIMARY_ROLLOUT' (want COMPLETED) — wait or investigate"
+  exit 1
+}
+test "$RUNNING" = "$DESIRED" || {
+  echo "runningCount ($RUNNING) != desiredCount ($DESIRED) — recovery incomplete"
+  exit 1
+}
 ```
 
-**Verify:** Observe log shows unhealthy/failed during inject; after revert you have HTTP 200 **and** `deploy-state-after-revert.json` with a completed/primary deployment on `GOOD_IMAGE` (not merely a lucky curl). File `good-image.txt`, both plan files, and both deploy-state snapshots. `terraform -chdir="$TF_STAGING" plan` (with restored tfvars) is empty or unrelated. If you use GitOps from [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), the same story is “bad digest commit → revert commit” with sync evidence — still attach the observe log and final deployment status.
+**Verify:** Observe log shows unhealthy/failed during inject; after revert you have HTTP 200 **and** the script assertions pass (`FINAL_IMAGE` = `GOOD_IMAGE`, PRIMARY `rolloutState` = `COMPLETED`, `runningCount` = `desiredCount`). File `good-image.txt`, both plan files, and both deploy-state snapshots. `terraform -chdir="$TF_STAGING" plan` (with restored tfvars) is empty or unrelated. If you use GitOps from [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), the same story is “bad digest commit → revert commit” with sync evidence — still attach the observe log and final deployment status.
 
 ### 3.3.3 Option B — task stop / unhealthy target (standard assessment)
 
@@ -651,4 +673,4 @@ Align with [C03 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 - [ECS best practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)  
 - [D05 Terraform](../4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · [D06 GitOps Automation and Operations](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) · [C02](C02%20AWS%20Cloud%20Foundations.md) · [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)
 
-**Previous chapter:** [Chapter 2 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md) · **Course detail:** [C03](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md) · **Next:** [Platform Engineering](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) (after Cloud milestone) · **Checklist:** [Final Project Checklist · C03](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
+**Previous chapter:** [Chapter 2 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md) · **Course detail:** [C03](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md) · **Next (optional):** [AI syllabus](../../3%20Course%20Detail/3.3%20AI%20Engineering/A00%20AI%20Syllabus.md) · **Next:** [Platform syllabus](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) (after Cloud milestone) · **Checklist:** [Final Project Checklist · C03](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
