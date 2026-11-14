@@ -250,8 +250,15 @@ ALB_SG="$(terraform -chdir="$TF_STAGING" output -raw alb_security_group_id 2>/de
 SERVICE_URL="$(terraform -chdir="$TF_STAGING" output -raw service_url 2>/dev/null || true)"
 ALB_DNS="$(terraform -chdir="$TF_STAGING" output -raw alb_dns_name 2>/dev/null || true)"
 
+# Discover ECS names (defaults match D05 staging prefix; verify before using):
+aws ecs list-clusters --profile harbour-training --region "$AWS_REGION"
+# Default D05 staging names — override if you changed the naming prefix:
+export CLUSTER="${CLUSTER:-harbour-stg-cluster}"
+aws ecs list-services --profile harbour-training --cluster "$CLUSTER" --region "$AWS_REGION"
+export SERVICE="${SERVICE:-harbour-stg-api}"
+# Confirm both appear in the list output before continuing.
+
 # Tasks SG may not be a root output in D05 — discover from the running service ENI/SG:
-# (Set CLUSTER/SERVICE to your names, e.g. harbour-stg-cluster / harbour-stg-api)
 APP_SG="$(aws ecs describe-services --profile harbour-training --region "$AWS_REGION" \
   --cluster "$CLUSTER" --services "$SERVICE" \
   --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[0]' \
@@ -303,15 +310,19 @@ aws ec2 describe-security-groups \
 D05’s training ALB uses an **HTTP** listener (`service_url = http://…`). Do **not** assume HTTPS until you add a TLS listener and a valid certificate (links to C01 TLS lessons).
 
 ```bash
-# Prefer Terraform output; HTTP is the D05 baseline:
-export HARBOUR_HEALTH_URL="${SERVICE_URL}/health"
+# Prefer Terraform output from §2.4.2; HTTP is the D05 baseline.
+# Validate before constructing — empty SERVICE_URL would yield "/health" and look nonempty.
+case "${SERVICE_URL:-}" in
+  http://*|https://*) ;;
+  *)
+    echo "No valid service URL. Complete D05 Stage C first (runtime apply), then re-run §2.4.2."
+    exit 1
+    ;;
+esac
+export HARBOUR_HEALTH_URL="${SERVICE_URL%/}/health"
 # e.g. http://harbour-xxxx.eu-west-1.elb.amazonaws.com/health
 # Only use https://… after you have configured an HTTPS listener + cert (enhancement below).
 
-test -n "${HARBOUR_HEALTH_URL:-}" || {
-  echo "Set HARBOUR_HEALTH_URL from service_url, or skip until D05 Stage C apply"
-  exit 1
-}
 curl -v --connect-timeout 5 --max-time 15 "$HARBOUR_HEALTH_URL" \
   2>&1 | tee "$HARBOUR_ROOT/docs/cloud/aws-health-curl.txt" | tail -n 40
 
@@ -370,7 +381,12 @@ Least privilege applies to **running services**, not only the demo CLI profile. 
 
 ```bash
 export AWS_PROFILE=harbour-training
-# CLUSTER / SERVICE from your staging names:
+# Reuse CLUSTER/SERVICE from §2.4.2 (discover if unset):
+export CLUSTER="${CLUSTER:-harbour-stg-cluster}"
+export SERVICE="${SERVICE:-harbour-stg-api}"
+aws ecs list-services --cluster "$CLUSTER" --region "$AWS_REGION" | grep -F "$SERVICE" \
+  || { echo "SERVICE not found on CLUSTER — list-clusters / list-services and set names"; exit 1; }
+
 TASK_DEF="$(aws ecs describe-services --region "$AWS_REGION" \
   --cluster "$CLUSTER" --services "$SERVICE" \
   --query 'services[0].taskDefinition' --output text)"
