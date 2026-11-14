@@ -9,7 +9,7 @@ This textbook accompanies the [Cloud Engineering overview](../../3%20Course%20De
 | Chapter | Subject | Study material |
 | --- | --- | --- |
 | 1 · C01 | Linux, Networking and Cloud Fundamentals | [Read Chapter 1](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) |
-| 2 · C02 | AWS Cloud Foundations | Not yet authored |
+| 2 · C02 | AWS Cloud Foundations | [Read Chapter 2](C02%20AWS%20Cloud%20Foundations.md) |
 | 3 · C03 | AWS Infrastructure and Architecture | Not yet authored |
 
 ## How to study

@@ -55,6 +55,6 @@ Document where Harbour API, DB, logs and DNS live. Prefer linking to existing `i
 
 **Acceptance:** Checklist C02 — Harbour runs in the documented landing zone; demo path does not rely on standing admin credentials.
 
-**Textbook:** Not yet authored (course detail ready for study planning).
+**Textbook:** [Chapter 2 — AWS Cloud Foundations](../../4%20Study%20Materials/4.2%20Cloud%20Engineering/C02%20AWS%20Cloud%20Foundations.md)
 
 **Previous:** [C01](C01%20Linux%20Networking%20and%20Cloud%20Fundamentals.md) · **Next:** [C03](C03%20AWS%20Infrastructure%20and%20Architecture.md)
