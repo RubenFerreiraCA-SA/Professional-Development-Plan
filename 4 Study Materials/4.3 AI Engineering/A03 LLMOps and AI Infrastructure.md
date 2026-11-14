@@ -171,30 +171,72 @@ from __future__ import annotations
 import os, time
 from collections import defaultdict, deque
 
-MAX_OUT_TOKENS = int(os.getenv("HARBOUR_AI_MAX_TOKENS", "512"))
+# Distinct controls — do not reuse MAX_OUT_TOKENS as an input-size ceiling.
+MAX_IN_TOKENS = int(os.getenv("HARBOUR_AI_MAX_IN_TOKENS", "2000"))   # prompt/question estimate cap
+MAX_OUT_TOKENS = int(os.getenv("HARBOUR_AI_MAX_OUT_TOKENS", "512"))  # reserved completion budget + provider max_tokens
 RATE_MAX = int(os.getenv("HARBOUR_AI_RATE_MAX", "30"))
 RATE_WINDOW_S = int(os.getenv("HARBOUR_AI_RATE_WINDOW_S", "300"))
-BUDGET_TOKENS = int(os.getenv("HARBOUR_AI_BUDGET_TOKENS", "20000"))
+BUDGET_TOKENS = int(os.getenv("HARBOUR_AI_BUDGET_TOKENS", "20000"))  # aggregate estimated spend
 
 _hits: dict[str, deque[float]] = defaultdict(deque)
 _spent = 0
 
-def check_request(identity: str = "local", est_tokens: int = 200) -> dict:
-    """In-process training limiter only — not durable multi-replica spend control."""
+
+def estimate_input_tokens(question: str, overhead: int = 200) -> int:
+    """Rough prompt-side estimate (chars/4 + fixed overhead). Not provider billing."""
+    return max(1, len(question) // 4 + overhead)
+
+
+def check_request(
+    identity: str = "local",
+    *,
+    est_input_tokens: int,
+    reserve_output_tokens: int | None = None,
+) -> dict:
+    """In-process training limiter only — not durable multi-replica spend control.
+
+    Separates: input allowance, reserved output tokens, and aggregate budget.
+    """
     global _spent
+    out_reserve = MAX_OUT_TOKENS if reserve_output_tokens is None else int(reserve_output_tokens)
+    if est_input_tokens > MAX_IN_TOKENS:
+        return {
+            "allowed": False,
+            "reason": "input_tokens",
+            "est_input_tokens": est_input_tokens,
+            "max_in_tokens": MAX_IN_TOKENS,
+        }
+    if out_reserve > MAX_OUT_TOKENS:
+        return {
+            "allowed": False,
+            "reason": "output_tokens",
+            "reserve_output_tokens": out_reserve,
+            "max_out_tokens": MAX_OUT_TOKENS,
+        }
+    total_est = est_input_tokens + out_reserve
     now = time.time()
     q = _hits[identity]
     while q and now - q[0] > RATE_WINDOW_S:
         q.popleft()
     if len(q) >= RATE_MAX:
         return {"allowed": False, "reason": "rate_limited"}
-    if _spent + est_tokens > BUDGET_TOKENS:
-        return {"allowed": False, "reason": "budget_exceeded"}
-    if est_tokens > MAX_OUT_TOKENS:
-        return {"allowed": False, "reason": "max_tokens"}
+    if _spent + total_est > BUDGET_TOKENS:
+        return {
+            "allowed": False,
+            "reason": "budget_exceeded",
+            "spent": _spent,
+            "total_est": total_est,
+            "budget_tokens": BUDGET_TOKENS,
+        }
     q.append(now)
-    _spent += est_tokens
-    return {"allowed": True, "spent": _spent, "max_tokens": MAX_OUT_TOKENS}
+    _spent += total_est
+    return {
+        "allowed": True,
+        "spent": _spent,
+        "est_input_tokens": est_input_tokens,
+        "reserve_output_tokens": out_reserve,
+        "max_out_tokens": MAX_OUT_TOKENS,
+    }
 ```
 
 ```python
@@ -281,7 +323,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ai.diagnostics.agent_runtime import execute_tool
-from ai.diagnostics.limits import check_request
+from ai.diagnostics.limits import MAX_OUT_TOKENS, check_request, estimate_input_tokens
 from ai.diagnostics.llm import LlmError, complete
 from ai.diagnostics.retrieve import load_corpus, retrieve
 from ai.diagnostics.telemetry import log_call
@@ -318,6 +360,21 @@ def health():
 MAX_QUESTION_LEN = int(os.getenv("HARBOUR_AI_MAX_QUESTION_LEN", "2000"))
 
 
+def _fail(t0: float, *, error: str, status: int, ai_on: bool, tokens_in: int = 0, **extra: Any):
+    """Shared completion path — validation failures are instrumented too."""
+    log_call(
+        latency_ms=(time.perf_counter() - t0) * 1000,
+        tokens_in=tokens_in,
+        tokens_out=0,
+        tool_denials=[],
+        limit_reason=error if error in ("rate_limited", "budget_exceeded", "input_tokens", "output_tokens") else "",
+        ai_enabled=ai_on,
+        result=error,
+    )
+    body = {"ok": False, "error": error, **extra}
+    return JSONResponse(body, status_code=status)
+
+
 @app.post("/v1/diagnose")
 async def diagnose(request: Request):
     t0 = time.perf_counter()
@@ -328,69 +385,52 @@ async def diagnose(request: Request):
     identity = request.headers.get("x-harbour-identity", "local")
 
     if not ai_enabled():
-        log_call(
-            latency_ms=(time.perf_counter() - t0) * 1000,
-            tokens_in=0,
-            tokens_out=0,
-            tool_denials=[],
-            limit_reason="",
-            ai_enabled=False,
-            result="ai_disabled",
-        )
-        return JSONResponse(
-            {"ok": False, "error": "ai_disabled", "hint": "HARBOUR_AI_ENABLED=true to enable"},
-            status_code=503,
-        )
+        return _fail(t0, error="ai_disabled", status=503, ai_on=False,
+                     hint="HARBOUR_AI_ENABLED=true to enable")
 
     try:
         raw: Any = await request.json()
     except Exception:
-        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+        return _fail(t0, error="invalid_json", status=400, ai_on=True)
     if not isinstance(raw, dict):
-        return JSONResponse(
-            {"ok": False, "error": "body_must_be_object", "hint": "JSON body must be a JSON object"},
-            status_code=400,
+        return _fail(
+            t0, error="body_must_be_object", status=400, ai_on=True,
+            hint="JSON body must be a JSON object",
         )
 
     question_raw = raw.get("question", raw.get("q", None))
     if question_raw is None:
-        return JSONResponse(
-            {"ok": False, "error": "missing_question", "hint": "JSON object needs string field question"},
-            status_code=400,
+        return _fail(
+            t0, error="missing_question", status=400, ai_on=True,
+            hint="JSON object needs string field question",
         )
     if not isinstance(question_raw, str):
-        return JSONResponse(
-            {"ok": False, "error": "question_must_be_string"},
-            status_code=400,
-        )
+        return _fail(t0, error="question_must_be_string", status=400, ai_on=True)
     question = question_raw.strip()
     if not question:
-        return JSONResponse(
-            {"ok": False, "error": "missing_question", "hint": "question must be non-empty"},
-            status_code=400,
+        return _fail(
+            t0, error="missing_question", status=400, ai_on=True,
+            hint="question must be non-empty",
         )
     if len(question) > MAX_QUESTION_LEN:
-        return JSONResponse(
-            {"ok": False, "error": "question_too_long", "max": MAX_QUESTION_LEN},
-            status_code=400,
+        return _fail(
+            t0, error="question_too_long", status=400, ai_on=True,
+            max=MAX_QUESTION_LEN, tokens_in=len(question) // 4,
         )
     # Do not echo the body — it may later contain sensitive operational text.
 
-    lim = check_request(identity=identity, est_tokens=max(50, len(question) // 4 + 200))
+    est_in = estimate_input_tokens(question)
+    lim = check_request(
+        identity=identity,
+        est_input_tokens=est_in,
+        reserve_output_tokens=MAX_OUT_TOKENS,
+    )
     if not lim.get("allowed"):
         limit_reason = str(lim.get("reason") or "limited")
-        log_call(
-            latency_ms=(time.perf_counter() - t0) * 1000,
-            tokens_in=len(question) // 4,
-            tokens_out=0,
-            tool_denials=[],
-            limit_reason=limit_reason,
-            ai_enabled=True,
-            result=limit_reason,
-        )
-        return JSONResponse(
-            {"ok": False, "error": limit_reason, "limits": {k: lim[k] for k in lim if k != "allowed"}},
-            status_code=429,
+        return _fail(
+            t0, error=limit_reason, status=429, ai_on=True,
+            tokens_in=est_in,
+            limits={k: lim[k] for k in lim if k != "allowed"},
         )
 
     root = harbour_root()
@@ -562,20 +602,33 @@ Do **not** use `pkill -f` against a command string — that can kill unrelated p
 Also add a tiny starter that writes the PID (use this whenever you bring diag up for labs):
 
 ```bash
-# scripts/start-harbour-ai.sh — starts diag and records docs/ai/ops/harbour-diag.pid
+# scripts/start-harbour-ai.sh — starts diag and records owned instance identity
 set -euo pipefail
-ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
+ROOT="$(cd "${HARBOUR_ROOT:-$HOME/harbour-platform}" && pwd)"
 cd "$ROOT"
 mkdir -p docs/ai/ops scripts
 ENABLED="${HARBOUR_AI_ENABLED:-true}"
 export PYTHONPATH="$ROOT/app${PYTHONPATH:+:$PYTHONPATH}" MOCK_LLM="${MOCK_LLM:-1}" HARBOUR_ROOT="$ROOT"
 HARBOUR_AI_ENABLED="$ENABLED" uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 \
   >docs/ai/ops/uvicorn.log 2>&1 &
-echo $! > docs/ai/ops/harbour-diag.pid
+PID=$!
+echo "$PID" > docs/ai/ops/harbour-diag.pid
+# Record enough identity to refuse stale/reused PIDs later (cwd + start time + cmdline mark).
+{
+  echo "pid=$PID"
+  echo "root=$ROOT"
+  echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "cmdline_mark=ai.diagnostics.api"
+  if [[ -r "/proc/$PID/cwd" ]]; then echo "cwd=$(readlink -f "/proc/$PID/cwd")"; fi
+  if [[ -r "/proc/$PID/stat" ]]; then
+    # field 22 = starttime (clock ticks) — opaque ownership token for this boot
+    awk '{print "starttime="$22}' "/proc/$PID/stat"
+  fi
+} > docs/ai/ops/harbour-diag.identity
 # Bounded readiness (not a fixed sleep):
 for i in $(seq 1 30); do
   if curl -sf http://127.0.0.1:8088/health >/dev/null; then
-    echo "ready pid=$(cat docs/ai/ops/harbour-diag.pid) enabled=$ENABLED"
+    echo "ready pid=$PID enabled=$ENABLED root=$ROOT"
     exit 0
   fi
   sleep 0.2
@@ -605,23 +658,40 @@ wait_ready() {
 
 stop_local_pid() {
   local pid_file="docs/ai/ops/harbour-diag.pid"
+  local id_file="docs/ai/ops/harbour-diag.identity"
   test -f "$pid_file" || { echo "missing $pid_file — start with scripts/start-harbour-ai.sh first"; exit 1; }
-  local pid
-  pid="$(cat "$pid_file")"
-  [[ "$pid" =~ ^[0-9]+$ ]] || { echo "invalid pid in $pid_file"; exit 1; }
+  test -f "$id_file" || { echo "missing $id_file — refuse stop without ownership record"; exit 1; }
+  local pid expected_root expected_start
+  pid="$(sed -n 's/^pid=//p' "$id_file" | head -n1)"
+  expected_root="$(sed -n 's/^root=//p' "$id_file" | head -n1)"
+  expected_start="$(sed -n 's/^starttime=//p' "$id_file" | head -n1)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || { echo "invalid pid in identity file"; exit 1; }
+  [[ "$(cat "$pid_file")" == "$pid" ]] || { echo "pid file / identity mismatch"; exit 1; }
   if [[ ! -r "/proc/$pid/cmdline" ]]; then
-    echo "pid $pid not running"; rm -f "$pid_file"; return 0
+    echo "pid $pid not running"; rm -f "$pid_file" "$id_file"; return 0
   fi
-  local cmd
+  local cmd cwd starttime
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
   echo "$cmd" | grep -q 'ai.diagnostics.api' || {
     echo "refusing to kill pid $pid — cmdline is not harbour-diag: $cmd"
     exit 1
   }
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  if [[ -n "$expected_root" && -n "$cwd" && "$cwd" != "$expected_root" ]]; then
+    echo "refusing to kill pid $pid — cwd $cwd != recorded root $expected_root"
+    exit 1
+  fi
+  if [[ -n "$expected_start" && -r "/proc/$pid/stat" ]]; then
+    starttime="$(awk '{print $22}' "/proc/$pid/stat")"
+    if [[ "$starttime" != "$expected_start" ]]; then
+      echo "refusing to kill pid $pid — starttime mismatch (stale/reused PID)"
+      exit 1
+    fi
+  fi
   kill "$pid"
   local i
   for i in $(seq 1 30); do
-    if [[ ! -e "/proc/$pid" ]]; then rm -f "$pid_file"; return 0; fi
+    if [[ ! -e "/proc/$pid" ]]; then rm -f "$pid_file" "$id_file"; return 0; fi
     sleep 0.1
   done
   echo "pid $pid did not exit"; exit 1
@@ -644,12 +714,16 @@ curl -sS "$BASE/health" | tee docs/ai/ops/health-after-disable.json
 curl -sS -X POST "$BASE/v1/diagnose" -H 'content-type: application/json' \
   -d '{"question":"status?"}' | tee docs/ai/ops/diagnose-after-disable.json
 
-# Exit assessment: when core Harbour is in scope, require baseline + after-disable core checks.
-if [[ "$REQUIRE_CORE" == "1" ]] || curl -sf --max-time 2 "$CORE_URL" >/dev/null 2>&1; then
-  test -f docs/ai/ops/core-health-before-disable.json || {
-    echo "Capture core baseline first: curl -sS $CORE_URL | tee docs/ai/ops/core-health-before-disable.json"
+# Core Harbour: for exit assessment, always capture fresh before + after (not a stale file alone).
+if [[ "$REQUIRE_CORE" == "1" ]]; then
+  curl -sf --max-time 2 "$CORE_URL" >/dev/null || {
+    echo "HARBOUR_AI_REQUIRE_CORE_CHECK=1 but core not reachable at $CORE_URL"
     exit 1
   }
+  curl -sS "$CORE_URL" | tee docs/ai/ops/core-health-before-disable.json >/dev/null
+fi
+# Re-check after disable whenever core was in scope for this run:
+if [[ "$REQUIRE_CORE" == "1" ]] || [[ -f docs/ai/ops/core-health-before-disable.json ]]; then
   curl -sS "$CORE_URL" | tee docs/ai/ops/core-health-still-up.json
 fi
 
@@ -659,10 +733,10 @@ r = pathlib.Path("docs/ai/ops")
 a = json.loads((r / "health-after-disable.json").read_text())
 d = json.loads((r / "diagnose-after-disable.json").read_text())
 ok = a.get("ai", {}).get("enabled") is False and d.get("error") == "ai_disabled"
-if os.environ.get("HARBOUR_AI_REQUIRE_CORE_CHECK") == "1" or (r / "core-health-still-up.json").is_file():
-    core = json.loads((r / "core-health-still-up.json").read_text())
-    # Accept any JSON 200 body from core — shape varies by D03/D05.
-    ok = ok and isinstance(core, dict)
+if os.environ.get("HARBOUR_AI_REQUIRE_CORE_CHECK") == "1":
+    before = json.loads((r / "core-health-before-disable.json").read_text())
+    after = json.loads((r / "core-health-still-up.json").read_text())
+    ok = ok and isinstance(before, dict) and isinstance(after, dict)
 print("disable_ok=", ok)
 sys.exit(0 if ok else 1)
 PY
@@ -670,18 +744,16 @@ PY
 
 ```bash
 chmod +x "$HARBOUR_ROOT/scripts/start-harbour-ai.sh" "$HARBOUR_ROOT/scripts/disable-harbour-ai.sh"
-# Baseline (enabled) + optional core baseline for exit assessment:
+# Baseline (enabled). For exit assessment with core Harbour in scope, export REQUIRE_CORE=1.
 export HARBOUR_AI_ENABLED=true
 ./scripts/start-harbour-ai.sh
 curl -sS http://127.0.0.1:8088/health | tee docs/ai/ops/health-before-disable.json
-# If core Harbour is part of your exit scenario:
-# curl -sS "${HARBOUR_CORE_HEALTH_URL:-http://127.0.0.1:8000/health}" \
-#   | tee docs/ai/ops/core-health-before-disable.json
-# ONE ACTION:
-HARBOUR_AI_ENABLED=false ./scripts/disable-harbour-ai.sh | tee docs/ai/ops/disable-script.out
+# ONE ACTION (disable script captures fresh core before+after when REQUIRE_CORE=1):
+HARBOUR_AI_REQUIRE_CORE_CHECK="${HARBOUR_AI_REQUIRE_CORE_CHECK:-0}" \
+  HARBOUR_AI_ENABLED=false ./scripts/disable-harbour-ai.sh | tee docs/ai/ops/disable-script.out
 ```
 
-**Note:** export `HARBOUR_AI_ENABLED=false` before calling `disable-harbour-ai.sh` so `start-harbour-ai.sh` (invoked inside) restarts disabled. Or set it inside the disable script before the restart — both are fine if documented.
+Beyond the lab, prefer Compose/systemd (or similar) over custom PID files. The identity file is a training hardening against stale PIDs, not a production process manager.
 
 Runbook stub — `docs/runbooks/ai-disable-rollback.md`:
 
@@ -716,11 +788,12 @@ You created `limits.py` in §3.2.4. This section explains and drills it.
 
 | Limit | Training default | When exceeded |
 | --- | --- | --- |
-| Max output tokens | e.g. 512 | Deny / truncate before call |
-| Rate limit | e.g. 30 / 5 min / **mock** identity | 429 |
-| Budget | mock tokens/day | `budget_exceeded` |
-| Redaction | strip `sk-`, Bearer, passwords | Never commit raw secrets |
+| Max **input** tokens | `HARBOUR_AI_MAX_IN_TOKENS` (2000) | 429 `input_tokens` |
+| Max **output** tokens | `HARBOUR_AI_MAX_OUT_TOKENS` (512) | reserved in limiter; live path sets provider `max_tokens` |
+| Aggregate budget | `HARBOUR_AI_BUDGET_TOKENS` (input+reserved out) | 429 `budget_exceeded` |
+| Rate limit | e.g. 30 / 5 min / **mock** identity | 429 `rate_limited` |
 | Question length | `HARBOUR_AI_MAX_QUESTION_LEN` (2000) | 400 `question_too_long` |
+| Redaction | strip `sk-`, Bearer, passwords | Never commit raw secrets |
 
 **Mock identity:** `/v1/diagnose` keys the limiter with `x-harbour-identity` (default `local`). That header is a **training demo only** — any client can spoof it to change buckets. A real deployment must derive identity from authenticated middleware or a trusted gateway. The in-memory limiter also resets on process restart and is not shared across replicas; token estimates are not invoices. Do not claim durable spend control or secure per-user quotas from this lab alone.
 
@@ -749,11 +822,16 @@ for line in pathlib.Path("docs/ai/ops/limits-api-drill.jsonl").read_text().split
     if line:
         rows.append(json.loads(line))
 assert any(r.get("ok") is True for r in rows), rows
-assert any(r.get("error") in ("rate_limited", "budget_exceeded") for r in rows), rows
+assert any(
+    r.get("error") in ("rate_limited", "budget_exceeded", "input_tokens", "output_tokens")
+    for r in rows
+), rows
 print("limits_enforced_via_api_ok")
 PY
 kill "$UV_PID"
 ```
+
+Also confirm live-provider completions pass `max_tokens` (A01 `openai_complete` reads `HARBOUR_AI_MAX_OUT_TOKENS`) — that is the explicit provider output ceiling, separate from input allowance and aggregate budget.
 
 ### 3.5.3 Redaction
 
@@ -820,14 +898,35 @@ def test_health_reports_ai():
     assert "bundle_version" in body["ai"]
 
 
-def test_diagnose_grounded_or_honest_no_match():
-    r = client.post("/v1/diagnose", json={"question": "What does GET /health status degraded mean?"})
+def test_diagnose_known_health_returns_citation():
+    """Known health question must cite the seeded health runbook — not a generic ok shape."""
+    r = client.post(
+        "/v1/diagnose",
+        json={"question": "What does GET /health status degraded mean?"},
+    )
     assert r.status_code == 200
     body = r.json()
-    assert body.get("ok") is True
-    assert "echo" not in body
+    assert body.get("ok") is True and "echo" not in body
     diag = body["diagnosis"]
-    assert "answer" in diag and "citations" in diag and "confidence" in diag
+    assert diag.get("refused") is False
+    cites = " ".join(diag.get("citations") or []).lower()
+    assert "health" in cites, cites  # seeded docs/runbooks/*health* label
+    assert diag.get("confidence") in ("low", "medium", "high")
+
+
+def test_diagnose_unsupported_is_honest_no_match():
+    """Unsupported subject → low confidence, empty citations, insufficient-evidence language."""
+    r = client.post(
+        "/v1/diagnose",
+        json={"question": "How do I tune the quantum-cache flux capacitor?"},
+    )
+    assert r.status_code == 200
+    diag = r.json()["diagnosis"]
+    assert diag.get("refused") is False
+    assert diag.get("confidence") == "low"
+    assert diag.get("citations") == []
+    blob = (diag.get("answer") or "").lower()
+    assert any(p in blob for p in ("insufficient", "no matching", "cannot find")), blob
 
 
 def test_diagnose_rejects_non_object_body():
@@ -855,6 +954,32 @@ def test_disabled_returns_ai_disabled(monkeypatch):
     r = client.post("/v1/diagnose", json={"question": "status?"})
     assert r.status_code == 503
     assert r.json().get("error") == "ai_disabled"
+
+
+def test_eval_gate_fails_when_a_case_fails(tmp_path, monkeypatch):
+    """Negative: a failed A01 case must make the integer gate fail (not a truthy passed count)."""
+    import json
+    import subprocess
+    import sys
+
+    report = {
+        "total": 3,
+        "passed": 2,
+        "failed": 1,
+        "results": [{"id": "x", "pass": False}],
+    }
+    path = tmp_path / "eval-a01.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    gate = f"""
+import json, pathlib, sys
+data = json.loads(pathlib.Path({str(path)!r}).read_text())
+total = int(data["total"]); passed = int(data["passed"]); failed = int(data["failed"])
+assert total > 0
+assert failed == 0
+assert passed == total
+"""
+    proc = subprocess.run([sys.executable, "-c", gate], capture_output=True, text=True)
+    assert proc.returncode != 0, "gate must fail when failed > 0"
 ```
 
 ```bash
@@ -867,7 +992,7 @@ pytest -q app/ai/diagnostics/tests/test_api_integration.py \
   | tee docs/ai/ops/api-integration-pytest.txt
 ```
 
-This catches regressions in request validation, refuse path, disable flag, and diagnose shape — beyond A01 eval alone.
+This catches regressions in **grounding** (citation vs insufficient-evidence), request validation, refuse path, disable flag, and a negative proof that a partial eval report fails the gate.
 
 ### 3.7.2 Eval in CI mindset
 
@@ -927,7 +1052,9 @@ bash "$HARBOUR_ROOT/scripts/check-ai-eval.sh" | tee "$HARBOUR_ROOT/docs/ai/ops/e
 | `harbour_diag.eval` missing | Wrong module name | `python3 app/ai/diagnostics/eval/run_eval.py` |
 | Secrets in `docs/ai/` | Raw provider logs | Redact; rotate key |
 | Port 8088 busy | Prior uvicorn | `ss -ltnp \| grep 8088` then kill PID |
-| No telemetry.jsonl | `log_call` not on request path | Instrument `api.diagnose` |
+| No telemetry.jsonl | `log_call` not on request path | Instrument `api.diagnose` (incl. validation via `_fail`) |
+| Stale PID refused | Identity/starttime mismatch | Restart with `start-harbour-ai.sh`; do not hand-edit pid file |
+| Gate passes bad eval | Forgot integer assertions | `test_eval_gate_fails_when_a_case_fails` must fail |
 
 ---
 
@@ -954,7 +1081,7 @@ Align with [A03 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/
 | Integration | Echo `/v1/diagnose` | Grounded diagnose via A01+A02 on HTTP; object/string validation | Peer reproduces exit scenario cold |
 | Versioning | Ad-hoc prompt in chat | VERSION + git_sha + changelog | Rollback of pin **and** code shown |
 | Kill switch | `pkill -f` / fixed sleeps | PID-file disable + readiness loop + verify | Compose mode + required core check |
-| Limits | Helper-only drill | API returns rate/budget deny; mock identity labelled | Shared-store note + provider cap |
+| Limits | Mixed input/output ceiling | Separate in/out/budget; API deny + live `max_tokens` | Shared-store note + provider spend cap |
 | Monitoring | Standalone `log_call` demo | Telemetry from live diagnose paths | Optional D07 metric |
 | Eval in CI | Stale JSON / bool `passed` | Re-run eval + `test_api_integration.py` | Hooked into D04 with MOCK |
 

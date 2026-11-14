@@ -441,9 +441,13 @@ def openai_complete(question: str, context: str, health_text: str = "") -> dict:
         return refusal_payload(
             "Mutation / deploy / write actions are out of scope for harbour-diag (A01)."
         )
+    # Cap provider completions explicitly (A03 MAX_OUT_TOKENS / HARBOUR_AI_MAX_OUT_TOKENS).
+    # This is the output-token ceiling — distinct from input allowance and aggregate budget.
+    max_out = int(os.environ.get("HARBOUR_AI_MAX_OUT_TOKENS", "512"))
     body = {
         "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         "temperature": 0,
+        "max_tokens": max_out,
         # JSON mode reduces malformed output, but it does NOT enforce our schema or rules.
         # App-side validate_answer() (via _parse_json_answer) is still required.
         "response_format": {"type": "json_object"},
