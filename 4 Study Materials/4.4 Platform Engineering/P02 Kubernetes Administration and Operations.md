@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 2 of 4*
 
-> **Status:** Authored; corrections after audits `ff921e0`/`ea9eb06`/`65a094d` — **not signed off**. Clean-room execution still not claimed.
+> **Status:** Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` — **awaiting re-review (not signed off)**. Clean-room execution still not claimed.
 
 | | |
 | --- | --- |
@@ -896,7 +896,7 @@ Distinguish what you prove. Do **not** call a manual `kubectl apply -k` of the a
 
 **Competent (this chapter):** levels 1–3. Level 4 is strengthened in P03–P04 but should not regress here.
 
-Commit `scripts/bootstrap-flux.sh` (pin versions you tested). For **private** repos, restore the deploy key / HTTPS token Secret **before** the GitRepository becomes Ready — controllers alone are not enough.
+Commit `scripts/bootstrap-flux.sh` (pin versions you tested). For **private** repos, the script must **recreate** the deploy-key / HTTPS-token Secret from out-of-band env vars **before** the GitRepository becomes Ready — controllers alone are not enough.
 
 ```bash
 #!/usr/bin/env bash
@@ -905,15 +905,39 @@ set -euo pipefail
 : "${GIT_URL:?set GIT_URL to the Harbour repo URL Flux can read}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 FLUX_VERSION="${FLUX_VERSION:-2.4.0}"   # pin; verify against flux releases
-# Credential method for private training repos (pick one; document in ADR 0304):
-#   FLUX_GIT_SECRET=flux-system   # Secret with identity/known_hosts (SSH) or username/password (HTTPS)
-# Public repos may omit FLUX_GIT_SECRET.
+# Credential method for private training repos (document choice in ADR 0304):
+#   FLUX_GIT_SECRET=flux-system
+#   FLUX_GIT_AUTH=https   + GITHUB_TOKEN   (PAT with contents:read)
+#   FLUX_GIT_AUTH=ssh    + FLUX_SSH_PRIVATE_KEY_FILE + optional FLUX_SSH_KNOWN_HOSTS_FILE
+# Public repos may omit FLUX_GIT_SECRET / FLUX_GIT_AUTH.
 command -v flux >/dev/null
 flux install --version="$FLUX_VERSION"
 if [ -n "${FLUX_GIT_SECRET:-}" ]; then
-  # Recreate from a sealed/out-of-band backup — never commit the private key.
-  # Example (HTTPS PAT): kubectl -n flux-system create secret generic "$FLUX_GIT_SECRET" \
-  #   --from-literal=username=git --from-literal=password="$GITHUB_TOKEN"
+  FLUX_GIT_AUTH="${FLUX_GIT_AUTH:-https}"
+  case "$FLUX_GIT_AUTH" in
+    https)
+      : "${GITHUB_TOKEN:?set GITHUB_TOKEN to recreate the Flux HTTPS Secret}"
+      kubectl -n flux-system create secret generic "$FLUX_GIT_SECRET" \
+        --from-literal=username=git \
+        --from-literal=password="$GITHUB_TOKEN" \
+        --dry-run=client -o yaml | kubectl apply -f -
+      ;;
+    ssh)
+      : "${FLUX_SSH_PRIVATE_KEY_FILE:?set path to deploy-key private key}"
+      KH_ARGS=()
+      if [ -n "${FLUX_SSH_KNOWN_HOSTS_FILE:-}" ]; then
+        KH_ARGS=(--from-file=known_hosts="$FLUX_SSH_KNOWN_HOSTS_FILE")
+      else
+        ssh-keyscan github.com > /tmp/harbour-known_hosts
+        KH_ARGS=(--from-file=known_hosts=/tmp/harbour-known_hosts)
+      fi
+      kubectl -n flux-system create secret generic "$FLUX_GIT_SECRET" \
+        --from-file=identity="$FLUX_SSH_PRIVATE_KEY_FILE" \
+        "${KH_ARGS[@]}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+      ;;
+    *) echo "ERROR: FLUX_GIT_AUTH must be https or ssh" >&2; exit 1 ;;
+  esac
   kubectl -n flux-system get secret "$FLUX_GIT_SECRET" >/dev/null
   SECRET_REF="--secret-ref=$FLUX_GIT_SECRET"
 else
@@ -930,16 +954,17 @@ flux check
 kubectl -n flux-system wait --for=condition=Ready gitrepository/flux-system --timeout=180s
 ```
 
-Rebuild sequence (fails closed). After controllers are Ready, prove **functional** reconciliation with a new commit:
+Rebuild sequence (fails closed). After controllers are Ready, prove **functional** reconciliation by applying a **known observable configuration change** (not an empty commit):
 
 ```bash
 START=$(date +%s)
 kind delete cluster --name "$LAB_CLUSTER"
 kind create cluster --config infra/kind/harbour-lab.yaml --image "$KIND_NODE_IMAGE"
 # re-run P01 §1.2.2 registry wiring
-# Restore Flux Git credentials from your documented out-of-band backup first (private repos).
-export GIT_URL="git@github.com:${GH_OWNER}/harbour-platform.git"   # or HTTPS
-export FLUX_GIT_SECRET=flux-system                                 # omit for public
+# Private repos: export GITHUB_TOKEN (or FLUX_SSH_PRIVATE_KEY_FILE) so bootstrap recreates the Secret.
+export GIT_URL="https://github.com/${GH_OWNER}/harbour-platform.git"   # or SSH URL
+export FLUX_GIT_SECRET=flux-system
+export FLUX_GIT_AUTH=https                                              # or ssh
 ./scripts/bootstrap-flux.sh
 flux get sources git -A
 flux get kustomizations -A
@@ -948,18 +973,40 @@ kubectl -n flux-system wait --for=condition=Ready kustomization/flux-system --ti
 kubectl -n "$NS" wait --for=condition=Available deploy/harbour-api --timeout=300s
 ./deploy/platform/staging/test-rbac.sh "$NS"
 ./deploy/platform/staging/test-connectivity.sh "$NS"
-# Functional reconciliation proof: empty commit → observe Kustomization LastAppliedRevision advance.
-BEFORE="$(kubectl -n flux-system get kustomization flux-system -o jsonpath='{.status.lastAppliedRevision}')"
-git commit --allow-empty -m "rebuild-reconcilation-probe $(date -u +%s)"
+# Observable reconciliation proof: change a label Flux must apply; wait until the live object shows it.
+PROBE="rebuild-probe-$(date -u +%Y%m%dT%H%M%SZ)"
+MARKER_FILE="deploy/harbour-api/overlays/staging/rebuild-probe-label.yaml"
+cat > "$MARKER_FILE" <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harbour-api
+spec:
+  template:
+    metadata:
+      labels:
+        harbour.example/rebuild-probe: "$PROBE"
+EOF
+# Ensure the overlay kustomization lists this strategic-merge patch (add once if missing).
+grep -q 'rebuild-probe-label.yaml' deploy/harbour-api/overlays/staging/kustomization.yaml \
+  || printf '\npatches:\n  - path: rebuild-probe-label.yaml\n' >> deploy/harbour-api/overlays/staging/kustomization.yaml
+git add deploy/harbour-api/overlays/staging/
+git commit -m "rebuild reconciliation probe $PROBE"
 git push
+BEFORE="$(kubectl -n flux-system get kustomization flux-system -o jsonpath='{.status.lastAppliedRevision}')"
 kubectl -n flux-system annotate gitrepository flux-system reconcile.fluxcd.io/requestedAt="$(date -u +%FT%TZ)" --overwrite
 wait_until() { local d=$((SECONDS+$1)); shift; until "$@"; do [ $SECONDS -ge $d ] && return 1; sleep 5; done; }
 wait_until 180 bash -c \
   "[ \"\$(kubectl -n flux-system get kustomization flux-system -o jsonpath='{.status.lastAppliedRevision}')\" != \"$BEFORE\" ]"
-echo "RTO (cluster rebuild incl. GitOps): $(( $(date +%s) - START )) s" | tee docs/platform/recovery-cluster.txt
+wait_until 180 bash -c \
+  "kubectl -n \"$NS\" get deploy harbour-api -o jsonpath='{.spec.template.metadata.labels.harbour\.example/rebuild-probe}' | grep -qx \"$PROBE\""
+echo "OK: Flux applied observable label harbour.example/rebuild-probe=$PROBE" \
+  | tee -a docs/platform/recovery-cluster.txt
+echo "RTO (cluster rebuild incl. GitOps): $(( $(date +%s) - START )) s" | tee -a docs/platform/recovery-cluster.txt
+# Clean up the probe in a follow-up commit once evidence is saved (optional).
 ```
 
-If you only re-apply manifests with `kubectl apply -k` and never restore Flux + credentials + subsequent reconciliation, mark GitOps recovery `Unproven`. **alice's kubeconfig is invalid** after rebuild — re-issue in the runbook.
+If you only re-apply manifests with `kubectl apply -k` and never restore Flux + credentials + subsequent reconciliation of an **observable** change, mark GitOps recovery `Unproven`. **alice's kubeconfig is invalid** after rebuild — re-issue in the runbook.
 
 ### 2.7.5 Practice — reproduce
 

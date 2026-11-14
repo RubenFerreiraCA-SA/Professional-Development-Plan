@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06`/`65a094d` — **not signed off** |
+| **Status** | Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` (Flux-safe restore, allow-list provenance, rule-level policy denies) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -164,7 +164,7 @@ CloudNativePG operator (better, more to learn); RDS (C03 option, costs money); n
 - **Not covered:** node/cluster loss on kind (PVs live on the Docker host), PITR, HA failover.
 
 ## Evidence
-docs/final/drills/stateful-YYYYMMDD/
+docs/final/drills/stateful-<RUN_ID>/
 ```
 
 ### 4.2.3 The limitations register
@@ -178,6 +178,8 @@ Create `docs/final/LIMITATIONS.md` now, not the night before the demo. One row p
 ---
 
 ## Section 4.3 — Outcome 1: a developer creates a service
+
+> **Integrated pathway (run once before claiming P03+P04 together):** boundaries between chapters are where earlier audits found defects. Prefer this sequence over isolated chapter checks: (1) `harbour-new-service` from P03’s CLI; (2) rendered manifests pass restricted PSA dry-run **and** `harbour-policy-check` / Kyverno; (3) build + attest + release-manifest artifact; (4) promote with attestation workflow checked against `platform/policy/approved-release-workflows.txt` (not against a PR-defined identity alone); (5) Flux deploys the exact verified digest (`imageID` match); (6) add the Postgres dependency and re-run allow/deny NetworkPolicy matrix; (7) seed → verified backup → damage → Flux-suspended maintenance → restore with full snapshot equivalence; (8) resume reconciliation and confirm the app serves the restored records. Record the run under `docs/final/INTEGRATED-OUTCOME.md`.
 
 Use the **P03 scaffold** exactly as a trial user would. Create the integrated demo service on a feature branch:
 
@@ -291,14 +293,16 @@ Release workflows must write `docs/releases/<svc>/<digest>.json` (example: `{"co
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-# usage: harbour-verify-artifact <oci-ref@sha256:…> --expect-commit <sha> --expect-workflow <name>
+# usage: harbour-verify-artifact <oci-ref@sha256:…> --expect-commit <sha> \
+#          (--approved-workflows-file <path> | --expect-workflow <name>)
 REF="${1:?}"; shift
-EXPECT_COMMIT=""; EXPECT_WORKFLOW="${HARBOUR_EXPECT_WORKFLOW:-}"
+EXPECT_COMMIT=""; EXPECT_WORKFLOW=""; APPROVED_FILE=""
 EXPECT_REPO="${HARBOUR_EXPECT_REPO:-${GITHUB_REPOSITORY:-}}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-commit) EXPECT_COMMIT="$2"; shift 2 ;;
     --expect-workflow) EXPECT_WORKFLOW="$2"; shift 2 ;;
+    --approved-workflows-file) APPROVED_FILE="$2"; shift 2 ;;
     --expect-repo) EXPECT_REPO="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -306,8 +310,9 @@ done
 [[ "$REF" =~ @sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: reference must be pinned by digest" >&2; exit 1; }
 SUBJECT_DIGEST="${REF##*@}"
 [ -n "$EXPECT_REPO" ] || { echo "ERROR: set HARBOUR_EXPECT_REPO or GITHUB_REPOSITORY" >&2; exit 1; }
-[ -n "$EXPECT_WORKFLOW" ] || { echo "ERROR: --expect-workflow required" >&2; exit 1; }
 [ -n "$EXPECT_COMMIT" ] || { echo "ERROR: --expect-commit required for promotion" >&2; exit 1; }
+[ -n "$APPROVED_FILE" ] || [ -n "$EXPECT_WORKFLOW" ] \
+  || { echo "ERROR: pass --approved-workflows-file (preferred) or --expect-workflow" >&2; exit 1; }
 docker buildx imagetools inspect "$REF" >/dev/null
 RAW="$(gh attestation verify "oci://$REF" --repo "$EXPECT_REPO" --format json)"
 COMMIT="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryDigest // empty')"
@@ -321,15 +326,23 @@ canon_repo() {
 GOT_REPO="$(canon_repo "$REPO")"
 WANT_REPO="$(canon_repo "$EXPECT_REPO")"
 [ "$GOT_REPO" = "$WANT_REPO" ] || { echo "FAIL: attestation repo mismatch want=$WANT_REPO got=$GOT_REPO (raw=$REPO)" >&2; exit 1; }
-[ "$WORKFLOW" = "$EXPECT_WORKFLOW" ] || { echo "FAIL: workflow mismatch want=$EXPECT_WORKFLOW got=$WORKFLOW" >&2; exit 1; }
+# Trust boundary: approved workflow identity comes from *protected platform config*
+# (or an explicit lab expect), never solely from a PR-authored release manifest.
+if [ -n "$APPROVED_FILE" ]; then
+  [ -f "$APPROVED_FILE" ] || { echo "FAIL: missing allow-list $APPROVED_FILE" >&2; exit 1; }
+  grep -Fxq "$WORKFLOW" "$APPROVED_FILE" \
+    || { echo "FAIL: attestation workflow '$WORKFLOW' not in $APPROVED_FILE" >&2; exit 1; }
+elif [ "$WORKFLOW" != "$EXPECT_WORKFLOW" ]; then
+  echo "FAIL: workflow mismatch want=$EXPECT_WORKFLOW got=$WORKFLOW" >&2; exit 1
+fi
 case "$COMMIT" in
   "$EXPECT_COMMIT"|sha1:"$EXPECT_COMMIT"|sha256:"$EXPECT_COMMIT") ;;
   *) echo "FAIL: commit mismatch want=$EXPECT_COMMIT got=$COMMIT" >&2; exit 1 ;;
 esac
-echo "VERIFIED: $REF bound to $WANT_REPO / $EXPECT_WORKFLOW / $EXPECT_COMMIT"
+echo "VERIFIED: $REF bound to $WANT_REPO / workflow=$WORKFLOW / $EXPECT_COMMIT"
 ```
 
-Always-on required check `.github/workflows/promotion-verify.yml` (set `HARBOUR_EXPECT_WORKFLOW` to the **exact** attestation workflow identity after one successful release):
+Always-on required check `.github/workflows/promotion-verify.yml`. The release manifest identifies **candidate commit and digest**; the **approved-workflow allow-list** is protected platform config and is compared to the attestation identity (not trusted from the PR alone):
 
 ```yaml
 name: promotion-verify
@@ -345,7 +358,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       HARBOUR_EXPECT_REPO: ${{ github.repository }}
-      HARBOUR_EXPECT_WORKFLOW: reusable-release.yml
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
@@ -358,6 +370,8 @@ jobs:
             echo "No promotion overlays changed — gate reports success (D04 always-on pattern)."
             exit 0
           fi
+          ALLOW="platform/policy/approved-release-workflows.txt"
+          [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
           for f in "${FILES[@]}"; do
             grep -q UNPROMOTED "$f" && { echo "skip $f (unpromoted sentinel)"; continue; }
             svc="$(echo "$f" | cut -d/ -f2)"
@@ -367,17 +381,19 @@ jobs:
             MAN="docs/releases/${svc}/${d}.json"
             [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (download CI artifact into PR)"; exit 1; }
             commit="$(jq -r .commit "$MAN")"
-            workflow="$(jq -r .workflow "$MAN")"
             [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
               || { echo "FAIL: manifest image does not match overlay"; exit 1; }
-            # Prefer the workflow identity recorded at release time; env is a training default / override.
+            # Manifest may *record* a workflow for humans; it does not define trust.
+            # Verifier compares attestation workflow to the protected allow-list.
             platform/bin/harbour-verify-artifact "${img}@${d}" \
-              --expect-workflow "${workflow:-$HARBOUR_EXPECT_WORKFLOW}" \
+              --approved-workflows-file "$ALLOW" \
               --expect-commit "$commit"
           done
 ```
 
-Test with a fabricated digest (must fail), a digest without `docs/releases/…` (must fail), and a docs-only PR (must succeed).
+Create and protect `platform/policy/approved-release-workflows.txt` (one exact attestation `githubWorkflowName` per line). CODEOWNERS: platform reviewers only. Trust chain parts: **manifest** (commit/digest candidate) · **attestation** (signed identity) · **allow-list** (what the platform trusts).
+
+Test with a fabricated digest (must fail), a digest without `docs/releases/…` (must fail), an attestation whose workflow is not allow-listed (must fail), and a docs-only PR (must succeed).
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -393,7 +409,7 @@ gh api "repos/$GH_OWNER/$(basename "$HARBOUR_ROOT")/branches/main/protection" \
 
 Required checks must include the service validate job, `policy` and `promotion-verify` (**always reports**). If your plan cannot enforce this, write the gap into `LIMITATIONS.md` with a compensating control (e.g. you do not self-approve; a second reviewer is the independent tester).
 
-**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` with `--expect-commit` / `--expect-workflow` and show a mismatched workflow is rejected. (4) Promote a **fabricated** digest and show `promotion-verify` fails. (5) Open a docs-only PR and show `promotion-verify` still reports success.
+**Practice — reproduce:** (1) Open a PR that breaks a test; show it is unmergeable. (2) Fix, merge, and record commit SHA, workflow run URL and digest. (3) Run `harbour-verify-artifact` with `--expect-commit` and `--approved-workflows-file` and show a non-allow-listed attestation workflow is rejected. (4) Promote a **fabricated** digest and show `promotion-verify` fails. (5) Open a docs-only PR and show `promotion-verify` still reports success.
 
 **Verify:** One page shows *merge commit → run URL → digest → attestation commit → promotion PR*. Without a break in that chain, the artefact is traceable.
 
@@ -541,13 +557,60 @@ if apply_rc != 0:
 print("OK: offline report — expected rules evaluated and passed")
 PY
 
-# Negative fixtures — CLI must reject (non-zero). Assert exit status, not stdout prose.
-must_fail() {
-  local f="$1"
-  if kyverno apply "$POLICY" --resource "$f" >/tmp/harbour-policy/neg.out 2>&1; then
-    echo "FAIL: expected rejection for $f"; cat /tmp/harbour-policy/neg.out; exit 1
-  fi
-  echo "OK rejected: $f"
+# Negative fixtures — prove the *intended* rule denied the fixture.
+# Exit code alone is insufficient (tool errors also exit nonzero; some CLI
+# versions may exit 0 while embedding fail results). Prefer the JSON report.
+# Documented fields for pinned CLI: policyreports.wgpolicyk8s.io/v1alpha2
+# PolicyReport.result[] entries with .policy / .rule / .result
+# (pass|fail|warn|error|skip). Walker below accepts that schema and common aliases.
+must_deny_rule() {
+  local f="$1" rule="$2"
+  set +e
+  kyverno apply "$POLICY" --resource "$f" -o json \
+    >/tmp/harbour-policy/neg.json 2>/tmp/harbour-policy/neg.err
+  local rc=$?
+  set -e
+  python3 - "$rule" "$rc" <<'PY'
+import json, sys
+from pathlib import Path
+want, apply_rc = sys.argv[1], int(sys.argv[2])
+raw = Path("/tmp/harbour-policy/neg.json").read_text().strip()
+err = Path("/tmp/harbour-policy/neg.err").read_text()
+if not raw:
+    print("FAIL: tool error (empty JSON), not a policy denial:", err[:400]); sys.exit(1)
+try:
+    rep = json.loads(raw)
+except json.JSONDecodeError as e:
+    print("FAIL: tool error (invalid JSON), not a policy denial:", e, err[:200]); sys.exit(1)
+
+# Prefer PolicyReport-shaped results; fall back to recursive rule/result pairs.
+def report_results(obj):
+    out = []
+    if isinstance(obj, dict):
+        if isinstance(obj.get("results"), list):
+            for r in obj["results"]:
+                if isinstance(r, dict):
+                    out.append(r)
+        for v in obj.values():
+            out.extend(report_results(v))
+    elif isinstance(obj, list):
+        for v in obj:
+            out.extend(report_results(v))
+    return out
+
+found_fail = False
+matched = []
+for r in report_results(rep):
+    rule = str(r.get("rule") or r.get("policy") or r.get("name") or "")
+    result = str(r.get("result") or r.get("status") or "").lower()
+    matched.append((rule, result))
+    if want in rule and result in {"fail", "error"}:
+        found_fail = True
+if not found_fail:
+    print(f"FAIL: did not observe rule {want} fail/error; saw={matched[:12]} rc={apply_rc}")
+    sys.exit(1)
+print(f"OK: rule {want} denied fixture (kyverno_rc={apply_rc})")
+PY
 }
 cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
 apiVersion: v1
@@ -573,12 +636,12 @@ spec:
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
   securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
 EOF
-must_fail "$FIXDIR/bad-mutable-tag.yaml"
-must_fail "$FIXDIR/bad-no-memory-limit.yaml"
+must_deny_rule "$FIXDIR/bad-mutable-tag.yaml" "require-image-digest"
+must_deny_rule "$FIXDIR/bad-no-memory-limit.yaml" "require-nonroot-memory-limit"
 echo "OK: offline policy check for $NAME"
 ```
 
-Complete required PR workflow `.github/workflows/policy.yml` (always-on; no cluster credentials):
+Complete required PR workflow `.github/workflows/policy.yml` (always-on; no cluster credentials). Pin CLI **and** verify the tarball checksum (record the SHA256 from the Kyverno release assets for your pin):
 
 ```yaml
 name: policy
@@ -588,19 +651,24 @@ permissions: {contents: read}
 jobs:
   harbour-policy:
     runs-on: ubuntu-latest
+    env:
+      KYVERNO_VERSION: "1.13.4"
+      # Replace with the published sha256 for this exact asset from the Kyverno release page.
+      KYVERNO_TARBALL_SHA256: "REPLACE_WITH_RELEASE_ASSET_SHA256"
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-kubectl@v4
         with: {version: v1.31.0}
-      - name: Install Kyverno CLI
-        env: {KYVERNO_VERSION: "1.13.4"}
+      - name: Install Kyverno CLI (checksum-verified)
         run: |
           set -euo pipefail
           curl -fsSL -o kyverno.tar.gz \
             "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          echo "${KYVERNO_TARBALL_SHA256}  kyverno.tar.gz" | sha256sum -c -
           tar -xzf kyverno.tar.gz kyverno
           sudo install -m 0755 kyverno /usr/local/bin/kyverno
-          kyverno version
+          kyverno version | tee /tmp/kyverno-version.txt
+          grep -q "$KYVERNO_VERSION" /tmp/kyverno-version.txt
       - name: Offline policy for every service overlay
         run: |
           set -euo pipefail
@@ -1023,7 +1091,19 @@ Delete one `$SVC` pod; with two replicas the Service keeps serving (D06 §6.8.1)
 #!/usr/bin/env bash
 set -euo pipefail
 NS="${1:?namespace}"; PHASE="${2:?phase}"; SVC="${SVC:?set SVC}"
-OUT="docs/final/drills/stateful-$(date -u +%Y%m%d)"; mkdir -p "$OUT" ~/harbour-backups
+# Isolate each experiment under a unique run dir. Subsequent phases of the *same*
+# experiment reuse HARBOUR_DRILL_OUT or /tmp/harbour-stateful-out.path.
+if [ -n "${HARBOUR_DRILL_OUT:-}" ]; then
+  OUT="$HARBOUR_DRILL_OUT"
+elif [ "${HARBOUR_DRILL_NEW:-0}" != "1" ] && [ -f /tmp/harbour-stateful-out.path ]; then
+  OUT="$(cat /tmp/harbour-stateful-out.path)"
+else
+  RUN_ID="${HARBOUR_DRILL_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+  OUT="docs/final/drills/stateful-$RUN_ID"
+fi
+mkdir -p "$OUT" ~/harbour-backups
+echo "$OUT" > /tmp/harbour-stateful-out.path
+export HARBOUR_DRILL_OUT="$OUT"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/timeline.log"; }
 wait_until() { # usage: wait_until <seconds> <description> -- <command...>
   local deadline=$(( $(date +%s) + $1 )); shift; local desc="$1"; shift
@@ -1158,22 +1238,50 @@ case "$PHASE" in
     [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
     [ "$(sha256sum "$BACKUP" | awk '{print $1}')" = "$(cat "$OUT/backup.sha256")" ] \
       || { log "selected backup checksum changed since copy"; exit 1; }
-    # Maintenance window: freeze app traffic before destructive restore.
+    # GitOps-safe maintenance: suspend reconciliation *before* changing replicas,
+    # so Flux cannot undo the write freeze. Desired replica count comes from Git later.
+    DESIRED="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
+    echo "${DESIRED:-2}" > "$OUT/desired-replicas.txt"
+    flux suspend kustomization "$SVC" -n "$NS"
+    kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance=restore --overwrite
     kubectl -n "$NS" scale deploy/"$SVC" --replicas=0
-    kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s || true
-    log "S3 maintenance: $SVC scaled to 0; acknowledged writes during restore are out of scope"
+    kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s
+    # Prove writers are gone (no pods) and Flux is not reconciling this Kustomization.
+    [ "$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | wc -l)" = "0" ] \
+      || { log "FAIL: app pods still present during maintenance"; exit 1; }
+    flux get kustomization "$SVC" -n "$NS" | tee -a "$OUT/maintenance-flux.txt" | grep -qi Suspended \
+      || { log "FAIL: Flux Kustomization not Suspended — abort restore"; exit 1; }
+    log "S3 maintenance: Flux suspended; $SVC replicas=0; desired=$(cat "$OUT/desired-replicas.txt")"
     kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
     kubectl -n "$NS" exec postgres-0 -- \
       pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
-    kubectl -n "$NS" scale deploy/"$SVC" --replicas=2
+    # Resume GitOps: restore desired state from Git (not a hardcoded replica count).
+    flux resume kustomization "$SVC" -n "$NS"
+    kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite
+    flux reconcile kustomization "$SVC" -n "$NS" --with-source
     kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
+    # Desired replicas must match Git/approved state again.
+    NOW="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
+    [ "$NOW" = "$(cat "$OUT/desired-replicas.txt")" ] \
+      || { log "FAIL: replicas after resume=$NOW want=$(cat "$OUT/desired-replicas.txt")"; exit 1; }
     app_pf
     wait_until 180 "ready query_ok after restore" -- bash -c '
       kill -0 '"$PF_PID"' 2>/dev/null || exit 1
       curl -sf http://127.0.0.1:18080/ready | grep -q query_ok
     '
-    GOT="$(app_count)"; WANT="$(cat "$OUT/count-at-backup.txt")"
-    notes_include A-1 || { log "missing note A-1 via structured JSON"; exit 1; }
+    # Full snapshot equivalence (IDs + notes), not count-only.
+    app_json > "$OUT/entries-after-restore.json"
+    python3 - <<PY | tee -a "$OUT/restore-equivalence.txt"
+import json, sys
+want = {(e["id"], e["note"]) for e in json.load(open("$OUT/entries-at-backup.json"))["entries"]}
+got = {(e["id"], e["note"]) for e in json.load(open("$OUT/entries-after-restore.json"))["entries"]}
+if want != got:
+    print("FAIL restore set mismatch")
+    print("missing", sorted(want - got)[:10])
+    print("extra", sorted(got - want)[:10])
+    sys.exit(1)
+print(f"OK full snapshot equivalence n={len(got)}")
+PY
     if notes_include B-1; then log "unexpected post-backup note B-1 still present"; exit 1; fi
     python3 - <<PY | tee -a "$OUT/rpo-report.txt"
 from datetime import datetime, timezone
@@ -1192,8 +1300,7 @@ print(f"last_ack_after_backup={last_ack.isoformat()}")
 print(f"http_count_at_backup={at_b['count']}")
 print(f"backup_sha256={open('$OUT/backup.sha256').read().strip()}")
 PY
-    log "S3 restore service-RTO=$(( $(date +%s) - T0 ))s http_count=$GOT expected=$WANT"
-    [ "$GOT" = "$WANT" ] || { log "S3 HTTP RESTORE MISMATCH"; exit 1; }
+    log "S3 restore service-RTO=$(( $(date +%s) - T0 ))s"
     app_stop_pf ;;
   *) echo "phases: seed backup write-after kill-db destroy restore" >&2; exit 2 ;;
 esac
@@ -1207,7 +1314,15 @@ NS="${SVC}-staging"
 kubectl -n "$NS" create job --from=cronjob/postgres-backup "warmup-a-$(date +%s)"
 sleep 30
 kubectl -n "$NS" create job --from=cronjob/postgres-backup "warmup-b-$(date +%s)"
-for p in seed backup write-after kill-db destroy restore; do platform/drills/stateful-drill.sh "$NS" "$p"; done
+# Start a fresh evidence directory for this experiment, then reuse it across phases.
+rm -f /tmp/harbour-stateful-out.path
+unset HARBOUR_DRILL_OUT
+HARBOUR_DRILL_NEW=1 platform/drills/stateful-drill.sh "$NS" seed
+export HARBOUR_DRILL_OUT="$(cat /tmp/harbour-stateful-out.path)"
+for p in backup write-after kill-db destroy restore; do
+  platform/drills/stateful-drill.sh "$NS" "$p"
+done
+echo "Evidence: $HARBOUR_DRILL_OUT"
 ```
 
 What each drill proves — and what it does not:
@@ -1227,8 +1342,13 @@ A backup that lives only in the cluster dies with the cluster. Copy one dump out
 ```bash
 # Use a *running* helper that mounts postgres-backup — never exec a completed Job pod.
 # (Same helper pattern as stateful-drill.sh backup phase.)
-platform/drills/stateful-drill.sh "$NS" backup   # produces ~/harbour-backups/*.dump + path file
-cp "$(cat docs/final/drills/stateful-$(date -u +%Y%m%d)/offcluster-backup.path)" \
+# Prefer the active experiment dir if you just ran the drill loop; else start a backup phase.
+OUT="${HARBOUR_DRILL_OUT:-$(cat /tmp/harbour-stateful-out.path 2>/dev/null || true)}"
+if [ -z "${OUT:-}" ] || [ ! -f "$OUT/offcluster-backup.path" ]; then
+  platform/drills/stateful-drill.sh "$NS" backup
+  OUT="$(cat /tmp/harbour-stateful-out.path)"
+fi
+cp "$(cat "$OUT/offcluster-backup.path")" \
   "docs/final/drills/latest.dump"   # gitignored; verify size > 0
 ```
 

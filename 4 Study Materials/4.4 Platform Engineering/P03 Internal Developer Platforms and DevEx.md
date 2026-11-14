@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06`/`65a094d` — **not signed off** |
+| **Status** | Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` (PSA `drop: [ALL]` + dry-run) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -300,9 +300,11 @@ OWNER=""
 while [ $# -gt 0 ]; do
   case "$1" in --owner) OWNER="${2:?--owner needs a value}"; shift 2 ;; *) usage ;; esac
 done
-# DNS-label safe: start and end alphanumeric (no trailing hyphen). Length 3–31.
-[[ "$NAME" =~ ^[a-z]([a-z0-9-]{0,29}[a-z0-9])?$ ]] || {
-  echo "ERROR: name must be 3-31 DNS-label chars (lowercase, digits, hyphens; start/end alphanumeric)." >&2; exit 1; }
+# DNS-label safe: start and end alphanumeric (no trailing hyphen). Enforce length 3–31 separately.
+[[ "$NAME" =~ ^[a-z]([a-z0-9-]*[a-z0-9])?$ ]] || {
+  echo "ERROR: name must be DNS-label safe (lowercase, digits, hyphens; start/end alphanumeric)." >&2; exit 1; }
+(( ${#NAME} >= 3 && ${#NAME} <= 31 )) || {
+  echo "ERROR: name length must be 3–31 (got ${#NAME})." >&2; exit 1; }
 [ -n "$OWNER" ] || { echo "ERROR: --owner required (who reviews and is contacted?)." >&2; exit 1; }
 [[ "$OWNER" =~ ^[a-z0-9][a-z0-9._-]{0,38}$ ]] || {
   echo "ERROR: --owner must be a safe handle for YAML/docs (alphanumeric, ._-)." >&2; exit 1; }
@@ -368,17 +370,29 @@ spec:
   template:
     metadata: {labels: {app: $NAME}}
     spec:
-      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: $NAME
           image: $IMG
           ports: [{name: http, containerPort: 8000}]
           readinessProbe: {httpGet: {path: /ready, port: http}, periodSeconds: 5}
           livenessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 10, periodSeconds: 10}
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}
+          # Must satisfy tenant PSA enforce=restricted (drop ALL — same bar as P01/P04).
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 50m, memory: 64Mi}
-            limits: {cpu: 250m, memory: 128Mi}
+            limits: {memory: 128Mi}   # CPU limit optional (P01/P04 platform policy)
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
 ---
 apiVersion: v1
 kind: Service
@@ -560,6 +574,19 @@ trap 'rm -rf "services/$T" "deploy/$T" "platform/tenants/$T" "docs/services/$T" 
 platform/bin/harbour-new-service "$T" --owner template-test
 ( cd "services/$T" && python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements.txt && pytest -q )
 kubectl kustomize "deploy/$T/overlays/staging" >/dev/null
+# Restricted PSA: rendered workload must be server-side admissible in an enforce=restricted namespace.
+kubectl create namespace "psa-probe-$T" --dry-run=client -o yaml \
+  | kubectl label --local -f - \
+      pod-security.kubernetes.io/enforce=restricted \
+      pod-security.kubernetes.io/enforce-version=latest -o yaml \
+  | kubectl apply -f -
+kubectl kustomize "deploy/$T/overlays/staging" \
+  | sed "s/namespace: .*/namespace: psa-probe-$T/" \
+  | kubectl apply --dry-run=server -f -
+kubectl delete namespace "psa-probe-$T" --wait=false
+kubectl kustomize "deploy/$T/overlays/staging" | grep -q 'drop:' \
+  && kubectl kustomize "deploy/$T/overlays/staging" | grep -q 'ALL' \
+  || { echo "FAIL: scaffold lost capabilities drop ALL"; exit 1; }
 platform/bin/harbour-check-service "$T" --allow-unpromoted
 echo "template OK"
 ```
@@ -639,6 +666,9 @@ echo "$R" | grep -q 'readinessProbe' || bad "no readinessProbe"
 echo "$R" | grep -q 'livenessProbe'  || bad "no livenessProbe"
 echo "$R" | grep -q 'limits:'        || bad "no resource limits"
 echo "$R" | grep -q 'runAsNonRoot: true' || bad "not runAsNonRoot"
+echo "$R" | grep -q 'allowPrivilegeEscalation: false' || bad "missing allowPrivilegeEscalation: false"
+echo "$R" | grep -qE 'drop:[[:space:]]*\[ALL\]|drop:[[:space:]]*-[[:space:]]*ALL' \
+  || bad "missing capabilities.drop: [ALL] (required for restricted PSA)"
 echo "$R" | grep -qE 'image: .*:latest' && bad "uses :latest"
 # Structural: every container image in the rendered Deployment must be digest-shaped.
 mapfile -t IMAGES < <(printf '%s\n' "$R" | python3 -c '
