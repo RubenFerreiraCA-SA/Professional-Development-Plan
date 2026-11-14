@@ -28,23 +28,23 @@ Operate the Harbour diagnostics AI path like a product surface: pinned versions,
 | Practical Assessment | 6–8 |
 | **Total** | **32–40** |
 
-## 1. Version and serve
+## 1. Integrate and serve
 
-Pin `app/ai/diagnostics/VERSION` (or equivalent). Health endpoints must report whether AI is enabled.
+`/v1/diagnose` must call A01 retrieval + inference and A02 controlled tools — not echo the request. Health reports AI enabled/disabled and VERSION (+ artifact identity).
 
 ## 2. Kill switch and rollback
 
-One documented action (e.g. `HARBOUR_AI_ENABLED=false` + restart, or revert VERSION) disables the path. Record evidence.
+One documented action (`scripts/disable-harbour-ai.sh`) disables the path and verifies. Rollback restores known-good code **and** matching VERSION. Core Harbour stays up.
 
-## 3. Cost, safety and signals
+## 3. Cost, safety, signals and eval gate
 
-Caps and monitors before “leave it running.” Prefer structured logs over vanity dashboards for the training bar.
+Enforce limits on the live API (training in-memory limiter is honest about its limits). Emit telemetry from real requests. CI re-runs A01 eval and asserts `failed == 0` / `passed == total`.
 
 ## Practical Assessment — operable AI path
 
-**Required evidence:** Deploy/config notes, LLMOps checks (limits/monitors), disable/rollback procedure with proof, version pin.
+**Required evidence:** Integrated diagnose evidence, VERSION pin, one-action disable proof, API limit deny, runtime telemetry, eval gate script.
 
-**Acceptance:** Checklist A03 — you can disable or roll back the AI path in one documented action; basic cost/safety limits or monitors exist.
+**Acceptance:** Checklist A03 — you can disable or roll back the AI path in one documented action; basic cost/safety limits or monitors exist. Prefer the textbook **AI exit scenario** (grounded ask → no-match → tool deny → rate limit → eval gate → disable).
 
 **Textbook:** [Chapter 3 — LLMOps and AI Infrastructure](../../4%20Study%20Materials/4.3%20AI%20Engineering/A03%20LLMOps%20and%20AI%20Infrastructure.md)
 

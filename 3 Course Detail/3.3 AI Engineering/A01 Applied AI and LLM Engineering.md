@@ -14,9 +14,10 @@ Build a **scoped, read-only** Harbour diagnostics assistant (`harbour-diag`): gr
 
 1. Separate system/user prompts and require structured answers (or explicit refusal) when out of scope.  
 2. Ground responses in Harbour docs/runbooks (lightweight retrieval is enough).  
-3. Run an evaluation suite and record pass/fail evidence.  
-4. Document feature boundaries so a peer user can see what the assistant must not do.  
-5. Keep provider secrets out of Git; prefer a mock/local path for core labs.
+3. Run an evaluation suite (including no-match / insufficient-evidence cases) and record pass/fail evidence.  
+4. Validate structured model responses; empty retrieval must not invent diagnoses.  
+5. Document feature boundaries so a peer user can see what the assistant must not do.  
+6. Keep provider secrets out of Git; offline eval must force mock unless explicitly opted into live.
 
 ## Suggested activities
 

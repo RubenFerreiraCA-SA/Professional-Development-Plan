@@ -36,6 +36,8 @@ Hour ranges are **planning assumptions**. Completion is demonstrated capability,
 
 Track Harbour increments on the [Final Project Checklist](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md) rows A01–A03 when AI is in scope. **End of AI** (optional milestone): Harbour exposes a limited diagnostics assistant with eval evidence, blocked unauthorised mutations, and a documented disable/rollback path.
 
+**Exit scenario (documentation sign-off bar):** mock `harbour-diag` answers a known health question with runbook evidence; an unsupported question does not invent a diagnosis; a mutating tool attempt is denied and audited; rate-limit exhaustion is rejected; evaluation re-runs from a clean state and fails CI when any case fails; one script disables AI without taking down core Harbour.
+
 ## Completion criteria
 
 - Each in-scope module’s Practical Assessment at **Competent** or better.  

@@ -13,9 +13,9 @@ Extend `harbour-diag` into a **tool-using agent** with deny-by-default permissio
 ## Outcomes
 
 1. Define tool schemas for read-only Harbour helpers (health, runbook, inventory).  
-2. Implement allow-list + deny-by-default tool execution (no raw shell for the model).  
-3. Gate a mutating stub (e.g. restart) behind an approval control that defaults to deny.  
-4. Run a bounded orchestration loop (plan → tool → observe → answer) with stop conditions.  
+2. Implement allow-list + deny-by-default tool execution with argument schema validation (no raw shell for the model).  
+3. Gate a mutating stub behind a **training** approval control that defaults to deny; document that production needs action-specific authorisation.  
+4. Sanitize tool audit logs; run a bounded mock-agent loop with stop conditions.  
 5. Prove an unauthorised mutating call fails and record the evidence.
 
 ## Suggested activities

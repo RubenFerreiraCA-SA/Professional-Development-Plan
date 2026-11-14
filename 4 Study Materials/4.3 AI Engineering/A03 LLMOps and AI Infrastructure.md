@@ -102,12 +102,16 @@ If AI is out of scope in your Capacity Planner, mark Checklist A03 `N/A` — do 
 
 ### 3.2.2 Worked example — VERSION + changelog
 
+**Recording a version ≠ deploying that version.** Changing `bundle_version` alone does not roll back code. Pin metadata **and** an artifact identity (Git SHA or image digest). Rollback restores the known-good software + matching `VERSION`.
+
 ```bash
-cat > "$HARBOUR_ROOT/app/ai/diagnostics/VERSION" <<'EOF'
+GIT_SHA="$(git -C "$HARBOUR_ROOT" rev-parse --short HEAD 2>/dev/null || echo uncommitted)"
+cat > "$HARBOUR_ROOT/app/ai/diagnostics/VERSION" <<EOF
 prompt_version=diag-prompt-2026-03
 tools_policy_version=tools-allow-v2
 model_id=mock-llm
 bundle_version=1.0.0
+git_sha=${GIT_SHA}
 EOF
 
 cat > "$HARBOUR_ROOT/app/ai/diagnostics/CHANGELOG.md" <<'EOF'
@@ -141,6 +145,7 @@ def load_version(path: Path = VERSION_PATH) -> dict[str, str]:
     for required in ("prompt_version", "tools_policy_version", "model_id", "bundle_version"):
         if required not in data:
             raise KeyError(f"VERSION missing {required}")
+    data.setdefault("git_sha", "")  # optional artifact identity (Git SHA / digest)
     return data
 ```
 
@@ -162,17 +167,44 @@ Bump `bundle_version` to `1.0.1`, append a changelog line, save `docs/ai/ops/VER
 
 ### 3.3.1 Health must report AI state
 
+`/v1/diagnose` must run the **real** A01/A02 path — not echo the request. Expected request path:
+
+1. Feature enabled?  
+2. Validate request + apply rate/token/budget limits.  
+3. Retrieve authorized runbook context (A01).  
+4. Optionally gather tool observations via A02 `execute_tool` (read-only).  
+5. Call A01 `complete` + schema validation.  
+6. Record sanitized telemetry; return structured result (never echo the raw body).
+
 ```python
 # app/ai/diagnostics/api.py
 from __future__ import annotations
+
 import os
-from fastapi import FastAPI
+import time
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from ai.diagnostics.agent_runtime import execute_tool
+from ai.diagnostics.limits import check_request
+from ai.diagnostics.llm import LlmError, complete
+from ai.diagnostics.retrieve import load_corpus, retrieve
+from ai.diagnostics.telemetry import log_call
 from ai.diagnostics.versioning import load_version
 
 app = FastAPI(title="harbour-diag")
 
+
 def ai_enabled() -> bool:
     return os.getenv("HARBOUR_AI_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+
+
+def harbour_root() -> Path:
+    return Path(os.environ.get("HARBOUR_ROOT", Path.home() / "harbour-platform")).expanduser()
+
 
 @app.get("/health")
 def health():
@@ -186,17 +218,120 @@ def health():
             "model_id": ver["model_id"],
             "prompt_version": ver["prompt_version"],
             "tools_policy_version": ver["tools_policy_version"],
+            "git_sha": ver.get("git_sha", ""),
         },
     }
 
+
 @app.post("/v1/diagnose")
-def diagnose(payload: dict):
+async def diagnose(request: Request):
+    t0 = time.perf_counter()
+    tool_denials: list[str] = []
+    limit_reason = ""
+    identity = request.headers.get("x-harbour-identity", "local")
+
     if not ai_enabled():
-        return {"ok": False, "error": "ai_disabled", "hint": "HARBOUR_AI_ENABLED=true to enable"}
+        log_call(
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_in=0,
+            tokens_out=0,
+            tool_denials=[],
+            limit_reason="",
+            ai_enabled=False,
+            result="ai_disabled",
+        )
+        return JSONResponse(
+            {"ok": False, "error": "ai_disabled", "hint": "HARBOUR_AI_ENABLED=true to enable"},
+            status_code=503,
+        )
+
+    try:
+        payload: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+
+    question = str(payload.get("question") or payload.get("q") or "").strip()
+    if not question:
+        return JSONResponse(
+            {"ok": False, "error": "missing_question", "hint": "JSON body needs question"},
+            status_code=400,
+        )
+    # Do not echo payload back — it may later contain sensitive operational text.
+
+    lim = check_request(identity=identity, est_tokens=max(50, len(question) // 4 + 200))
+    if not lim.get("allowed"):
+        limit_reason = str(lim.get("reason") or "limited")
+        log_call(
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_in=len(question) // 4,
+            tokens_out=0,
+            tool_denials=[],
+            limit_reason=limit_reason,
+            ai_enabled=True,
+            result=limit_reason,
+        )
+        return JSONResponse(
+            {"ok": False, "error": limit_reason, "limits": {k: lim[k] for k in lim if k != "allowed"}},
+            status_code=429,
+        )
+
+    root = harbour_root()
+    health_text = ""
+    # A02 read-only tool path (allow-list + schema + audit); denials are recorded.
+    import json as _json
+    health_obs = execute_tool("get_health", {})
+    if health_obs.get("status") == "ok":
+        health_text = _json.dumps(health_obs.get("result") or {}, sort_keys=True)
+    elif health_obs.get("status") == "denied":
+        tool_denials.append(f"get_health:{health_obs.get('reason')}")
+
+    try:
+        corpus = load_corpus(root / "docs" / "runbooks")
+        context = retrieve(question, corpus, k=3)
+    except FileNotFoundError as e:
+        log_call(
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_in=len(question) // 4,
+            tokens_out=0,
+            tool_denials=tool_denials,
+            limit_reason="",
+            ai_enabled=True,
+            result="missing_runbooks",
+        )
+        return JSONResponse({"ok": False, "error": "missing_runbooks", "detail": str(e)}, status_code=500)
+
+    try:
+        result = complete(question, context, health_text=str(health_text))
+    except LlmError as e:
+        log_call(
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_in=len(question) // 4,
+            tokens_out=0,
+            tool_denials=tool_denials,
+            limit_reason="",
+            ai_enabled=True,
+            result="llm_error",
+        )
+        return JSONResponse({"ok": False, "error": "llm_error", "detail": str(e)}, status_code=502)
+
+    answer = str(result.get("answer") or "")
+    log_call(
+        latency_ms=(time.perf_counter() - t0) * 1000,
+        tokens_in=len(question) // 4,
+        tokens_out=len(answer) // 4,
+        tool_denials=tool_denials,
+        limit_reason=limit_reason,
+        ai_enabled=True,
+        result="ok" if not result.get("refused") else "refused",
+    )
+    ver = load_version()
     return {
         "ok": True,
-        "mode": "mock" if os.getenv("MOCK_LLM", "1") == "1" else "live",
-        "echo": payload,
+        "mode": "mock" if os.getenv("MOCK_LLM", "1") != "0" else "live",
+        "bundle_version": ver["bundle_version"],
+        "context_empty": not bool(context.strip()),
+        "diagnosis": result,  # validated A01 schema: answer, citations, confidence, refused…
+        "tool_denials": tool_denials,
     }
 ```
 
@@ -206,12 +341,27 @@ cd "$HARBOUR_ROOT"
 test -f .venv/bin/activate && . .venv/bin/activate
 pip install -q 'fastapi>=0.110' 'uvicorn[standard]>=0.27'
 
-export MOCK_LLM=1 HARBOUR_AI_ENABLED=true
+# VERSION must include git_sha (or leave empty) — see §3.2; bind pin to an artifact.
+export MOCK_LLM=1 HARBOUR_AI_ENABLED=true HARBOUR_ROOT
 export PYTHONPATH="$HARBOUR_ROOT/app${PYTHONPATH:+:$PYTHONPATH}"
 uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 &
 UV_PID=$!
 sleep 1
 curl -sS http://127.0.0.1:8088/health | tee "$HARBOUR_ROOT/docs/ai/ops/health-enabled.json"
+# Integrated diagnose — grounded answer, not an echo:
+curl -sS -X POST http://127.0.0.1:8088/v1/diagnose \
+  -H 'content-type: application/json' \
+  -d '{"question":"What does GET /health status degraded mean?"}' \
+  | tee "$HARBOUR_ROOT/docs/ai/ops/diagnose-grounded.json"
+python3 - <<'PY'
+import json, pathlib, sys
+d = json.loads(pathlib.Path("docs/ai/ops/diagnose-grounded.json").read_text())
+assert d.get("ok") is True and "echo" not in d
+diag = d["diagnosis"]
+assert diag.get("refused") is False
+assert diag.get("citations") or d.get("context_empty") is False or diag.get("confidence") == "low"
+print("integrated_diagnose_ok")
+PY
 kill "$UV_PID"
 ```
 
@@ -226,10 +376,13 @@ services:
     image: python:3.12-slim
     working_dir: /app
     # Mount Harbour app/ so `ai.diagnostics` imports match local PYTHONPATH=$HARBOUR_ROOT/app
-    volumes: [../../app:/app:ro]
+    volumes:
+      - ../../app:/app:ro
+      - ../../docs:/docs  # rw: A02 tool audit + A03 telemetry under docs/ai/
     environment:
       HARBOUR_AI_ENABLED: "${HARBOUR_AI_ENABLED:-true}"
       MOCK_LLM: "${MOCK_LLM:-1}"
+      HARBOUR_ROOT: /
       PYTHONPATH: /app
     command: >
       bash -lc "pip install -q fastapi 'uvicorn[standard]' &&
@@ -259,42 +412,77 @@ docker compose -f deploy/ai/docker-compose.yml down   # idle when done
 
 ### 3.4.1 One documented action
 
+The syllabus promises **one action**. Encapsulate env flip + recreate + verify in a script — do not leave operators to improvise multi-step shell.
+
 | Goal | One action |
 | --- | --- |
-| Disable | `HARBOUR_AI_ENABLED=false` + restart diag |
-| Roll back pin | Restore known-good `VERSION` + restart |
+| Disable | `./scripts/disable-harbour-ai.sh` |
+| Re-enable | `./scripts/enable-harbour-ai.sh` (optional mirror) |
+| Roll back pin + code | Restore known-good Git SHA / image **and** matching `VERSION`, then restart |
 
-A second engineer must succeed from the runbook alone.
+Core Harbour API must stay up; the script only touches `harbour-diag`.
 
-### 3.4.2 Worked example — disable drill
+### 3.4.2 Worked example — `scripts/disable-harbour-ai.sh`
 
 ```bash
-cd "$HARBOUR_ROOT"
-mkdir -p docs/ai/ops docs/runbooks
-export PYTHONPATH="$HARBOUR_ROOT/app${PYTHONPATH:+:$PYTHONPATH}" MOCK_LLM=1
+# scripts/disable-harbour-ai.sh — ONE ACTION disable with verification
+set -euo pipefail
+ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
+cd "$ROOT"
+mkdir -p docs/ai/ops
 
-serve() { uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 & UV_PID=$!; sleep 1; }
-probe() {
-  local tag="$1"
-  curl -sS http://127.0.0.1:8088/health | tee "docs/ai/ops/health-${tag}.json"
-  curl -sS -X POST http://127.0.0.1:8088/v1/diagnose \
-    -H 'content-type: application/json' -d '{"q":"status?"}' \
-    | tee "docs/ai/ops/diagnose-${tag}.json"
-}
+MODE="${HARBOUR_AI_DISABLE_MODE:-local}"  # local | compose
 
-export HARBOUR_AI_ENABLED=true; serve; probe before-disable; kill "$UV_PID"
-# ONE ACTION — kill switch + restart
-export HARBOUR_AI_ENABLED=false; serve; probe after-disable; kill "$UV_PID"
+if [[ "$MODE" == "compose" ]]; then
+  test -f deploy/ai/docker-compose.yml || { echo "missing deploy/ai/docker-compose.yml"; exit 1; }
+  printf 'HARBOUR_AI_ENABLED=false\nMOCK_LLM=%s\n' "${MOCK_LLM:-1}" > deploy/ai/.env
+  docker compose -f deploy/ai/docker-compose.yml up -d --force-recreate
+  BASE="http://127.0.0.1:8088"
+else
+  # Local uvicorn: write flag file the process must honour OR restart with env.
+  # Training: kill listener on 8088 and restart disabled (caller may already have server).
+  export PYTHONPATH="$ROOT/app${PYTHONPATH:+:$PYTHONPATH}" MOCK_LLM="${MOCK_LLM:-1}"
+  if ss -ltnp 2>/dev/null | grep -q ':8088'; then
+    # shellcheck disable=SC2009
+    pkill -f 'uvicorn ai.diagnostics.api:app' || true
+    sleep 1
+  fi
+  HARBOUR_AI_ENABLED=false HARBOUR_ROOT="$ROOT" \
+    uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 &
+  echo $! > docs/ai/ops/harbour-diag.pid
+  sleep 1
+  BASE="http://127.0.0.1:8088"
+fi
+
+curl -sS "$BASE/health" | tee docs/ai/ops/health-after-disable.json
+curl -sS -X POST "$BASE/v1/diagnose" -H 'content-type: application/json' \
+  -d '{"question":"status?"}' | tee docs/ai/ops/diagnose-after-disable.json
+
+# Core Harbour (if running) must still answer — optional check:
+if curl -sf --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+  curl -sS http://127.0.0.1:8000/health | tee docs/ai/ops/core-health-still-up.json
+fi
 
 python3 - <<'PY'
 import json, pathlib, sys
 r = pathlib.Path("docs/ai/ops")
-b = json.loads((r/"health-before-disable.json").read_text())
-a = json.loads((r/"health-after-disable.json").read_text())
-d = json.loads((r/"diagnose-after-disable.json").read_text())
-ok = b["ai"]["enabled"] is True and a["ai"]["enabled"] is False and d.get("error") == "ai_disabled"
-print("disable_drill_ok=", ok); sys.exit(0 if ok else 1)
+a = json.loads((r / "health-after-disable.json").read_text())
+d = json.loads((r / "diagnose-after-disable.json").read_text())
+ok = a.get("ai", {}).get("enabled") is False and d.get("error") == "ai_disabled"
+print("disable_ok=", ok)
+sys.exit(0 if ok else 1)
 PY
+```
+
+```bash
+chmod +x "$HARBOUR_ROOT/scripts/disable-harbour-ai.sh"
+# Before: start diag enabled, capture health-before-disable.json yourself once.
+HARBOUR_AI_ENABLED=true MOCK_LLM=1 PYTHONPATH="$HARBOUR_ROOT/app" HARBOUR_ROOT \
+  uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 &
+sleep 1
+curl -sS http://127.0.0.1:8088/health | tee docs/ai/ops/health-before-disable.json
+# ONE ACTION:
+./scripts/disable-harbour-ai.sh | tee docs/ai/ops/disable-script.out
 ```
 
 Runbook stub — `docs/runbooks/ai-disable-rollback.md`:
@@ -303,20 +491,22 @@ Runbook stub — `docs/runbooks/ai-disable-rollback.md`:
 # Runbook — Disable or roll back harbour-diag (one action)
 
 ## Disable
-1. HARBOUR_AI_ENABLED=false (Compose `.env` or process env).
-2. Restart diag only: `docker compose -f deploy/ai/docker-compose.yml up -d --force-recreate`
-3. Verify health `"enabled": false`; file docs/ai/ops/ evidence.
+Run: `./scripts/disable-harbour-ai.sh`
+Verify: docs/ai/ops/health-after-disable.json has ai.enabled=false;
+        diagnose returns error=ai_disabled.
+Core Harbour /health (e.g. :8000) must still succeed if it was up.
 
-## Roll back VERSION
-1. Restore VERSION from docs/ai/ops/VERSION.pinned.txt (or git).
-2. Restart; confirm /health bundle_version matches.
+## Roll back VERSION + code
+1. Check out known-good Git SHA (or redeploy known-good image digest).
+2. Restore matching docs/ai/ops/VERSION.pinned.txt → app/ai/diagnostics/VERSION.
+3. Restart diag; confirm /health bundle_version + git_sha.
 
-Do not tear down core Harbour. Re-enable: HARBOUR_AI_ENABLED=true + restart.
+Do not tear down core Harbour. Re-enable: HARBOUR_AI_ENABLED=true + restart (or enable script).
 ```
 
 ### 3.4.3 Practice
 
-Execute disable once **from the runbook only**; fix the runbook if tribal knowledge was required.
+Execute disable **via the script only**; fix the script/runbook if tribal knowledge was required.
 
 ---
 
@@ -364,21 +554,36 @@ def check_request(identity: str = "local", est_tokens: int = 200) -> dict:
     return {"allowed": True, "spent": _spent, "max_tokens": MAX_OUT_TOKENS}
 ```
 
+**Training limiter limits:** counters are **in-process memory** — they reset on restart and are not shared across workers/replicas. Token estimates are not provider invoices. Real multi-instance budget control needs a shared store **and** provider-side spending safeguards. Keep this mock for labs; do not claim a durable spend cap.
+
+`check_request` is **wired inside** `/v1/diagnose` (§3.3). Prove both allow and deny through the HTTP API:
+
 ```bash
 cd "$HARBOUR_ROOT"
-export HARBOUR_AI_BUDGET_TOKENS=500 HARBOUR_AI_RATE_MAX=3
-export PYTHONPATH="$HARBOUR_ROOT/app${PYTHONPATH:+:$PYTHONPATH}"
-python3 - <<'PY' | tee docs/ai/ops/limits-drill.json
-import json
-from ai.diagnostics.limits import check_request
-results = [check_request("lab", est_tokens=200) for _ in range(4)]
-results.append(check_request("lab", est_tokens=400))
-print(json.dumps(results, indent=2))
-assert any(r.get("reason") in ("rate_limited", "budget_exceeded") for r in results)
+export HARBOUR_AI_BUDGET_TOKENS=500 HARBOUR_AI_RATE_MAX=2
+export PYTHONPATH="$HARBOUR_ROOT/app${PYTHONPATH:+:$PYTHONPATH}" MOCK_LLM=1 HARBOUR_AI_ENABLED=true HARBOUR_ROOT
+uvicorn ai.diagnostics.api:app --host 127.0.0.1 --port 8088 &
+UV_PID=$!; sleep 1
+: > docs/ai/ops/limits-api-drill.jsonl
+for i in 1 2 3; do
+  curl -sS -X POST http://127.0.0.1:8088/v1/diagnose \
+    -H 'content-type: application/json' -H 'x-harbour-identity: lab' \
+    -d "{\"question\":\"health check $i\"}" | tee -a docs/ai/ops/limits-api-drill.jsonl
+  echo >> docs/ai/ops/limits-api-drill.jsonl
+done
+python3 - <<'PY'
+import json, pathlib, sys
+rows = []
+for line in pathlib.Path("docs/ai/ops/limits-api-drill.jsonl").read_text().splitlines():
+    line = line.strip()
+    if line:
+        rows.append(json.loads(line))
+assert any(r.get("ok") is True for r in rows), rows
+assert any(r.get("error") in ("rate_limited", "budget_exceeded") for r in rows), rows
+print("limits_enforced_via_api_ok")
 PY
+kill "$UV_PID"
 ```
-
-Wire `check_request` **before** model/tool execution in `/v1/diagnose` for Competent→Advanced.
 
 ### 3.5.3 Redaction
 
@@ -396,16 +601,19 @@ Emit one JSON object per diagnose call. Minimum fields: `ts`, `latency_ms`, `tok
 ```python
 # app/ai/diagnostics/telemetry.py
 from __future__ import annotations
-import json, time, sys
+import json, os, time
+from pathlib import Path
 from ai.diagnostics.versioning import load_version
 
 def log_call(*, latency_ms: float, tokens_in: int, tokens_out: int,
              tool_denials: list[str], limit_reason: str = "",
-             ai_enabled: bool = True) -> None:
+             ai_enabled: bool = True, result: str = "ok") -> None:
+    """Called from api.diagnose on every request path (ok, denied, disabled, limited)."""
     ver = load_version()
-    print(json.dumps({
+    event = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "event": "harbour_diag_call",
+        "result": result,
         "latency_ms": round(latency_ms, 2),
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
@@ -413,54 +621,69 @@ def log_call(*, latency_ms: float, tokens_in: int, tokens_out: int,
         "limit_reason": limit_reason,
         "ai_enabled": ai_enabled,
         **ver,
-    }), flush=True)
+    }
+    line = json.dumps(event, sort_keys=True)
+    print(line, flush=True)
+    log_path = Path(os.environ.get(
+        "HARBOUR_AI_TELEMETRY_PATH",
+        str(Path(os.environ.get("HARBOUR_ROOT", ".")) / "docs" / "ai" / "ops" / "telemetry.jsonl"),
+    ))
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
 ```
+
+Evidence must come from **real API requests** (not a standalone helper call). After the §3.3 integrated diagnose curl and the limits drill:
 
 ```bash
-cd "$HARBOUR_ROOT"
-export PYTHONPATH="$HARBOUR_ROOT/app${PYTHONPATH:+:$PYTHONPATH}"
-python3 - <<'PY' | tee docs/ai/ops/sample-structured-log.jsonl
-from ai.diagnostics.telemetry import log_call
-log_call(latency_ms=42.5, tokens_in=120, tokens_out=80,
-         tool_denials=["restart_service"], limit_reason="")
-PY
+test -s "$HARBOUR_ROOT/docs/ai/ops/telemetry.jsonl" || {
+  echo "No runtime telemetry — ensure api.diagnose calls log_call"
+  exit 1
+}
+tail -n 5 "$HARBOUR_ROOT/docs/ai/ops/telemetry.jsonl" \
+  | tee "$HARBOUR_ROOT/docs/ai/ops/sample-structured-log.jsonl"
+# Expect rows with result in ok|refused|rate_limited|budget_exceeded|ai_disabled
 ```
 
-Optional: counter `harbour_diag_requests_total{result=…}` later (D07-style) — structured logs + evidence files are enough for Competent.
+Optional: counter `harbour_diag_requests_total{result=…}` later (D07-style) — JSONL from the live API is enough for Competent.
 
 ---
 
 ## Section 3.7 — Eval in CI mindset
 
-Gate builds on A01’s `docs/ai/eval-a01.json`.
+Gate must **re-run** A01’s harness on current code, then assert counts — never treat a stale `passed` integer as a Boolean success.
+
+A01 writes `passed` / `failed` / `total` as **integers**. `if not passed` is wrong when `passed=2` and `failed=1`.
 
 ```bash
-# scripts/check-ai-eval.sh
+# scripts/check-ai-eval.sh — run eval, then verify failed==0
 set -euo pipefail
 ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
+cd "$ROOT"
+export HARBOUR_ROOT="$ROOT"
+export PYTHONPATH="$ROOT/app${PYTHONPATH:+:$PYTHONPATH}"
+# Offline gate forces mock (A01 runner overrides prior MOCK_LLM unless --allow-live):
+python3 app/ai/diagnostics/eval/run_eval.py
 EVAL="$ROOT/docs/ai/eval-a01.json"
-test -f "$EVAL" || { echo "Missing $EVAL — run A01 eval first"; exit 1; }
+test -f "$EVAL"
 
 python3 - <<PY
 import json, pathlib, sys
 data = json.loads(pathlib.Path("$EVAL").read_text())
-passed = data.get("passed")
-if passed is None:
-    summary = data.get("summary") or {}
-    failed = int(summary.get("failed", summary.get("fail", 1)))
-    passed = failed == 0
-if not passed:
-    print("EVAL REGRESSION:", data)
-    sys.exit(1)
-print("eval_gate_ok")
+total = int(data["total"])
+passed = int(data["passed"])
+failed = int(data["failed"])
+assert total > 0, data
+assert failed == 0, data
+assert passed == total, data
+print("eval_gate_ok", passed, "/", total)
 PY
 ```
 
-CI sketch (adapt to D04): checkout → `MOCK_LLM=1 python -m harbour_diag.eval` → `bash scripts/check-ai-eval.sh`.
+CI sketch (adapt to D04): checkout → `bash scripts/check-ai-eval.sh` (script itself runs the eval).
 
 ```bash
 export HARBOUR_ROOT="${HARBOUR_ROOT:-$HOME/harbour-platform}"
-test -f "$HARBOUR_ROOT/docs/ai/eval-a01.json" || { echo "Re-run A01 eval first"; exit 1; }
 bash "$HARBOUR_ROOT/scripts/check-ai-eval.sh" | tee "$HARBOUR_ROOT/docs/ai/ops/eval-gate.txt"
 ```
 
@@ -474,9 +697,13 @@ bash "$HARBOUR_ROOT/scripts/check-ai-eval.sh" | tee "$HARBOUR_ROOT/docs/ai/ops/e
 | Disable does nothing | Env in shell ≠ Compose | Print env in container; `--force-recreate` |
 | Still answers when “off” | Bypass route / cached worker | Only hit after recreate; confirm `ai_disabled` |
 | Eval gate fails in CI only | `MOCK_LLM` unset / missing fixtures | Set MOCK; commit fixtures, not secrets |
-| Budget never trips | Limiter not wired | Call `check_request` before model/tools |
+| Budget never trips | Limiter not wired into API | Hit `/v1/diagnose` with low `HARBOUR_AI_RATE_MAX` |
+| Diagnose echoes body | Placeholder API left in place | Replace with §3.3 integrated path |
+| Eval gate passes with failures | Treated `passed` count as bool | Assert `failed == 0` and `passed == total` |
+| `harbour_diag.eval` missing | Wrong module name | `python3 app/ai/diagnostics/eval/run_eval.py` |
 | Secrets in `docs/ai/` | Raw provider logs | Redact; rotate key |
 | Port 8088 busy | Prior uvicorn | `ss -ltnp \| grep 8088` then kill PID |
+| No telemetry.jsonl | `log_call` not on request path | Instrument `api.diagnose` |
 
 ---
 
@@ -484,35 +711,38 @@ bash "$HARBOUR_ROOT/scripts/check-ai-eval.sh" | tee "$HARBOUR_ROOT/docs/ai/ops/e
 
 Align with [A03 Course Detail](../../3%20Course%20Detail/3.3%20AI%20Engineering/A03%20LLMOps%20and%20AI%20Infrastructure.md) and Checklist A03: *disable or roll back in one documented action; basic cost/safety limits or monitors exist.*
 
+**AI Engineering exit scenario (Competent across A01–A03):** start mock `harbour-diag` → known health question returns grounded answer with citations → unsupported question returns uncertainty / empty citations (not an invented diagnosis) → mutating tool attempt denied + audited (A02) → rate-limit exhaustion rejected via API → `scripts/check-ai-eval.sh` re-runs eval and fails if any case fails → `./scripts/disable-harbour-ai.sh` disables AI without taking down core Harbour.
+
 ### Required deliverables
 
-1. **ADR 0203** — VERSION pin, kill switch, limits, monitoring, evidence paths.  
+1. **ADR 0203** — VERSION pin (+ `git_sha`), kill switch, limits, monitoring, evidence paths.  
 2. **Pinned** `app/ai/diagnostics/VERSION` (+ changelog); copy under `docs/ai/ops/`.  
-3. **Serving path** — uvicorn and/or `deploy/ai` Compose; `/health` reports `ai.enabled` + versions.  
-4. **One-action disable/rollback** — `docs/runbooks/ai-disable-rollback.md` + before/after evidence.  
-5. **Limits** — mockable token/rate/budget deny (`limits-drill.json`).  
-6. **Monitoring** — structured log sample (`sample-structured-log.jsonl`).  
-7. **Eval gate** — `scripts/check-ai-eval.sh` (or equivalent) against `docs/ai/eval-a01.json`.
+3. **Integrated serving path** — `/v1/diagnose` calls A01 retrieve+complete and A02 `execute_tool`; `/health` reports `ai.enabled` + versions; **no request echo**.  
+4. **One-action disable** — `scripts/disable-harbour-ai.sh` + runbook + before/after evidence; core Harbour still up.  
+5. **Limits enforced on API** — allow + deny evidence (`limits-api-drill.jsonl`); in-memory limiter honesty documented.  
+6. **Runtime telemetry** — `docs/ai/ops/telemetry.jsonl` from real API calls (ok, limited, disabled).  
+7. **Eval gate** — `scripts/check-ai-eval.sh` runs A01 `run_eval.py` then asserts `failed == 0` and `passed == total`.
 
 ### Rubric
 
 | Dimension | Developing | Competent | Advanced |
 | --- | --- | --- | --- |
-| Versioning | Ad-hoc prompt in chat | VERSION + changelog committed | Pin rollback shown via `/health` |
-| Kill switch | Comment-out code | `HARBOUR_AI_ENABLED=false` + restart; runbook + evidence | Peer can flip via Compose/env alone |
-| Limits | “Be careful” | Mock rate/budget/max-tokens deny JSON | Wired into `/v1/diagnose` |
-| Monitoring | Unstructured print | JSON: latency, tokens, denials | Optional metric / D07 note |
-| Eval in CI | Eval once locally | Gate script fails on regression | Hooked into D04/CI with MOCK |
+| Integration | Echo `/v1/diagnose` | Grounded diagnose via A01+A02 on HTTP | Peer reproduces exit scenario cold |
+| Versioning | Ad-hoc prompt in chat | VERSION + git_sha + changelog | Rollback of pin **and** code shown |
+| Kill switch | Multi-step improvised | One script disable + verify | Compose mode + peer runbook |
+| Limits | Helper-only drill | API returns rate/budget deny | Shared-store note + provider cap |
+| Monitoring | Standalone `log_call` demo | Telemetry from live diagnose paths | Optional D07 metric |
+| Eval in CI | Stale JSON / bool `passed` | Re-run eval; count assertions | Hooked into D04 with MOCK |
 
 **Completion:** **Competent** on every row.
 
 ### Self-check
 
-Disable without taking down core Harbour? `/health` shows `"enabled": false`? Secrets redacted? MOCK still works? Would a peer find the runbook and `docs/ai/ops/` alone?
+Does `/v1/diagnose` return a diagnosis object (not `echo`)? Disable via **one script** without taking down core Harbour? Telemetry rows from real requests? Eval gate fails when `failed > 0`? Would a peer find the runbook and `docs/ai/ops/` alone?
 
 ### Example conclusion (evidence still required)
 
-> ADR 0203: diag :8088; VERSION 1.0.0; kill switch + recreate → enabled=false / ai_disabled; limits-drill shows deny; structured log + eval gate under MOCK; Compose down when idle.
+> ADR 0203: integrated `/v1/diagnose` (retrieve+complete+get_health); VERSION 1.0.0 + git_sha; `./scripts/disable-harbour-ai.sh` → enabled=false / ai_disabled; limits-api-drill shows allow then rate_limited; telemetry.jsonl from live calls; check-ai-eval.sh re-runs A01 eval with failed==0.
 
 ---
 
