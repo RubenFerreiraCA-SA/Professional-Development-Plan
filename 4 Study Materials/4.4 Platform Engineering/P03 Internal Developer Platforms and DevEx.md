@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06` — **not signed off** |
+| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06`/`65a094d` — **not signed off** |
 
 ## How to study this chapter
 
@@ -300,9 +300,12 @@ OWNER=""
 while [ $# -gt 0 ]; do
   case "$1" in --owner) OWNER="${2:?--owner needs a value}"; shift 2 ;; *) usage ;; esac
 done
-[[ "$NAME" =~ ^[a-z][a-z0-9-]{2,30}$ ]] || {
-  echo "ERROR: name must be 3-31 chars: lowercase letters, digits, hyphens; start with a letter." >&2; exit 1; }
+# DNS-label safe: start and end alphanumeric (no trailing hyphen). Length 3–31.
+[[ "$NAME" =~ ^[a-z]([a-z0-9-]{0,29}[a-z0-9])?$ ]] || {
+  echo "ERROR: name must be 3-31 DNS-label chars (lowercase, digits, hyphens; start/end alphanumeric)." >&2; exit 1; }
 [ -n "$OWNER" ] || { echo "ERROR: --owner required (who reviews and is contacted?)." >&2; exit 1; }
+[[ "$OWNER" =~ ^[a-z0-9][a-z0-9._-]{0,38}$ ]] || {
+  echo "ERROR: --owner must be a safe handle for YAML/docs (alphanumeric, ._-)." >&2; exit 1; }
 cd "$(git rev-parse --show-toplevel)"
 [ ! -e "services/$NAME" ] || { echo "ERROR: services/$NAME already exists." >&2; exit 1; }
 NS="${NAME}-staging"
@@ -660,7 +663,7 @@ done
 TENANT="platform/tenants/$NAME/tenant.yaml"
 grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" || bad "tenant manifest missing PSA enforce=restricted"
 grep -q 'name: default-deny-all' "$TENANT" || bad "tenant manifest missing default-deny-all"
-# Effective-policy test (after Flux reconciles) — required in post-deploy / P04, not skipped silently:
+# Effective-policy test (after Flux reconciles) — required post-deploy; object existence alone is not isolation.
 TENANT_NS="$NAME-staging"
 if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then
   kubectl get ns "$TENANT_NS" >/dev/null 2>&1 || bad "effective check requested but namespace $TENANT_NS missing"
@@ -668,11 +671,14 @@ if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then
     | grep -qx 'restricted' || bad "live namespace missing PSA enforce=restricted"
   kubectl -n "$TENANT_NS" get networkpolicy default-deny-all >/dev/null 2>&1 \
     || bad "live namespace missing default-deny-all"
+  # Reuse P02 connectivity matrix (allow probe, deny lateral) — CNI enforcement, not YAML presence.
+  NS="$TENANT_NS" ./deploy/platform/staging/test-connectivity.sh "$TENANT_NS" \
+    || bad "connectivity matrix failed (CNI may not enforce NetworkPolicy)"
 fi
 [ "$fail" -eq 0 ] && echo "OK: $NAME conforms to golden path v1" || exit 1
 ```
 
-Wire the offline checks into the required PR `policy` job. After promotion/reconcile, run `HARBOUR_CHECK_EFFECTIVE=1 platform/bin/harbour-check-service "$NAME"` (needs cluster read). P04 §4.5.2 adds Kyverno offline fixtures + lab admission probes.
+Wire offline checks into the required PR `policy` job (P04 `.github/workflows/policy.yml`). After reconcile: `HARBOUR_CHECK_EFFECTIVE=1 platform/bin/harbour-check-service "$NAME"`.
 
 ### 3.4.4 One-time platform wiring (author task, documented)
 

@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06` — **not signed off** |
+| **Status** | Authored; corrections after audits `ff921e0`/`ea9eb06`/`65a094d` — **not signed off** |
 
 ## How to study this chapter
 
@@ -215,7 +215,7 @@ Provenance is **evidence for tracing and verification**, not a guarantee. Say so
 
 ### 4.4.2 Worked example — extend the release workflow
 
-Add tests as a gate, build with provenance/SBOM, and attest the digest. Replace the `release` job in `.github/workflows/service-release.yml` and add a `test` job:
+Add tests as a gate, build with provenance/SBOM, attest the digest, and **produce the release manifest** that promotion requires. Replace the `release` job in `.github/workflows/service-release.yml`:
 
 ```yaml
 jobs:
@@ -229,6 +229,7 @@ jobs:
     permissions: {contents: read, packages: write, id-token: write, attestations: write}
     outputs:
       digest: ${{ steps.push.outputs.digest }}
+      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       # …meta, docker/login-action and setup-buildx exactly as in P03 §3.3.3…
@@ -245,9 +246,41 @@ jobs:
           subject-name: ${{ steps.meta.outputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+      # Release-manifest producer (immutable CI artifact — not a silent laptop step).
+      - name: Write release manifest
+        env:
+          SVC: ${{ inputs.service }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p "docs/releases/${SVC}"
+          # digest is already "sha256:…"
+          MAN="docs/releases/${SVC}/${DIGEST}.json"
+          jq -n \
+            --arg commit "${{ github.sha }}" \
+            --arg workflow "${{ github.workflow }}" \
+            --arg image "${IMAGE}@${DIGEST}" \
+            --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{commit:$commit, workflow:$workflow, image:$image, run_url:$run}' > "$MAN"
+          echo "Wrote $MAN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ inputs.service }}-${{ github.sha }}
+          path: docs/releases/${{ inputs.service }}/${{ steps.push.outputs.digest }}.json
+          if-no-files-found: error
+          retention-days: 30
 ```
 
-Callers (`<svc>-release.yml`) must now grant `id-token: write` and `attestations: write` as well, since a called workflow cannot exceed the caller's permissions. **Limitation:** artifact attestations on **private** repositories may require a paid plan; if unavailable, use a public training repo or document the gap and use Sigstore `cosign` keyless signing instead.
+**Release-manifest lifecycle (required):**
+
+| Stage | Who / what | Artifact |
+| --- | --- | --- |
+| Produce | Release workflow after push+attest | `docs/releases/<svc>/<digest>.json` uploaded as a workflow artifact |
+| Review into Git | Human opens promotion PR; includes the downloaded manifest **and** the overlay digest pin | Manifest content must match attestation (promotion-verify enforces) |
+| Consume | `promotion-verify` + `harbour-verify-artifact` | Exact commit/workflow/image; no undocumented copy |
+
+Callers (`<svc>-release.yml`) must grant `id-token: write` and `attestations: write`. **Limitation:** private-repo attestations may need a paid plan; document the gap or use cosign keyless if unavailable.
 
 ### 4.4.3 Worked example — verify before you promote
 
@@ -281,13 +314,19 @@ COMMIT="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certific
 WORKFLOW="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowName // empty')"
 REPO="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryURI // empty')"
 printf 'subject=%s\nrepo=%s\nworkflow=%s\ncommit=%s\n' "$SUBJECT_DIGEST" "$REPO" "$WORKFLOW" "$COMMIT"
-echo "$REPO" | grep -q "$EXPECT_REPO" || { echo "FAIL: attestation repo mismatch (want $EXPECT_REPO)" >&2; exit 1; }
+# Exact identity — not substring grep. Normalize URI forms once.
+canon_repo() {
+  printf '%s' "$1" | sed -E 's#^https://github.com/##; s#^git@github.com:##; s#\.git$##; s#/$##'
+}
+GOT_REPO="$(canon_repo "$REPO")"
+WANT_REPO="$(canon_repo "$EXPECT_REPO")"
+[ "$GOT_REPO" = "$WANT_REPO" ] || { echo "FAIL: attestation repo mismatch want=$WANT_REPO got=$GOT_REPO (raw=$REPO)" >&2; exit 1; }
 [ "$WORKFLOW" = "$EXPECT_WORKFLOW" ] || { echo "FAIL: workflow mismatch want=$EXPECT_WORKFLOW got=$WORKFLOW" >&2; exit 1; }
 case "$COMMIT" in
   "$EXPECT_COMMIT"|sha1:"$EXPECT_COMMIT"|sha256:"$EXPECT_COMMIT") ;;
   *) echo "FAIL: commit mismatch want=$EXPECT_COMMIT got=$COMMIT" >&2; exit 1 ;;
 esac
-echo "VERIFIED: $REF bound to $EXPECT_REPO / $EXPECT_WORKFLOW / $EXPECT_COMMIT"
+echo "VERIFIED: $REF bound to $WANT_REPO / $EXPECT_WORKFLOW / $EXPECT_COMMIT"
 ```
 
 Always-on required check `.github/workflows/promotion-verify.yml` (set `HARBOUR_EXPECT_WORKFLOW` to the **exact** attestation workflow identity after one successful release):
@@ -326,12 +365,14 @@ jobs:
             d="$(grep -oE 'digest: sha256:[0-9a-f]{64}' "$f" | head -1 | cut -d' ' -f2)"
             [ -n "$img" ] && [ -n "$d" ] || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
             MAN="docs/releases/${svc}/${d}.json"
-            [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN"; exit 1; }
+            [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (download CI artifact into PR)"; exit 1; }
             commit="$(jq -r .commit "$MAN")"
+            workflow="$(jq -r .workflow "$MAN")"
             [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
               || { echo "FAIL: manifest image does not match overlay"; exit 1; }
+            # Prefer the workflow identity recorded at release time; env is a training default / override.
             platform/bin/harbour-verify-artifact "${img}@${d}" \
-              --expect-workflow "$HARBOUR_EXPECT_WORKFLOW" \
+              --expect-workflow "${workflow:-$HARBOUR_EXPECT_WORKFLOW}" \
               --expect-commit "$commit"
           done
 ```
@@ -429,7 +470,7 @@ Confirm autogen is active. If your Kyverno version does not autogen Pod→Deploy
 | PR CI (`policy` job) | `kyverno apply` + structured policy-report parse; negative fixtures | **No** |
 | Integration / disposable cluster | Live admission probes; distinguish Kyverno vs PSA vs RBAC messages | Yes (lab only) |
 
-`platform/bin/harbour-policy-check` — **offline**, for required PR checks:
+`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (example `v1.13.4`) and **fail closed** on fail/skip/missing rules. After one dry run, lock the JSON schema paths you observe for that CLI version in `platform/bin/lib/kyverno_report.py`.
 
 ```bash
 #!/usr/bin/env bash
@@ -437,26 +478,77 @@ set -euo pipefail
 NAME="${1:?service}"
 POLICY="platform/policy/harbour-baseline.yaml"
 FIXDIR="platform/policy/fixtures"
+KYVERNO_VERSION="${KYVERNO_VERSION:-1.13.4}"
 mkdir -p "$FIXDIR" /tmp/harbour-policy
+command -v kyverno >/dev/null || {
+  echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
 kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
-# Structured report (JSON). Adjust jq paths once against your kyverno CLI version.
+# Capture JSON + exit status separately; never treat a failed apply as success.
+set +e
 kyverno apply "$POLICY" --resource /tmp/harbour-policy/rendered.yaml -o json \
-  > /tmp/harbour-policy/report.json
-python3 - <<'PY'
+  > /tmp/harbour-policy/report.json 2>/tmp/harbour-policy/apply.err
+APPLY_RC=$?
+set -e
+python3 - "$APPLY_RC" <<'PY'
 import json, sys
-rep = json.load(open("/tmp/harbour-policy/report.json"))
-# Accept either a PolicyReport-like list or kyverno CLI result objects — inspect once and pin.
-text = json.dumps(rep)
-for rule in ("require-image-digest", "require-nonroot-memory-limit"):
-    if rule not in text:
-        print(f"FAIL: rule {rule} not present in report — do not treat skip as pass"); sys.exit(1)
-if "fail" in text.lower() and "policyresponse" in text.lower():
-    # Heuristic: fail closed if any fail result string appears with a policy response
-    pass
-print("OK: expected rules present in offline report; manually confirm pass counts for your CLI schema")
+from pathlib import Path
+apply_rc = int(sys.argv[1])
+raw = Path("/tmp/harbour-policy/report.json").read_text().strip()
+if not raw:
+    print("FAIL: empty kyverno JSON report"); sys.exit(1)
+rep = json.loads(raw)
+EXPECTED = ("require-image-digest", "require-nonroot-memory-limit")
+
+def walk(obj, acc):
+    if isinstance(obj, dict):
+        # Kyverno CLI / PolicyReport style fields vary — collect rule + result pairs.
+        rule = obj.get("rule") or obj.get("policy") or obj.get("name")
+        result = (obj.get("result") or obj.get("status") or obj.get("pass") or "")
+        if isinstance(result, bool):
+            result = "pass" if result else "fail"
+        result = str(result).lower()
+        if rule and result in {"pass", "fail", "skip", "warn", "error"}:
+            acc.append((str(rule), result))
+        for v in obj.values():
+            walk(v, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            walk(v, acc)
+
+outcomes = []
+walk(rep, outcomes)
+if not outcomes:
+    print("FAIL: could not parse any rule results — pin CLI version and adjust walker"); sys.exit(1)
+
+# Fail closed: any fail/error/skip of expected rules is a gate failure.
+by_rule = {r: [] for r in EXPECTED}
+for rule, result in outcomes:
+    for exp in EXPECTED:
+        if exp in rule or rule == exp:
+            by_rule[exp].append(result)
+
+for exp in EXPECTED:
+    results = by_rule[exp]
+    if not results:
+        print(f"FAIL: expected rule {exp} never evaluated"); sys.exit(1)
+    if any(r in {"fail", "error", "skip"} for r in results):
+        print(f"FAIL: rule {exp} results={results}"); sys.exit(1)
+    if not any(r == "pass" for r in results):
+        print(f"FAIL: rule {exp} has no pass result: {results}"); sys.exit(1)
+
+if apply_rc != 0:
+    print(f"FAIL: kyverno apply exited {apply_rc}; see /tmp/harbour-policy/apply.err"); sys.exit(1)
+print("OK: offline report — expected rules evaluated and passed")
 PY
 
-# Negative fixtures — each MUST be rejected by CLI (no cluster).
+# Negative fixtures — CLI must reject (non-zero). Assert exit status, not stdout prose.
+must_fail() {
+  local f="$1"
+  if kyverno apply "$POLICY" --resource "$f" >/tmp/harbour-policy/neg.out 2>&1; then
+    echo "FAIL: expected rejection for $f"; cat /tmp/harbour-policy/neg.out; exit 1
+  fi
+  echo "OK rejected: $f"
+}
 cat > "$FIXDIR/bad-mutable-tag.yaml" <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -481,12 +573,45 @@ spec:
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
   securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
 EOF
-kyverno apply "$POLICY" --resource "$FIXDIR/bad-mutable-tag.yaml" && {
-  echo "FAIL: mutable-tag fixture accepted"; exit 1; }
-kyverno apply "$POLICY" --resource "$FIXDIR/bad-no-memory-limit.yaml" && {
-  echo "FAIL: no-memory-limit fixture accepted"; exit 1; }
+must_fail "$FIXDIR/bad-mutable-tag.yaml"
+must_fail "$FIXDIR/bad-no-memory-limit.yaml"
 echo "OK: offline policy check for $NAME"
 ```
+
+Complete required PR workflow `.github/workflows/policy.yml` (always-on; no cluster credentials):
+
+```yaml
+name: policy
+on:
+  pull_request:
+permissions: {contents: read}
+jobs:
+  harbour-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with: {version: v1.31.0}
+      - name: Install Kyverno CLI
+        env: {KYVERNO_VERSION: "1.13.4"}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kyverno.tar.gz \
+            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          tar -xzf kyverno.tar.gz kyverno
+          sudo install -m 0755 kyverno /usr/local/bin/kyverno
+          kyverno version
+      - name: Offline policy for every service overlay
+        run: |
+          set -euo pipefail
+          mapfile -t SVCS < <(find deploy -path '*/overlays/staging' -type d | sed -E 's#^deploy/([^/]+)/.*#\1#' | sort -u)
+          [ "${#SVCS[@]}" -ge 1 ] || { echo "no staging overlays"; exit 1; }
+          for s in "${SVCS[@]}"; do
+            platform/bin/harbour-policy-check "$s"
+          done
+```
+
+**Required-check tests:** (1) PR that introduces `image: nginx:latest` must fail `policy`; (2) docs-only PR must still get a completed `policy` check (always-on). Live `harbour-policy-admit` stays lab-only.
 
 `platform/bin/harbour-policy-admit` — **lab/integration only** (not the PR required check). Isolates Kyverno digest denial from PSA rejection by using a restricted-compliant Pod that only violates the image rule:
 
@@ -721,7 +846,8 @@ spec:
 Prove admission before relying on Flux:
 
 ```bash
-kubectl apply --dry-run=server -f platform/components/postgres/
+# Validate the *assembled* staging overlay (includes patches + component), not a raw directory with -f.
+kubectl apply --dry-run=server -k "deploy/${SVC}/overlays/staging"
 # Then apply for real / via Git; confirm pods become Ready under restricted PSA.
 ```
 
@@ -883,7 +1009,7 @@ Write them in ADR 0310/0311 *before* injecting failures:
 | Backup freshness | newest successful Job + off-cluster copy | < 10 min old; file exists outside cluster |
 | SLI (if D07 stack present) | `docs/observability/slo-harbour.md` pattern | availability objective met |
 
-Targets (training, state yours): **RTO ≤ 3 min** until `/ready` is `query_ok` **and** `GET /v1/entries` succeeds; **RPO** measured as wall-clock gap between last acknowledged write timestamp and backup completion timestamp (not only row counts). They are *hypotheses* until measured.
+Targets (training, state yours): **RTO ≤ 3 min** until `/ready` is `query_ok` **and** `GET /v1/entries` succeeds. Report both **estimated recovery-point age** (`incident_time − backup_completed_at`, an approximation of when `pg_dump` finished writing — not a precise recoverable-LSn boundary) and **acknowledged records lost**. They are *hypotheses* until measured.
 
 ### 4.6.3 Stateless drill (brief)
 
@@ -908,12 +1034,31 @@ wait_until() { # usage: wait_until <seconds> <description> -- <command...>
   done
 }
 PF_PID=""
+assert_pf_alive() {
+  kill -0 "$PF_PID" 2>/dev/null || { log "INVALID MEASUREMENT: port-forward PID $PF_PID exited"; return 1; }
+}
+# Returns: "CODE BODY" on HTTP response; "TRANSPORT <reason>" if curl fails.
+http_probe() {
+  local url="$1" out code
+  assert_pf_alive || { echo "TRANSPORT pf_dead"; return 0; }
+  set +e
+  out="$(curl -sS --max-time 5 -o /tmp/http_body -w '%{http_code}' "$url" 2>/tmp/http_err)"
+  local rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "TRANSPORT curl_rc=${rc}:$(tr '\n' ' ' </tmp/http_err)"
+    return 0
+  fi
+  echo "$out $(tr '\n' ' ' </tmp/http_body)"
+}
 app_pf() {
   app_stop_pf
   kubectl -n "$NS" port-forward "svc/$SVC" 18080:80 >/tmp/pf-ledger.log 2>&1 & PF_PID=$!
-  # Distinguish tunnel-up from app-ready: first require *any* HTTP response, then /ready.
-  wait_until 30 "port-forward accepts TCP" -- \
-    bash -c 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:18080/health | grep -qE "^[0-9]+$"'
+  wait_until 30 "port-forward HTTP health" -- bash -c '
+    r=$(curl -sS --max-time 2 -o /dev/null -w "%{http_code}" http://127.0.0.1:18080/health || true)
+    [[ "$r" =~ ^[0-9]+$ ]]
+  '
+  assert_pf_alive
 }
 app_stop_pf() { [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null || true; PF_PID=""; }
 trap app_stop_pf EXIT
@@ -948,12 +1093,19 @@ case "$PHASE" in
     backup_helper
     DUMP="$(kubectl -n "$NS" exec backup-helper -- sh -c 'ls -1t /backup/*.dump | head -1')"
     [ -n "$DUMP" ] || { log "no dump on backup PVC"; exit 1; }
-    # Verify artifact contents (custom format header), then copy off-cluster.
-    kubectl -n "$NS" exec backup-helper -- sh -c "test -s '$DUMP' && head -c 5 '$DUMP' | od -An -tx1"
+    # Restorability checks: size, checksum, and pg_restore --list (custom format).
+    SUM_IN="$(kubectl -n "$NS" exec backup-helper -- sha256sum "$DUMP" | awk '{print $1}')"
+    kubectl -n "$NS" exec backup-helper -- \
+      pg_restore -l "$DUMP" >/tmp/pg_restore_list.txt
+    grep -q 'TABLE DATA\|TABLE' /tmp/pg_restore_list.txt \
+      || { log "dump does not list table objects"; exit 1; }
     DEST="$HOME/harbour-backups/$(basename "$DUMP")"
     kubectl -n "$NS" cp "backup-helper:$DUMP" "$DEST"
-    python3 -c "import pathlib; p=pathlib.Path('$DEST'); assert p.stat().st_size>0; print('offcluster_bytes', p.stat().st_size)"
+    SUM_OUT="$(sha256sum "$DEST" | awk '{print $1}')"
+    [ "$SUM_IN" = "$SUM_OUT" ] || { log "checksum mismatch in=$SUM_IN out=$SUM_OUT"; exit 1; }
+    echo "$SUM_OUT" > "$OUT/backup.sha256"
     echo "$DEST" > "$OUT/offcluster-backup.path"
+    log "backup artifact sha256=$SUM_OUT bytes=$(wc -c <"$DEST")"
     kubectl -n "$NS" delete pod backup-helper --wait=false
     app_pf
     wait_until 60 "ready query_ok" -- bash -c 'curl -sf http://127.0.0.1:18080/ready | grep -q query_ok'
@@ -977,10 +1129,18 @@ case "$PHASE" in
     app_pf
     log "S2 inject: delete pod postgres-0"
     T0=$(date +%s); kubectl -n "$NS" delete pod postgres-0 --wait=false
-    wait_until 90 "app not ready" -- bash -c '! curl -sf http://127.0.0.1:18080/ready >/dev/null'
-    log "S2 detected not-ready after $(( $(date +%s) - T0 ))s"
+    # Accept only HTTP 503 as expected readiness loss — not transport/pf failure.
+    wait_until 90 "HTTP 503 readiness" -- bash -c '
+      r=$(curl -sS --max-time 5 -o /tmp/body -w "%{http_code}" http://127.0.0.1:18080/ready || echo TRANSPORT)
+      kill -0 '"$PF_PID"' 2>/dev/null || exit 1
+      [ "$r" = "503" ]
+    '
+    log "S2 detected HTTP 503 after $(( $(date +%s) - T0 ))s body=$(tr '\n' ' ' </tmp/body)"
     kubectl -n "$NS" wait --for=condition=ready pod/postgres-0 --timeout=180s
-    wait_until 180 "ready query_ok after S2" -- bash -c 'curl -sf http://127.0.0.1:18080/ready | grep -q query_ok'
+    wait_until 180 "ready query_ok after S2" -- bash -c '
+      kill -0 '"$PF_PID"' 2>/dev/null || exit 1
+      curl -sf http://127.0.0.1:18080/ready | grep -q query_ok
+    '
     GOT="$(app_count)"; WANT="$(cat "$OUT/count-before-incident.txt")"
     log "S2 recovered RTO=$(( $(date +%s) - T0 ))s http_count=$GOT expected=$WANT"
     [ "$GOT" = "$WANT" ] || { log "S2 HTTP DATA MISMATCH"; exit 1; }
@@ -996,11 +1156,22 @@ case "$PHASE" in
     T0=$(date +%s)
     BACKUP="$(cat "$OUT/offcluster-backup.path")"
     [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
+    [ "$(sha256sum "$BACKUP" | awk '{print $1}')" = "$(cat "$OUT/backup.sha256")" ] \
+      || { log "selected backup checksum changed since copy"; exit 1; }
+    # Maintenance window: freeze app traffic before destructive restore.
+    kubectl -n "$NS" scale deploy/"$SVC" --replicas=0
+    kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s || true
+    log "S3 maintenance: $SVC scaled to 0; acknowledged writes during restore are out of scope"
     kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
     kubectl -n "$NS" exec postgres-0 -- \
       pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
+    kubectl -n "$NS" scale deploy/"$SVC" --replicas=2
+    kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
     app_pf
-    wait_until 180 "ready query_ok after restore" -- bash -c 'curl -sf http://127.0.0.1:18080/ready | grep -q query_ok'
+    wait_until 180 "ready query_ok after restore" -- bash -c '
+      kill -0 '"$PF_PID"' 2>/dev/null || exit 1
+      curl -sf http://127.0.0.1:18080/ready | grep -q query_ok
+    '
     GOT="$(app_count)"; WANT="$(cat "$OUT/count-at-backup.txt")"
     notes_include A-1 || { log "missing note A-1 via structured JSON"; exit 1; }
     if notes_include B-1; then log "unexpected post-backup note B-1 still present"; exit 1; fi
@@ -1013,12 +1184,13 @@ acks = [datetime.fromisoformat(l.strip().replace("Z","+00:00"))
         for l in open("$OUT/ack_timestamps_after_backup.txt") if l.strip()]
 last_ack = max(acks)
 at_b = json.load(open("$OUT/entries-at-backup.json"))
-print(f"recovery_point_time={backup.isoformat()}")
+print(f"estimated_recovery_point_time={backup.isoformat()} (approx: dump completion, not exact LSN)")
 print(f"incident_time={incident.isoformat()}")
-print(f"RPO_age_seconds={(incident - backup.astimezone(timezone.utc)).total_seconds():.1f} (incident - recovery_point)")
-print(f"acknowledged_writes_lost={len(acks)} (post-backup acks not in recovery point)")
+print(f"estimated_RPO_age_seconds={(incident - backup.astimezone(timezone.utc)).total_seconds():.1f}")
+print(f"acknowledged_writes_lost={len(acks)}")
 print(f"last_ack_after_backup={last_ack.isoformat()}")
 print(f"http_count_at_backup={at_b['count']}")
+print(f"backup_sha256={open('$OUT/backup.sha256').read().strip()}")
 PY
     log "S3 restore service-RTO=$(( $(date +%s) - T0 ))s http_count=$GOT expected=$WANT"
     [ "$GOT" = "$WANT" ] || { log "S3 HTTP RESTORE MISMATCH"; exit 1; }
