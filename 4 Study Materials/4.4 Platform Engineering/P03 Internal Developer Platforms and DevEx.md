@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P03 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (about 32–40 hours, plus time to recruit and observe a trial user). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md) and [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) (Harbour as sound Kubernetes workloads with day-2 operations). [D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) and [D07](../4.1%20DevOps/D07%20Observability.md) strongly recommended; the Cloud path ([C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) is preferred but not required for the kind-based labs. AI optional. |
-| **Status** | Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` (PSA `drop: [ALL]` + dry-run) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `366f6815` (quota/CPU, structural capabilities, release=push-to-main) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -433,7 +433,10 @@ metadata:
 apiVersion: v1
 kind: ResourceQuota
 metadata: {name: default, namespace: $NS}
-spec: {hard: {pods: "6", requests.cpu: "500m", requests.memory: 512Mi, limits.cpu: "1", limits.memory: 1Gi}}
+# CPU limits are optional (P01/P02 ADR). Do NOT set limits.cpu here — without a
+# LimitRange, Kubernetes requires every container to declare a CPU limit when
+# the quota tracks limits.cpu, and Pods would stall Pending forever.
+spec: {hard: {pods: "6", requests.cpu: "500m", requests.memory: 512Mi, limits.memory: 1Gi}}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -540,13 +543,17 @@ EOF
 cat > ".github/workflows/$NAME-release.yml" <<EOF
 name: $NAME-release
 on:
+  # Reviewed history only: push to the protected branch after merge.
+  # Do NOT enable workflow_dispatch here — a manually selected branch can attest
+  # an unmerged commit, and P04 promotion requires that attested source ∈ main.
   push:
     branches: ["main"]
     paths: ["services/$NAME/**"]
-  workflow_dispatch:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 jobs:
   release:
     uses: ./.github/workflows/service-release.yml
@@ -558,11 +565,13 @@ echo "Created $NAME. Next: platform/bin/harbour-check-service $NAME --allow-unpr
 
 > **Registry access (decide and document):** kind must be able to pull `ghcr.io/<owner>/<service>@sha256:…`. Either make training packages public (fabricated sample code only) or provision an image pull secret per tenant (D06 §6.5.3). (If you keep the P01 local registry instead, CI cannot push to it — then your release step is a documented local script, and the trial must still cover it.) If you choose neither, the trial participant will hit `ImagePullBackOff` at T2 and you will have failed your own docs. Write the choice into START-HERE.
 
-**Read it critically.** The generated validate workflow has **no path filter** (so the required check always reports, per D04 §4.3.4); the release workflow *does*, because it is not a required check. The unpromoted digest is a visible sentinel, not a silent bug.
+**Read it critically.** The generated validate workflow has **no path filter** (so the required check always reports, per D04 §4.3.4); the release workflow *does*, because it is not a required check. Release is **push-to-`main` only** — no `workflow_dispatch` — so attestations bind to reviewed history. The unpromoted digest is a visible sentinel, not a silent bug.
 
 ### 3.3.4 Test the template like software
 
-A template that has never been generated in CI will rot. Add `platform/bin/test-template` and run it in a workflow on every change to `platform/` or the reusable workflows. It must pass on a **clean clone**:
+A template that has never been generated in CI will rot. Split **offline** (unprivileged PR CI) from **cluster** (disposable kind lab):
+
+**`platform/bin/test-template` — offline / required PR check** (no cluster credentials):
 
 ```bash
 #!/usr/bin/env bash
@@ -574,7 +583,21 @@ trap 'rm -rf "services/$T" "deploy/$T" "platform/tenants/$T" "docs/services/$T" 
 platform/bin/harbour-new-service "$T" --owner template-test
 ( cd "services/$T" && python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements.txt && pytest -q )
 kubectl kustomize "deploy/$T/overlays/staging" >/dev/null
-# Restricted PSA: rendered workload must be server-side admissible in an enforce=restricted namespace.
+# Structural securityContext (YAML-aware — not a fragile single-line grep).
+platform/bin/harbour-check-service "$T" --allow-unpromoted
+# Quota must not require CPU limits while the Deployment omits them.
+grep -q 'limits\.cpu' "platform/tenants/$T/tenant.yaml" \
+  && { echo "FAIL: tenant quota sets limits.cpu (blocks pods without CPU limits)"; exit 1; }
+echo "template OK (offline)"
+```
+
+**`platform/bin/test-template-admission` — lab / disposable cluster only** (not a required PR check):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+T="${1:?usage: test-template-admission <generated-service-name>}"
 kubectl create namespace "psa-probe-$T" --dry-run=client -o yaml \
   | kubectl label --local -f - \
       pod-security.kubernetes.io/enforce=restricted \
@@ -584,14 +607,10 @@ kubectl kustomize "deploy/$T/overlays/staging" \
   | sed "s/namespace: .*/namespace: psa-probe-$T/" \
   | kubectl apply --dry-run=server -f -
 kubectl delete namespace "psa-probe-$T" --wait=false
-kubectl kustomize "deploy/$T/overlays/staging" | grep -q 'drop:' \
-  && kubectl kustomize "deploy/$T/overlays/staging" | grep -q 'ALL' \
-  || { echo "FAIL: scaffold lost capabilities drop ALL"; exit 1; }
-platform/bin/harbour-check-service "$T" --allow-unpromoted
-echo "template OK"
+echo "template OK (admission dry-run)"
 ```
 
-(`.venv/` must be gitignored.) **Verify:** it passes, and breaking the template (e.g. remove the readiness probe) makes it fail.
+Wire `test-template` into a workflow on every change to `platform/` or the reusable workflows. Run `test-template-admission` on kind after Flux is up. (`.venv/` must be gitignored.) **Verify:** offline passes; breaking the template fails; admission dry-run rejects a Privileged copy.
 
 **Practice — reproduce:** Generate `hello-docs`, run its tests and `kubectl kustomize` its staging overlay. **Challenge:** resist adding a `--db` flag; write down why stateful services are *not* in v1 (P04 §4.6 shows the cost of getting this wrong).
 
@@ -637,10 +656,13 @@ mkdir -p docs/releases
 printf '%s %s %s previous=%s new=%s\n' "$(date -u +%FT%TZ)" "$NAME" "$ENV" "${PREV:-none}" "$DIGEST" \
   >> docs/releases/promotion-log.md
 echo "Updated $F (previous: ${PREV:-none})."
-echo "Next: git checkout -b promote/$NAME-$ENV && git add -A && git commit -m 'promote($ENV): $NAME $DIGEST' && open a pull request."
+echo "Required next (P04): download the release-manifest artifact for this digest into"
+echo "  docs/releases/$NAME/$DIGEST.json  (from the release workflow run),"
+echo "then: git checkout -b promote/$NAME-$ENV && git add -A &&"
+echo "  git commit -m 'promote($ENV): $NAME $DIGEST' && open a pull request."
 ```
 
-Note what it does **not** do: it does not run `kubectl`, hold cluster credentials or push to `main`. The cluster changes only when review merges the pull request and Flux reconciles (D06).
+Note what it does **not** do: it does not run `kubectl`, hold cluster credentials, push to `main`, or invent a release manifest. P04 `promotion-verify` requires the CI-produced `docs/releases/<svc>/<digest>.json` in the same PR (download the Actions artifact from the release run that built that digest). The cluster changes only when review merges and Flux reconciles (D06).
 
 ### 3.4.3 Worked example — the policy check
 
@@ -661,38 +683,53 @@ for f in "services/$NAME/Dockerfile" "services/$NAME/test_main.py" "catalog/$NAM
 done
 grep -qE '^  owner: .+' "catalog/$NAME.yaml" || bad "catalog: owner missing"
 R="$(kubectl kustomize "deploy/$NAME/overlays/staging")" || { echo "FAIL: kustomize build"; exit 1; }
-# Introductory text checks (fast feedback). Final acceptance uses structural/Kyverno deny fixtures (P04 §4.5.2).
-echo "$R" | grep -q 'readinessProbe' || bad "no readinessProbe"
-echo "$R" | grep -q 'livenessProbe'  || bad "no livenessProbe"
-echo "$R" | grep -q 'limits:'        || bad "no resource limits"
-echo "$R" | grep -q 'runAsNonRoot: true' || bad "not runAsNonRoot"
-echo "$R" | grep -q 'allowPrivilegeEscalation: false' || bad "missing allowPrivilegeEscalation: false"
-echo "$R" | grep -qE 'drop:[[:space:]]*\[ALL\]|drop:[[:space:]]*-[[:space:]]*ALL' \
-  || bad "missing capabilities.drop: [ALL] (required for restricted PSA)"
-echo "$R" | grep -qE 'image: .*:latest' && bad "uses :latest"
-# Structural: every container image in the rendered Deployment must be digest-shaped.
-mapfile -t IMAGES < <(printf '%s\n' "$R" | python3 -c '
+# Structural YAML parse — do not grep multiline securityContext fields.
+printf '%s\n' "$R" | python3 -c '
 import sys, yaml
+allow = sys.argv[1]
 docs = list(yaml.safe_load_all(sys.stdin))
-for d in docs:
-    if not d or d.get("kind") != "Deployment":
-        continue
-    for c in d["spec"]["template"]["spec"].get("containers", []):
-        print(c.get("image", ""))
-')
-[ "${#IMAGES[@]}" -ge 1 ] || bad "no Deployment containers found in rendered overlay"
-for IMG in "${IMAGES[@]}"; do
-  case "$IMG" in
-    *@sha256:0000000000000000000000000000000000000000000000000000000000000000)
-      [ "$ALLOW" = "--allow-unpromoted" ] || bad "image is the UNPROMOTED sentinel; promote a real digest" ;;
-    *@sha256:*) ;;
-    *) bad "image not pinned by digest: $IMG" ;;
-  esac
-done
-# Manifest contract (always — before merge): generated tenant YAML must declare PSA + NetPol.
+deploys = [d for d in docs if d and d.get("kind") == "Deployment"]
+if not deploys:
+    print("FAIL: no Deployment in rendered overlay"); sys.exit(1)
+SENTINEL = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+for d in deploys:
+    spec = d["spec"]["template"]["spec"]
+    psc = spec.get("securityContext") or {}
+    if psc.get("runAsNonRoot") is not True:
+        print("FAIL: pod runAsNonRoot != true"); sys.exit(1)
+    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
+        name = c.get("name", "?")
+        img = c.get("image", "")
+        if ":latest" in img.split("@")[0]:
+            print(f"FAIL: container {name} uses :latest"); sys.exit(1)
+        if "@sha256:" not in img:
+            print(f"FAIL: container {name} image not digest-pinned: {img}"); sys.exit(1)
+        digest = img.rsplit("@", 1)[-1]
+        if digest == SENTINEL and allow != "--allow-unpromoted":
+            print(f"FAIL: container {name} still has UNPROMOTED sentinel digest"); sys.exit(1)
+        sc = c.get("securityContext") or {}
+        if sc.get("allowPrivilegeEscalation") is not False:
+            print(f"FAIL: container {name} missing allowPrivilegeEscalation: false"); sys.exit(1)
+        drop = [str(x) for x in ((sc.get("capabilities") or {}).get("drop") or [])]
+        if "ALL" not in drop:
+            print(f"FAIL: container {name} capabilities.drop missing ALL (got {drop})"); sys.exit(1)
+        res = c.get("resources") or {}
+        if "memory" not in (res.get("limits") or {}):
+            print(f"FAIL: container {name} missing memory limit"); sys.exit(1)
+        req = res.get("requests") or {}
+        if "cpu" not in req or "memory" not in req:
+            print(f"FAIL: container {name} missing cpu/memory requests"); sys.exit(1)
+        if not c.get("readinessProbe"):
+            print(f"FAIL: container {name} missing readinessProbe"); sys.exit(1)
+        if not c.get("livenessProbe"):
+            print(f"FAIL: container {name} missing livenessProbe"); sys.exit(1)
+print("OK: structural Deployment security/resources")
+' "$ALLOW" || bad "structural Deployment/securityContext check failed"
+# Manifest contract (always — before merge): generated tenant YAML must declare PSA + NetPol + safe quota.
 TENANT="platform/tenants/$NAME/tenant.yaml"
 grep -q 'pod-security.kubernetes.io/enforce: restricted' "$TENANT" || bad "tenant manifest missing PSA enforce=restricted"
 grep -q 'name: default-deny-all' "$TENANT" || bad "tenant manifest missing default-deny-all"
+grep -qE 'limits\.cpu' "$TENANT" && bad "tenant quota sets limits.cpu (conflicts with optional CPU limits)"
 # Effective-policy test (after Flux reconciles) — required post-deploy; object existence alone is not isolation.
 TENANT_NS="$NAME-staging"
 if [ "${HARBOUR_CHECK_EFFECTIVE:-0}" = "1" ]; then

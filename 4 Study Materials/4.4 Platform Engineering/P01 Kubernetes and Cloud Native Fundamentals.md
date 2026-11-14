@@ -2,7 +2,7 @@
 
 *Platform Engineering textbook · Chapter 1 of 4*
 
-> **Status:** Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` — **awaiting re-review (not signed off)**. Clean-room execution still not claimed. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
+> **Status:** Authored; remediations after audits through `366f6815` — **awaiting re-review (not signed off)**. Clean-room execution still not claimed. Treat version numbers, URLs and kind behaviour as things to **verify on your machine**.
 
 | | |
 | --- | --- |

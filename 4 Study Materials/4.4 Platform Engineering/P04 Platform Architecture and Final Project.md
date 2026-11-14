@@ -6,7 +6,7 @@
 | --- | --- |
 | **Estimated study time** | Work at your own pace; see the [P04 course detail](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P04%20Platform%20Architecture%20and%20Final%20Project.md) (about 40–50 hours, plus time to recruit an independent developer). |
 | **Prerequisites** | [P01](P01%20Kubernetes%20and%20Cloud%20Native%20Fundamentals.md), [P02](P02%20Kubernetes%20Administration%20and%20Operations.md) and [P03](P03%20Internal%20Developer%20Platforms%20and%20DevEx.md) (golden path, scaffold, self-service guardrails, trial protocol). The DevOps ([D04](../4.1%20DevOps/D04%20CICD%20and%20Build%20Automation.md), [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), [D07](../4.1%20DevOps/D07%20Observability.md)) and Cloud ([C02–C03](../4.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md)) Harbour path is preferred. AI optional. |
-| **Status** | Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` (Flux-safe restore, allow-list provenance, rule-level policy denies) — **awaiting re-review (not signed off)** |
+| **Status** | Authored; remediations after audits through `366f6815` (promotion unpromoted-parse, reviewed-commit bind, Kyverno `--policy-report`, restore trap) — **awaiting re-review (not signed off)** |
 
 ## How to study this chapter
 
@@ -264,7 +264,9 @@ jobs:
             --arg workflow "${{ github.workflow }}" \
             --arg image "${IMAGE}@${DIGEST}" \
             --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            '{commit:$commit, workflow:$workflow, image:$image, run_url:$run}' > "$MAN"
+            --arg ref "${{ github.ref }}" \
+            --arg event "${{ github.event_name }}" \
+            '{commit:$commit, workflow:$workflow, image:$image, run_url:$run, ref:$ref, event:$event}' > "$MAN"
           echo "Wrote $MAN"
       - uses: actions/upload-artifact@v4
         with:
@@ -282,21 +284,23 @@ jobs:
 | Review into Git | Human opens promotion PR; includes the downloaded manifest **and** the overlay digest pin | Manifest content must match attestation (promotion-verify enforces) |
 | Consume | `promotion-verify` + `harbour-verify-artifact` | Exact commit/workflow/image; no undocumented copy |
 
-Callers (`<svc>-release.yml`) must grant `id-token: write` and `attestations: write`. **Limitation:** private-repo attestations may need a paid plan; document the gap or use cosign keyless if unavailable.
+Callers (`<svc>-release.yml`) must grant `id-token: write` and `attestations: write`, and must trigger only on **`push` to `main`** (no `workflow_dispatch` — see P03). **Limitation:** private-repo attestations may need a paid plan; document the gap or use cosign keyless if unavailable.
 
 ### 4.4.3 Worked example — verify before you promote
 
-`platform/bin/harbour-verify-artifact` binds digest → expected source repository → approved workflow → **required** commit (rejects if any mismatch). Commit is never optional for promotion.
+`platform/bin/harbour-verify-artifact` binds digest → expected source repository → approved workflow → **required** commit on the **protected release branch** (rejects if any mismatch). An attestation alone is not enough: the attested source commit must appear in `main` history.
 
-Release workflows must write `docs/releases/<svc>/<digest>.json` (example: `{"commit":"<sha>","workflow":"<name>","image":"<ref@digest>"}`) so promotion can look up the allowed source commit.
+Release workflows must write `docs/releases/<svc>/<digest>.json` (example: `{"commit":"<sha>","workflow":"<name>","image":"<ref@digest>","ref":"refs/heads/main","event":"push"}`) so promotion can look up the allowed source commit.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 # usage: harbour-verify-artifact <oci-ref@sha256:…> --expect-commit <sha> \
-#          (--approved-workflows-file <path> | --expect-workflow <name>)
+#          (--approved-workflows-file <path> | --expect-workflow <name>) \
+#          [--require-branch main]
 REF="${1:?}"; shift
 EXPECT_COMMIT=""; EXPECT_WORKFLOW=""; APPROVED_FILE=""
+REQUIRE_BRANCH="${HARBOUR_REQUIRE_BRANCH:-main}"
 EXPECT_REPO="${HARBOUR_EXPECT_REPO:-${GITHUB_REPOSITORY:-}}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -304,6 +308,7 @@ while [ $# -gt 0 ]; do
     --expect-workflow) EXPECT_WORKFLOW="$2"; shift 2 ;;
     --approved-workflows-file) APPROVED_FILE="$2"; shift 2 ;;
     --expect-repo) EXPECT_REPO="$2"; shift 2 ;;
+    --require-branch) REQUIRE_BRANCH="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -318,16 +323,17 @@ RAW="$(gh attestation verify "oci://$REF" --repo "$EXPECT_REPO" --format json)"
 COMMIT="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryDigest // empty')"
 WORKFLOW="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowName // empty')"
 REPO="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.sourceRepositoryURI // empty')"
-printf 'subject=%s\nrepo=%s\nworkflow=%s\ncommit=%s\n' "$SUBJECT_DIGEST" "$REPO" "$WORKFLOW" "$COMMIT"
-# Exact identity — not substring grep. Normalize URI forms once.
+# Prefer certificate fields when present (GitHub attestations expose workflow ref/event).
+ATT_REF="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowRef // empty')"
+ATT_TRIGGER="$(printf '%s' "$RAW" | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowTrigger // empty')"
+printf 'subject=%s\nrepo=%s\nworkflow=%s\ncommit=%s\nref=%s\ntrigger=%s\n' \
+  "$SUBJECT_DIGEST" "$REPO" "$WORKFLOW" "$COMMIT" "$ATT_REF" "$ATT_TRIGGER"
 canon_repo() {
   printf '%s' "$1" | sed -E 's#^https://github.com/##; s#^git@github.com:##; s#\.git$##; s#/$##'
 }
 GOT_REPO="$(canon_repo "$REPO")"
 WANT_REPO="$(canon_repo "$EXPECT_REPO")"
 [ "$GOT_REPO" = "$WANT_REPO" ] || { echo "FAIL: attestation repo mismatch want=$WANT_REPO got=$GOT_REPO (raw=$REPO)" >&2; exit 1; }
-# Trust boundary: approved workflow identity comes from *protected platform config*
-# (or an explicit lab expect), never solely from a PR-authored release manifest.
 if [ -n "$APPROVED_FILE" ]; then
   [ -f "$APPROVED_FILE" ] || { echo "FAIL: missing allow-list $APPROVED_FILE" >&2; exit 1; }
   grep -Fxq "$WORKFLOW" "$APPROVED_FILE" \
@@ -339,10 +345,22 @@ case "$COMMIT" in
   "$EXPECT_COMMIT"|sha1:"$EXPECT_COMMIT"|sha256:"$EXPECT_COMMIT") ;;
   *) echo "FAIL: commit mismatch want=$EXPECT_COMMIT got=$COMMIT" >&2; exit 1 ;;
 esac
-echo "VERIFIED: $REF bound to $WANT_REPO / workflow=$WORKFLOW / $EXPECT_COMMIT"
+# Reviewed-history gate: attested commit must be an ancestor of the protected branch tip.
+# (Attestation ≠ merge; workflow_dispatch on a feature branch must not promote.)
+STRIP_COMMIT="${COMMIT#sha1:}"; STRIP_COMMIT="${STRIP_COMMIT#sha256:}"
+git fetch origin "$REQUIRE_BRANCH" --depth=200 2>/dev/null || true
+git merge-base --is-ancestor "$STRIP_COMMIT" "origin/$REQUIRE_BRANCH" \
+  || { echo "FAIL: attested commit $STRIP_COMMIT is not on origin/$REQUIRE_BRANCH (unreviewed source)" >&2; exit 1; }
+if [ -n "$ATT_REF" ] && [ "$ATT_REF" != "refs/heads/$REQUIRE_BRANCH" ]; then
+  echo "FAIL: attestation workflow ref '$ATT_REF' is not refs/heads/$REQUIRE_BRANCH" >&2; exit 1
+fi
+if [ -n "$ATT_TRIGGER" ] && [ "$ATT_TRIGGER" != "push" ]; then
+  echo "FAIL: attestation trigger '$ATT_TRIGGER' is not push (reject workflow_dispatch builds)" >&2; exit 1
+fi
+echo "VERIFIED: $REF bound to $WANT_REPO / workflow=$WORKFLOW / $EXPECT_COMMIT on $REQUIRE_BRANCH"
 ```
 
-Always-on required check `.github/workflows/promotion-verify.yml`. The release manifest identifies **candidate commit and digest**; the **approved-workflow allow-list** is protected platform config and is compared to the attestation identity (not trusted from the PR alone):
+Always-on required check `.github/workflows/promotion-verify.yml`. The release manifest identifies **candidate commit and digest**; the **approved-workflow allow-list** is protected platform config; the attested commit must belong to **protected-branch history**:
 
 ```yaml
 name: promotion-verify
@@ -358,6 +376,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       HARBOUR_EXPECT_REPO: ${{ github.repository }}
+      HARBOUR_REQUIRE_BRANCH: main
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
@@ -372,28 +391,48 @@ jobs:
           fi
           ALLOW="platform/policy/approved-release-workflows.txt"
           [ -f "$ALLOW" ] || { echo "FAIL: missing $ALLOW"; exit 1; }
+          SENTINEL="sha256:0000000000000000000000000000000000000000000000000000000000000000"
           for f in "${FILES[@]}"; do
-            grep -q UNPROMOTED "$f" && { echo "skip $f (unpromoted sentinel)"; continue; }
             svc="$(echo "$f" | cut -d/ -f2)"
+            # Structural unpromoted detection — never substring-match the word UNPROMOTED.
+            is_unpromoted="$(python3 - "$f" "$SENTINEL" <<'PY'
+import sys, re, pathlib
+text = pathlib.Path(sys.argv[1]).read_text()
+sentinel = sys.argv[2]
+digests = re.findall(r"(?m)^\s*digest:\s*(sha256:[0-9a-f]{64})", text)
+# Unpromoted only when *every* digest is the zero sentinel AND replicas are disabled (count: 0).
+# A comment containing the word UNPROMOTED must never cause a skip on its own.
+replicas_disabled = bool(re.search(r"(?ms)^\s*replicas:\s*(?:-|\n).*?\bcount:\s*0\b", text))
+only_sentinel = digests == [sentinel]
+print("yes" if only_sentinel and replicas_disabled else "no")
+PY
+)"
+            if [ "$is_unpromoted" = "yes" ]; then
+              echo "skip $f (exact zero-digest sentinel + replicas disabled)"
+              continue
+            fi
+            # Negative case: a real digest must never skip, even if a comment says UNPROMOTED.
             img="$(sed -nE 's/^[[:space:]]+newName:[[:space:]]+(.*)$/\1/p' "$f" | head -1)"
             d="$(grep -oE 'digest: sha256:[0-9a-f]{64}' "$f" | head -1 | cut -d' ' -f2)"
             [ -n "$img" ] && [ -n "$d" ] || { echo "FAIL: cannot parse image/digest in $f"; exit 1; }
+            [ "$d" != "$SENTINEL" ] || { echo "FAIL: sentinel digest without disabled replicas in $f"; exit 1; }
             MAN="docs/releases/${svc}/${d}.json"
             [ -f "$MAN" ] || { echo "FAIL: missing release manifest $MAN (download CI artifact into PR)"; exit 1; }
             commit="$(jq -r .commit "$MAN")"
             [ "$(jq -r .image "$MAN")" = "${img}@${d}" ] \
               || { echo "FAIL: manifest image does not match overlay"; exit 1; }
-            # Manifest may *record* a workflow for humans; it does not define trust.
-            # Verifier compares attestation workflow to the protected allow-list.
             platform/bin/harbour-verify-artifact "${img}@${d}" \
               --approved-workflows-file "$ALLOW" \
-              --expect-commit "$commit"
+              --expect-commit "$commit" \
+              --require-branch "$HARBOUR_REQUIRE_BRANCH"
           done
 ```
 
-Create and protect `platform/policy/approved-release-workflows.txt` (one exact attestation `githubWorkflowName` per line). CODEOWNERS: platform reviewers only. Trust chain parts: **manifest** (commit/digest candidate) · **attestation** (signed identity) · **allow-list** (what the platform trusts).
+**Promotion hand-off (P03 → P04):** after the release run finishes, download artifact `release-manifest-<svc>-<sha>` and place `docs/releases/<svc>/<digest>.json` in the promotion branch **before** opening the PR. `harbour-promote` only edits the overlay; without the committed manifest, `promotion-verify` fails closed.
 
-Test with a fabricated digest (must fail), a digest without `docs/releases/…` (must fail), an attestation whose workflow is not allow-listed (must fail), and a docs-only PR (must succeed).
+Create and protect `platform/policy/approved-release-workflows.txt` (one exact attestation `githubWorkflowName` per line). CODEOWNERS: platform reviewers only. Trust chain: **manifest** (commit/digest candidate) · **attestation** (signed identity) · **allow-list** · **protected-branch ancestry**.
+
+**Required negative tests:** (1) fabricated digest fails; (2) missing `docs/releases/…` fails; (3) non-allow-listed workflow fails; (4) overlay with a **real** digest plus a comment containing the word `UNPROMOTED` still runs verification (must not skip); (5) attested commit **not** on `main` fails; (6) docs-only PR succeeds.
 
 ### 4.4.4 Review and branch protection are part of the trust story
 
@@ -486,7 +525,7 @@ Confirm autogen is active. If your Kyverno version does not autogen Pod→Deploy
 | PR CI (`policy` job) | `kyverno apply` + structured policy-report parse; negative fixtures | **No** |
 | Integration / disposable cluster | Live admission probes; distinguish Kyverno vs PSA vs RBAC messages | Yes (lab only) |
 
-`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (example `v1.13.4`) and **fail closed** on fail/skip/missing rules. After one dry run, lock the JSON schema paths you observe for that CLI version in `platform/bin/lib/kyverno_report.py`.
+`platform/bin/harbour-policy-check` — **offline**, for required PR checks. Pin the Kyverno CLI (**v1.13.4** below) and **fail closed** on fail/skip/missing rules. That pin emits a YAML `ClusterPolicyReport` via `--policy-report`; parse `results[].rule` / `results[].result` (wgpolicyk8s.io/v1alpha2).
 
 ```bash
 #!/usr/bin/env bash
@@ -499,44 +538,53 @@ mkdir -p "$FIXDIR" /tmp/harbour-policy
 command -v kyverno >/dev/null || {
   echo "Install kyverno CLI ${KYVERNO_VERSION} (no cluster needed for apply --resource)"; exit 1; }
 kubectl kustomize "deploy/$NAME/overlays/staging" > /tmp/harbour-policy/rendered.yaml
-# Capture JSON + exit status separately; never treat a failed apply as success.
+# Kyverno CLI (pinned v1.13.4): -o is mutate/generate output path — NOT a report format.
+# Use --policy-report (YAML ClusterPolicyReport on stdout). Do not invent --output-format
+# for this pin — that flag lands in later CLIs. Parse the YAML report with PyYAML.
+kyverno_report() {
+  local resource="$1" out="$2" err="$3"
+  set +e
+  kyverno apply "$POLICY" --resource "$resource" --policy-report \
+    >"$out" 2>"$err"
+  local rc=$?
+  set -e
+  return "$rc"
+}
 set +e
-kyverno apply "$POLICY" --resource /tmp/harbour-policy/rendered.yaml -o json \
-  > /tmp/harbour-policy/report.json 2>/tmp/harbour-policy/apply.err
+kyverno_report /tmp/harbour-policy/rendered.yaml \
+  /tmp/harbour-policy/report.yaml /tmp/harbour-policy/apply.err
 APPLY_RC=$?
 set -e
 python3 - "$APPLY_RC" <<'PY'
-import json, sys
+import sys, yaml
 from pathlib import Path
 apply_rc = int(sys.argv[1])
-raw = Path("/tmp/harbour-policy/report.json").read_text().strip()
-if not raw:
-    print("FAIL: empty kyverno JSON report"); sys.exit(1)
-rep = json.loads(raw)
+raw = Path("/tmp/harbour-policy/report.yaml").read_text()
+if not raw.strip():
+    print("FAIL: empty kyverno policy report"); sys.exit(1)
+# CLI may emit log lines before the YAML document — keep from the first apiVersion/kind.
+idx = raw.find("apiVersion:")
+if idx < 0:
+    print("FAIL: no PolicyReport YAML in kyverno output; see apply.err"); sys.exit(1)
+docs = list(yaml.safe_load_all(raw[idx:]))
+rep = next((d for d in docs if isinstance(d, dict) and "results" in d), None)
+if rep is None and docs:
+    rep = docs[0]
+if not isinstance(rep, dict):
+    print("FAIL: could not parse ClusterPolicyReport"); sys.exit(1)
 EXPECTED = ("require-image-digest", "require-nonroot-memory-limit")
-
-def walk(obj, acc):
-    if isinstance(obj, dict):
-        # Kyverno CLI / PolicyReport style fields vary — collect rule + result pairs.
-        rule = obj.get("rule") or obj.get("policy") or obj.get("name")
-        result = (obj.get("result") or obj.get("status") or obj.get("pass") or "")
-        if isinstance(result, bool):
-            result = "pass" if result else "fail"
-        result = str(result).lower()
-        if rule and result in {"pass", "fail", "skip", "warn", "error"}:
-            acc.append((str(rule), result))
-        for v in obj.values():
-            walk(v, acc)
-    elif isinstance(obj, list):
-        for v in obj:
-            walk(v, acc)
-
+results = rep.get("results") or []
 outcomes = []
-walk(rep, outcomes)
+for r in results:
+    if not isinstance(r, dict):
+        continue
+    rule = str(r.get("rule") or r.get("policy") or "")
+    result = str(r.get("result") or "").lower()
+    if rule and result in {"pass", "fail", "skip", "warn", "error"}:
+        outcomes.append((rule, result))
 if not outcomes:
-    print("FAIL: could not parse any rule results — pin CLI version and adjust walker"); sys.exit(1)
+    print("FAIL: PolicyReport.results empty — check CLI pin and --policy-report"); sys.exit(1)
 
-# Fail closed: any fail/error/skip of expected rules is a gate failure.
 by_rule = {r: [] for r in EXPECTED}
 for rule, result in outcomes:
     for exp in EXPECTED:
@@ -544,65 +592,48 @@ for rule, result in outcomes:
             by_rule[exp].append(result)
 
 for exp in EXPECTED:
-    results = by_rule[exp]
-    if not results:
+    got = by_rule[exp]
+    if not got:
         print(f"FAIL: expected rule {exp} never evaluated"); sys.exit(1)
-    if any(r in {"fail", "error", "skip"} for r in results):
-        print(f"FAIL: rule {exp} results={results}"); sys.exit(1)
-    if not any(r == "pass" for r in results):
-        print(f"FAIL: rule {exp} has no pass result: {results}"); sys.exit(1)
+    if any(r in {"fail", "error", "skip"} for r in got):
+        print(f"FAIL: rule {exp} results={got}"); sys.exit(1)
+    if not any(r == "pass" for r in got):
+        print(f"FAIL: rule {exp} has no pass result: {got}"); sys.exit(1)
 
 if apply_rc != 0:
     print(f"FAIL: kyverno apply exited {apply_rc}; see /tmp/harbour-policy/apply.err"); sys.exit(1)
-print("OK: offline report — expected rules evaluated and passed")
+print("OK: offline PolicyReport — expected rules evaluated and passed")
 PY
 
-# Negative fixtures — prove the *intended* rule denied the fixture.
-# Exit code alone is insufficient (tool errors also exit nonzero; some CLI
-# versions may exit 0 while embedding fail results). Prefer the JSON report.
-# Documented fields for pinned CLI: policyreports.wgpolicyk8s.io/v1alpha2
-# PolicyReport.result[] entries with .policy / .rule / .result
-# (pass|fail|warn|error|skip). Walker below accepts that schema and common aliases.
+# Negative fixtures — prove the *intended* rule denied the fixture (not any CLI error).
 must_deny_rule() {
   local f="$1" rule="$2"
   set +e
-  kyverno apply "$POLICY" --resource "$f" -o json \
-    >/tmp/harbour-policy/neg.json 2>/tmp/harbour-policy/neg.err
+  kyverno_report "$f" /tmp/harbour-policy/neg.yaml /tmp/harbour-policy/neg.err
   local rc=$?
   set -e
   python3 - "$rule" "$rc" <<'PY'
-import json, sys
+import sys, yaml
 from pathlib import Path
 want, apply_rc = sys.argv[1], int(sys.argv[2])
-raw = Path("/tmp/harbour-policy/neg.json").read_text().strip()
+raw = Path("/tmp/harbour-policy/neg.yaml").read_text()
 err = Path("/tmp/harbour-policy/neg.err").read_text()
-if not raw:
-    print("FAIL: tool error (empty JSON), not a policy denial:", err[:400]); sys.exit(1)
-try:
-    rep = json.loads(raw)
-except json.JSONDecodeError as e:
-    print("FAIL: tool error (invalid JSON), not a policy denial:", e, err[:200]); sys.exit(1)
-
-# Prefer PolicyReport-shaped results; fall back to recursive rule/result pairs.
-def report_results(obj):
-    out = []
-    if isinstance(obj, dict):
-        if isinstance(obj.get("results"), list):
-            for r in obj["results"]:
-                if isinstance(r, dict):
-                    out.append(r)
-        for v in obj.values():
-            out.extend(report_results(v))
-    elif isinstance(obj, list):
-        for v in obj:
-            out.extend(report_results(v))
-    return out
-
+if not raw.strip():
+    print("FAIL: tool error (empty report), not a policy denial:", err[:400]); sys.exit(1)
+idx = raw.find("apiVersion:")
+if idx < 0:
+    print("FAIL: tool error (no PolicyReport YAML), not a policy denial:", err[:200]); sys.exit(1)
+docs = list(yaml.safe_load_all(raw[idx:]))
+rep = next((d for d in docs if isinstance(d, dict) and "results" in d), docs[0] if docs else None)
+if not isinstance(rep, dict):
+    print("FAIL: tool error (unparseable report), not a policy denial"); sys.exit(1)
 found_fail = False
 matched = []
-for r in report_results(rep):
-    rule = str(r.get("rule") or r.get("policy") or r.get("name") or "")
-    result = str(r.get("result") or r.get("status") or "").lower()
+for r in (rep.get("results") or []):
+    if not isinstance(r, dict):
+        continue
+    rule = str(r.get("rule") or r.get("policy") or "")
+    result = str(r.get("result") or "").lower()
     matched.append((rule, result))
     if want in rule and result in {"fail", "error"}:
         found_fail = True
@@ -653,8 +684,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       KYVERNO_VERSION: "1.13.4"
-      # Replace with the published sha256 for this exact asset from the Kyverno release page.
-      KYVERNO_TARBALL_SHA256: "REPLACE_WITH_RELEASE_ASSET_SHA256"
+      # Frozen for kyverno-cli_v1.13.4_linux_x86_64.tar.gz (GitHub release checksums.txt).
+      KYVERNO_TARBALL_SHA256: "abd318dbb971ab6de2bbe3b7226f4a03230d5c9c651df8a29b6b5e085a55aeeb"
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-kubectl@v4
@@ -768,7 +799,7 @@ platform/bin/harbour-status "$SVC"
 
 ### 4.6.1 Add a stateful dependency deliberately
 
-Stateful services were out of P03's v1 golden path because they are expensive to get wrong. Add Postgres as a **platform component** the service opts into (StatefulSet and PVC concepts: P01 §1.8). This is a documented human gate: raise the tenant quota (`pods: "8"`, `requests.cpu: "1"`, `requests.memory: 1Gi`, `limits.cpu: "2"`, `limits.memory: 2Gi`) through a reviewed edit of `platform/tenants/$SVC/tenant.yaml`.
+Stateful services were out of P03's v1 golden path because they are expensive to get wrong. Add Postgres as a **platform component** the service opts into (StatefulSet and PVC concepts: P01 §1.8). This is a documented human gate: raise the tenant quota (`pods: "8"`, `requests.cpu: "1"`, `requests.memory: 1Gi`, `limits.memory: 2Gi` — **no `limits.cpu`**, matching P01/P03 optional CPU limits) through a reviewed edit of `platform/tenants/$SVC/tenant.yaml`.
 
 P03's tenant already enforces **restricted** PSA and **default-deny** NetworkPolicy. Postgres must therefore (a) satisfy restricted Pod Security and (b) receive explicit allow rules — otherwise the first P04 startup fails under the controls P03 just taught.
 
@@ -1238,29 +1269,52 @@ case "$PHASE" in
     [ -f "$BACKUP" ] || { log "missing off-cluster backup"; exit 1; }
     [ "$(sha256sum "$BACKUP" | awk '{print $1}')" = "$(cat "$OUT/backup.sha256")" ] \
       || { log "selected backup checksum changed since copy"; exit 1; }
-    # GitOps-safe maintenance: suspend reconciliation *before* changing replicas,
-    # so Flux cannot undo the write freeze. Desired replica count comes from Git later.
+    # Failure-safe cleanup: never leave Flux suspended / app scaled to 0 on script error.
+    MAINT=0
+    cleanup_maint() {
+      if [ "${MAINT:-0}" = "1" ]; then
+        log "cleanup: resuming Flux after restore failure/exit (MAINT trap)"
+        flux resume kustomization "$SVC" -n "$NS" || log "cleanup: flux resume failed"
+        kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite \
+          || true
+        flux reconcile kustomization "$SVC" -n "$NS" --with-source || true
+        echo "trap-fired $(date -u +%FT%TZ)" >> "$OUT/maintenance-cleanup.txt"
+      fi
+    }
+    trap cleanup_maint EXIT
+    # GitOps-safe maintenance: suspend reconciliation *before* changing replicas.
     DESIRED="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
     echo "${DESIRED:-2}" > "$OUT/desired-replicas.txt"
     flux suspend kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance=restore --overwrite
+    MAINT=1
     kubectl -n "$NS" scale deploy/"$SVC" --replicas=0
     kubectl -n "$NS" wait --for=delete pod -l "app=$SVC" --timeout=120s
-    # Prove writers are gone (no pods) and Flux is not reconciling this Kustomization.
     [ "$(kubectl -n "$NS" get pods -l "app=$SVC" --no-headers 2>/dev/null | wc -l)" = "0" ] \
       || { log "FAIL: app pods still present during maintenance"; exit 1; }
     flux get kustomization "$SVC" -n "$NS" | tee -a "$OUT/maintenance-flux.txt" | grep -qi Suspended \
       || { log "FAIL: Flux Kustomization not Suspended — abort restore"; exit 1; }
     log "S3 maintenance: Flux suspended; $SVC replicas=0; desired=$(cat "$OUT/desired-replicas.txt")"
+    # Optional failure injection (lab): HARBOUR_RESTORE_FAIL_AFTER=suspend|copy|pg_restore
+    case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
+      suspend) log "injected failure after suspend"; exit 42 ;;
+    esac
     kubectl -n "$NS" cp "$BACKUP" "postgres-0:/tmp/restore.dump"
+    case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
+      copy) log "injected failure after backup copy"; exit 42 ;;
+    esac
     kubectl -n "$NS" exec postgres-0 -- \
       pg_restore -U harbour -d harbour --clean --if-exists /tmp/restore.dump
+    case "${HARBOUR_RESTORE_FAIL_AFTER:-}" in
+      pg_restore) log "injected failure after pg_restore"; exit 42 ;;
+    esac
     # Resume GitOps: restore desired state from Git (not a hardcoded replica count).
     flux resume kustomization "$SVC" -n "$NS"
     kubectl -n "$NS" annotate kustomization "$SVC" harbour.example/maintenance- --overwrite
+    MAINT=0
+    trap - EXIT
     flux reconcile kustomization "$SVC" -n "$NS" --with-source
     kubectl -n "$NS" rollout status deploy/"$SVC" --timeout=180s
-    # Desired replicas must match Git/approved state again.
     NOW="$(kubectl -n "$NS" get deploy "$SVC" -o jsonpath='{.spec.replicas}')"
     [ "$NOW" = "$(cat "$OUT/desired-replicas.txt")" ] \
       || { log "FAIL: replicas after resume=$NOW want=$(cat "$OUT/desired-replicas.txt")"; exit 1; }
@@ -1269,7 +1323,6 @@ case "$PHASE" in
       kill -0 '"$PF_PID"' 2>/dev/null || exit 1
       curl -sf http://127.0.0.1:18080/ready | grep -q query_ok
     '
-    # Full snapshot equivalence (IDs + notes), not count-only.
     app_json > "$OUT/entries-after-restore.json"
     python3 - <<PY | tee -a "$OUT/restore-equivalence.txt"
 import json, sys
@@ -1323,6 +1376,14 @@ for p in backup write-after kill-db destroy restore; do
   platform/drills/stateful-drill.sh "$NS" "$p"
 done
 echo "Evidence: $HARBOUR_DRILL_OUT"
+# Failure-path proof (required once): inject a mid-restore abort and confirm Flux resumes.
+HARBOUR_RESTORE_FAIL_AFTER=suspend platform/drills/stateful-drill.sh "$NS" restore \
+  && { echo "FAIL: injected restore should have exited nonzero"; exit 1; } || true
+flux get kustomization "$SVC" -n "$NS" | tee -a "$HARBOUR_DRILL_OUT/restore-fail-after-suspend.txt"
+flux get kustomization "$SVC" -n "$NS" | grep -qi Suspended \
+  && { echo "FAIL: Flux still Suspended after failed restore trap"; exit 1; } \
+  || echo "OK: trap resumed Flux after injected restore failure" \
+       | tee -a "$HARBOUR_DRILL_OUT/restore-fail-after-suspend.txt"
 ```
 
 What each drill proves — and what it does not:

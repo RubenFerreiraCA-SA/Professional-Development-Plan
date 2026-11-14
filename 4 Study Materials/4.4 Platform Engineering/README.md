@@ -34,8 +34,8 @@ Hour estimates in course detail are planning assumptions. Use disposable cluster
 
 | | |
 | --- | --- |
-| **P01–P04** | Authored; remediations after audits `ff921e0`/`ea9eb06`/`65a094d`/`309cfb6` — **awaiting re-review (not signed off)** |
-| **Remediation focus (309cfb6)** | P03 restricted PSA (`drop: [ALL]` + admission dry-run); Flux-suspended DB restore; Kyverno intended-rule denies; attestation vs protected workflow allow-list; observable recon + Flux Secret recreate |
+| **P01–P04** | Authored; remediations after audits through `366f6815` — **awaiting re-review (not signed off)** |
+| **Remediation focus (366f6815)** | Remove `limits.cpu` quotas; structural capabilities parse; promotion skip only for exact sentinel; reviewed-commit on `main`; Kyverno `--policy-report` (YAML) + frozen CLI checksum; restore EXIT trap |
 | **Not claimed** | Clean-room lab execution; independent Gate-5 platform-user acceptance; executable Harbour reference repository |
 
 **Course detail:** [P00 Platform Syllabus](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) · **Checklist:** [Final Project Checklist · Platform](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
