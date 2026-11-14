@@ -126,7 +126,7 @@ C02 landing zone in account … region … Reuse D05 `infra/envs/staging`.
 - Data: API is currently **stateless**; durable state is image digest + Terraform state (S3 versioned). DB Multi-AZ: out of scope / planned …
 - Edge: ALB in public subnets across AZs …; target group health path `/health`
 - Observability: CloudWatch Logs group …; alarm … (optional)
-- Primary failure drill: <bad deploy rollback | task stop / unhealthy | AZ impairment note | restore-from-state>
+- Primary failure drill: <Option B task stop (standard) | Option A Terraform bad-deploy (advanced) | placement-config sim (not AZ outage) | restore-from-state>
 - Cost: budget $…; no NAT; teardown runbook …
 
 ## Consequences
@@ -170,11 +170,62 @@ aws elbv2 describe-load-balancers --profile "$AWS_PROFILE" --region "$AWS_REGION
   --output json | tee "$HARBOUR_ROOT/docs/cloud/alb-azs.json"
 ```
 
-Optional IaC refinements (pick what your ADR requires — not all at once):
+**Wire `desired_count` through the staging root (D05 gap).** The runtime module already accepts `desired_count`, but D05’s staging root does not declare or pass it. Add this before claiming multi-task HA:
+
+```hcl
+# infra/envs/staging — add alongside existing variables:
+variable "desired_count" {
+  type    = number
+  default = 1
+}
+
+module "runtime" {
+  count = var.enable_runtime ? 1 : 0
+
+  source          = "../../modules/runtime"
+  name_prefix     = "${var.name_prefix}-stg"
+  vpc_id          = module.network.vpc_id
+  subnet_ids      = module.network.public_subnet_ids
+  container_image = var.container_image
+  allowed_cidrs   = var.allowed_cidrs
+  desired_count   = var.desired_count   # ← add this line (module already supports it)
+}
+```
+
+Then raise count and verify placement:
+
+```bash
+# Keep other vars in terraform.tfvars; override count for this apply:
+terraform -chdir="$TF_STAGING" plan \
+  -var="desired_count=2" \
+  -out=/tmp/harbour-desired-2.tfplan
+terraform -chdir="$TF_STAGING" show -no-color /tmp/harbour-desired-2.tfplan \
+  | tee "$HARBOUR_ROOT/docs/cloud/desired-count-plan.txt" | tail -n 40
+terraform -chdir="$TF_STAGING" apply /tmp/harbour-desired-2.tfplan
+
+aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].{desired:desiredCount,running:runningCount}' \
+  --output json | tee "$HARBOUR_ROOT/docs/cloud/ha-after-desired-2.json"
+
+# Actual AZ placement of running tasks (do not claim Multi-AZ HA without this):
+aws ecs list-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --service-name "$SERVICE" --desired-status RUNNING \
+  --query 'taskArns' --output text | tr '\t' '\n' | while read -r t; do
+  test -n "$t" || continue
+  aws ecs describe-tasks --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+    --cluster "$CLUSTER" --tasks "$t" \
+    --query 'tasks[0].{task:taskArn,az:availabilityZone,subnet:attachments[0].details[?name==`subnetId`].value|[0]}' \
+    --output json
+done | tee "$HARBOUR_ROOT/docs/cloud/task-az-placement.json"
+```
+
+Persist `desired_count = 2` in `terraform.tfvars` (or your usual var file) if the ADR keeps that claim; otherwise plan/apply back to `1` when idle.
+
+Other optional IaC refinements (pick what your ADR requires — not all at once):
 
 | Refinement | Where | Verify |
 | --- | --- | --- |
-| Raise `desired_count` to 2 | staging `tfvars` / module variable | Two tasks; ALB still healthy |
 | Tighten task SG ingress to ALB SG only | runtime module | C01/C02 SG dump still matches |
 | Add HTTPS listener + cert | runtime module + ACM | Then (and only then) use `https://` health URL |
 | Add CloudWatch alarm on unhealthy hosts | staging or module | Alarm enters ALARM during drill |
@@ -215,7 +266,7 @@ test -f "$HARBOUR_ROOT/docs/cloud/console-exceptions.md" \
 
 ## Section 3.3 — Failure and recovery (match the ADR)
 
-Pick **one** primary drill for the Practical Assessment. Record: hypothesis → inject → observe → recover → evidence paths. Recovery steps must match ADR 0103.
+Pick **one** primary drill for the Practical Assessment. **Option B (task stop)** is the standard executable assessment. **Option A (bad deploy via Terraform)** is the advanced design exercise when you want deploy-rollback evidence without CLI drift. Record: hypothesis → inject → observe → recover → evidence paths. Recovery steps must match ADR 0103.
 
 ### 3.3.1 Shared observation helpers
 
@@ -235,41 +286,73 @@ observe() {
 observe "baseline-before-inject"
 ```
 
-### 3.3.2 Option A — bad deploy rollback (preferred if you have a prior task definition)
+### 3.3.2 Option A — bad deploy rollback via Terraform (advanced)
 
-**ADR claim:** “A bad task definition is rolled back to the previous known-good revision without recreating the cluster.”
+**Role:** Advanced design exercise — fully executable, but longer than Option B. Do **not** recover with bare `aws ecs update-service` while Terraform still owns the task definition; that creates drift.
+
+**ADR claim:** “A bad `container_image` digest is applied through Terraform, observed as a failed deploy, then reverted by re-applying the previous digest — no unmanaged CLI task-definition edits.”
 
 ```bash
-# Capture current (known-good) definition:
-GOOD_TD="$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+# 1) Record the known-good digest from the running task definition (must be image@sha256:…):
+TASK_DEF="$(aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   --cluster "$CLUSTER" --services "$SERVICE" \
   --query 'services[0].taskDefinition' --output text)"
-echo "GOOD_TD=$GOOD_TD" | tee "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
+GOOD_IMAGE="$(aws ecs describe-task-definition --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --task-definition "$TASK_DEF" \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+case "$GOOD_IMAGE" in
+  *@sha256:*) ;;
+  *)
+    echo "Expected digest reference from D05 Stage C; got: $GOOD_IMAGE"
+    exit 1
+    ;;
+esac
+echo "GOOD_IMAGE=$GOOD_IMAGE" | tee "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
 
-# Inject: register a deliberately broken revision (wrong image tag or failing health command).
-# Prefer doing this via Terraform variable change + apply, then revert the same way.
-# CLI sketch (break-glass — log in console-exceptions if you use it):
-# aws ecs register-task-definition ...  # broken
-# aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition <broken>
+# 2) Syntactically valid but non-pullable digest (fails ECS pulls / never becomes healthy):
+ECR_REPO="${GOOD_IMAGE%@*}"
+BAD_IMAGE="${ECR_REPO}@sha256:0000000000000000000000000000000000000000000000000000000000000001"
+echo "BAD_IMAGE=$BAD_IMAGE" | tee -a "$HARBOUR_ROOT/docs/cloud/recovery/rollback-ids.txt"
+
+# 3) Inject — plan + apply through staging (keep enable_runtime / allowed_cidrs from tfvars):
+terraform -chdir="$TF_STAGING" plan \
+  -var="enable_runtime=true" \
+  -var="container_image=${BAD_IMAGE}" \
+  -out=/tmp/harbour-bad-deploy.tfplan
+terraform -chdir="$TF_STAGING" show -no-color /tmp/harbour-bad-deploy.tfplan \
+  | tee "$HARBOUR_ROOT/docs/cloud/recovery/bad-deploy-plan.txt" | tail -n 60
+terraform -chdir="$TF_STAGING" apply /tmp/harbour-bad-deploy.tfplan
 
 observe "during-bad-deploy"
+# Expect: tasks failing to start or never healthy; /health degraded or failing.
+# Wait long enough to capture events (do not leave BAD_IMAGE applied overnight).
+for i in 1 2 3 4; do
+  observe "bad-deploy-wait-$i"
+  sleep 20
+done
 
-# Recover per ADR — roll forward to GOOD_TD (or terraform apply previous tfvars):
-aws ecs update-service --profile "$AWS_PROFILE" --region "$AWS_REGION" \
-  --cluster "$CLUSTER" --service "$SERVICE" \
-  --task-definition "$GOOD_TD" \
-  --force-new-deployment
+# 4) Recover — revert digest with another recorded plan/apply (Terraform remains source of truth):
+terraform -chdir="$TF_STAGING" plan \
+  -var="enable_runtime=true" \
+  -var="container_image=${GOOD_IMAGE}" \
+  -out=/tmp/harbour-good-revert.tfplan
+terraform -chdir="$TF_STAGING" show -no-color /tmp/harbour-good-revert.tfplan \
+  | tee "$HARBOUR_ROOT/docs/cloud/recovery/good-revert-plan.txt" | tail -n 60
+terraform -chdir="$TF_STAGING" apply /tmp/harbour-good-revert.tfplan
 
-# Wait until runningCount == desiredCount and health returns 200
+# Also restore container_image in terraform.tfvars (or your var file) so the next plain
+# plan does not re-introduce BAD_IMAGE.
 for i in 1 2 3 4 5 6; do
   observe "rollback-wait-$i"
   sleep 20
 done
 ```
 
-If you use GitOps from D06, prefer **reverting the Git change** that produced the bad digest and showing sync/apply evidence — still attach the same observe log.
+**Verify:** Observe log shows unhealthy/failed during inject and HTTP 200 after revert; both plan files are filed; `terraform -chdir="$TF_STAGING" plan` (with restored tfvars) is empty or unrelated. If you use GitOps from [D06](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md), the same story is “bad digest commit → revert commit” with sync evidence — still attach the observe log.
 
-### 3.3.3 Option B — task stop / unhealthy target (scheduler recovery)
+### 3.3.3 Option B — task stop / unhealthy target (standard assessment)
+
+**Role:** Standard executable Practical Assessment drill. Proves **self-healing** (ECS replaces the task). With `desired_count=1` this is **not** multi-instance HA — say so in the ADR.
 
 **ADR claim:** “Stopping the running task(s) results in ECS replacing them; ALB returns healthy within RTO ….”
 
@@ -293,16 +376,36 @@ for i in 1 2 3 4 5 6; do
 done
 ```
 
-**Verify:** New task ARN ≠ stopped ARN; `/health` recovers; events show the replacement. If `desired_count=1`, this proves **self-healing**, not multi-instance HA — say so in the ADR.
+**Verify:** New task ARN ≠ stopped ARN; `/health` recovers; events show the replacement.
 
-### 3.3.4 Option C — AZ impairment (honest simulation)
+### 3.3.4 Option C — placement-configuration failure (not a true AZ outage)
 
-True AZ failure is hard to inject safely. Acceptable training simulations:
+**Label clearly:** this is a **placement-configuration failure simulation**, not an Availability Zone outage. Removing a subnet from the ECS service network configuration is **not** equivalent to AWS impairing an AZ. Do **not** use this drill to claim “Multi-AZ resilience verified.”
 
-- Scale so tasks only register in one subnet/AZ, then remove that subnet from the service temporarily **via Terraform**, observe ALB behaviour, restore.  
-- Or document: “ALB spans AZs (`alb-azs.json`); with `desired_count=1` we do **not** claim AZ failure tolerance; drill deferred until count ≥ 2 and tasks spread.”
+**What it can teach:** how Harbour behaves when the service can no longer place tasks in a subnet you removed on purpose, and how you restore that configuration via Terraform.
 
-Do **not** claim Multi-AZ app HA without evidence of tasks (or data) surviving loss of one AZ.
+**Procedure (only if ADR names this drill and `desired_count` ≥ 1):**
+
+```bash
+# Record current subnet list from the service (or from module.network outputs):
+aws ecs describe-services --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' \
+  --output json | tee "$HARBOUR_ROOT/docs/cloud/recovery/subnets-before.json"
+
+# Via Terraform only: temporarily pass a single public subnet_id into module.runtime
+# (or a temporary staging override), plan, apply, observe placement/health impact,
+# then restore the full subnet list with another plan/apply. File both plans.
+# Do not edit the service network config with the AWS CLI while Terraform owns it.
+```
+
+**Expected limitations (write these into the ADR):**
+
+- Proves configuration/placement sensitivity, **not** AZ failure tolerance.  
+- ALB may still span two AZs in `alb-azs.json` while tasks cannot — that is not app HA.  
+- True AZ resilience remains an **unverified claim** until you have an appropriate test (and usually `desired_count` ≥ 2 with verified cross-AZ placement from §3.2.2).
+
+With `desired_count=1`, the honest ADR line is: “ALB spans AZs; we do **not** claim AZ failure tolerance for the app.”
 
 ### 3.3.5 Option D — restore assumptions (stateless + state bucket)
 
@@ -375,9 +478,11 @@ Update `docs/cloud/cost-guardrails.md` with: NAT decision, ALB idle cost, Fargat
 ### 3.4.2 Worked example — destroy path still exists
 
 ```bash
-# Plan only until you intend to tear down:
+# Plan only until you intend to tear down — capture the full plan first (avoid
+# piping through head, which can SIGPIPE terraform and truncate evidence):
 terraform -chdir="$TF_STAGING" plan -destroy \
-  | tee "$HARBOUR_ROOT/docs/cloud/c03-destroy-plan-head.txt" | head -n 60
+  > "$HARBOUR_ROOT/docs/cloud/c03-destroy-plan.txt"
+head -n 60 "$HARBOUR_ROOT/docs/cloud/c03-destroy-plan.txt"
 ```
 
 Confirm `docs/runbooks/aws-training-teardown.md` (from C02) still lists order: runtime → network → (never bootstrap while envs exist).
@@ -447,10 +552,10 @@ Align with [C03 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 ### Required deliverables
 
-1. **ADR 0103** — compute, network, data, edge, observability, cost, **one** primary failure mode.  
-2. **Verified** HA/backup/limit choices in `infra/` (or explicit “not claimed” with evidence files such as `ha-baseline.json`, `alb-azs.json`).  
-3. **Recovery evidence** for the injected/simulated failure (`docs/cloud/recovery/`, observe log, before/after health).  
-4. **Cost controls** updated (budget still valid; NAT/idle/teardown honesty).  
+1. **ADR 0103** — compute, network, data, edge, observability, cost, **one** primary failure mode (Option B is the standard assessment; Option A if you complete the full Terraform bad-deploy loop).  
+2. **Verified** HA/backup/limit choices in `infra/` (or explicit “not claimed” with evidence files such as `ha-baseline.json`, `alb-azs.json`, and task AZ placement if `desired_count` ≥ 2).  
+3. **Recovery evidence** for the injected/simulated failure (`docs/cloud/recovery/`, observe log, before/after health). Placement-config drills must not be labelled as AZ outages.  
+4. **Cost controls** updated (budget still valid; NAT/idle/teardown honesty; full destroy plan file if captured).  
 5. **`console-exceptions.md`** — complete list (may be empty).  
 6. Recovery runbook stub matching the ADR.  
 7. Confirmation demo path still works as **least-privilege** identity from C02 (no standing admin required to show health).
@@ -470,14 +575,16 @@ Align with [C03 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 ### Self-check
 
 - Does the ADR admit single-task / no-DB limits if that is reality?  
-- Was recovery done the way the ADR said (not a different improvisation)?  
+- If you raised `desired_count`, is it wired through the **staging root** and verified with task AZ placement?  
+- Was recovery done the way the ADR said (Terraform revert for Option A — no CLI drift)?  
+- Did you avoid calling a subnet-removal drill a “true AZ outage”?  
 - Were Terraform paths `-chdir=…/infra/envs/staging`?  
 - Is health evidence still on **http://** unless HTTPS was an explicit enhancement?  
 - Would a second engineer find CLUSTER/SERVICE names and the recovery runbook without asking you?
 
 ### Example conclusion (evidence still required)
 
-> ADR 0103: Fargate public-subnet training, ALB HTTP across two AZs, desired_count=2 claimed for task replacement HA (not full AZ proof). Stateless API; state bucket versioning noted. Primary drill: stop-task → ECS replace; observe.log shows health 000→200 in ~Ns. Plan/apply under `infra/envs/staging`. No console exceptions. Budget unchanged; teardown runbook linked. Demo health via demo-operator.
+> ADR 0103: Fargate public-subnet training, ALB HTTP across two AZs, desired_count=2 wired via staging `var.desired_count` (task-az-placement.json shows spread — still not a live AZ-impairment test). Stateless API; state bucket versioning noted. Primary drill: Option B stop-task → ECS replace; observe.log shows health recover in ~Ns. No console exceptions. Full destroy plan filed (not executed). Demo health via demo-operator.
 
 ---
 
@@ -505,6 +612,6 @@ Align with [C03 Course Detail](../../3%20Course%20Detail/3.2%20Cloud%20Engineeri
 
 - [AWS Well-Architected — Reliability](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html)  
 - [ECS best practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)  
-- [D05 Terraform](../4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · [D06 CD/GitOps](../4.1%20DevOps/D06%20Continuous%20Delivery%20and%20GitOps.md) · [C02](C02%20AWS%20Cloud%20Foundations.md) · [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)
+- [D05 Terraform](../4.1%20DevOps/D05%20Infrastructure%20as%20Code%20and%20Terraform.md) · [D06 GitOps Automation and Operations](../4.1%20DevOps/D06%20GitOps%20Automation%20and%20Operations.md) · [C02](C02%20AWS%20Cloud%20Foundations.md) · [Cloud syllabus](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C00%20Cloud%20Syllabus.md)
 
 **Previous chapter:** [Chapter 2 — AWS Cloud Foundations](C02%20AWS%20Cloud%20Foundations.md) · **Course detail:** [C03](../../3%20Course%20Detail/3.2%20Cloud%20Engineering/C03%20AWS%20Infrastructure%20and%20Architecture.md) · **Next:** [Platform Engineering](../../3%20Course%20Detail/3.4%20Platform%20Engineering/P00%20Platform%20Syllabus.md) (after Cloud milestone) · **Checklist:** [Final Project Checklist · C03](../../1%20Foundational%20Documents/1.5%20Final%20Project%20Checklist.md)
