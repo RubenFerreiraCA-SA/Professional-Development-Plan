@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-069](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-01-I — Kubernetes Fundamentals and Architecture — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-01-i) — Work through declarative manifests, the Services and DNS discussion and the exercise that breaks readiness and liveness in turn.
+- [T-PLT-01-I — Kubernetes Fundamentals and Architecture — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-01%20Kubernetes%20Fundamentals%20and%20Architecture/T-PLT-01-I%20Intermediate.md#t-plt-01-i) — Work through declarative manifests, the Services and DNS discussion and the exercise that breaks readiness and liveness in turn.
 
 Optional enrichment: the notes on kubeconfig contexts and namespaces in the same chapter. Optional material is clearly marked in the textbook.
 

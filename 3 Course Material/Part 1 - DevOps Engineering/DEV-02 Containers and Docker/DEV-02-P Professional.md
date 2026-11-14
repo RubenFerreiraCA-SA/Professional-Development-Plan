@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-006](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-02-P — Containers and Docker — Professional](../../../5%20Textbook/Master%20Textbook.md#t-dev-02-p)
+- [T-DEV-02-P — Containers and Docker — Professional](../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-02%20Containers%20and%20Docker/T-DEV-02-P%20Professional.md#t-dev-02-p)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-02` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

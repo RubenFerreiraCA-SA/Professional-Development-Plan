@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-095](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-07-E — Platform Integration, Reliability and Evolution — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-07-e) — Read platform evolution and deprecation, platform reliability engineering, scaling beyond one team, governance without gatekeeping, evaluating platform health, build, buy or adopt and the final architecture review checklist.
+- [T-PLT-07-E — Platform Integration, Reliability and Evolution — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-07%20Platform%20Integration,%20Reliability%20and%20Evolution/T-PLT-07-E%20Expert.md#t-plt-07-e) — Read platform evolution and deprecation, platform reliability engineering, scaling beyond one team, governance without gatekeeping, evaluating platform health, build, buy or adopt and the final architecture review checklist.
 
 Optional enrichment: the mentoring prompts about the breaking-change rollout. Optional material is clearly marked in the textbook.
 

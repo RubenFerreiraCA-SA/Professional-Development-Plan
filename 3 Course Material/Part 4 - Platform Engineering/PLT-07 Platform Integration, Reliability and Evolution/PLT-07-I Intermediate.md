@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-093](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-07-I — Platform Integration, Reliability and Evolution — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-07-i) — Study the integrated demonstration plan, acceptance tasks, stateful drills, backups that survive the cluster and runbooks for someone who is not you.
+- [T-PLT-07-I — Platform Integration, Reliability and Evolution — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-07%20Platform%20Integration,%20Reliability%20and%20Evolution/T-PLT-07-I%20Intermediate.md#t-plt-07-i) — Study the integrated demonstration plan, acceptance tasks, stateful drills, backups that survive the cluster and runbooks for someone who is not you.
 
 Optional enrichment: the exercise that runs drills S1 and S2 and improves a runbook. Optional material is clearly marked in the textbook.
 

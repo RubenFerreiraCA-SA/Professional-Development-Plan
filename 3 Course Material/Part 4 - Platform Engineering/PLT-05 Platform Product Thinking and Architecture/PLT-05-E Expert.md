@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-087](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-05-E — Platform Product Thinking and Architecture — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-05-e) — Read platform as a product organisation, the thinnest viable platform, team topology, architecture defence, reviewer questions and the organisational failure catalogue.
+- [T-PLT-05-E — Platform Product Thinking and Architecture — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-05%20Platform%20Product%20Thinking%20and%20Architecture/T-PLT-05-E%20Expert.md#t-plt-05-e) — Read platform as a product organisation, the thinnest viable platform, team topology, architecture defence, reviewer questions and the organisational failure catalogue.
 
 Optional enrichment: the mentoring prompts about deciding whether an organisation needs a portal. Optional material is clearly marked in the textbook.
 

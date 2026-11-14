@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-055](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-02-E — Grounding, Retrieval and Knowledge Use — Expert](../../../5%20Textbook/Master%20Textbook.md#t-aie-02-e)
+- [T-AIE-02-E — Grounding, Retrieval and Knowledge Use — Expert](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-02%20Grounding,%20Retrieval%20and%20Knowledge%20Use/T-AIE-02-E%20Expert.md#t-aie-02-e)
 
 Read for: retrieval failure modes, advanced techniques and when to adopt them, evaluation at depth, governance and privacy of embeddings, and latency and cost.
 

@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-060](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-04-B — Agents, Tools and Orchestration — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-aie-04-b)
+- [T-AIE-04-B — Agents, Tools and Orchestration — Beginner](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-04%20Agents,%20Tools%20and%20Orchestration/T-AIE-04-B%20Beginner.md#t-aie-04-b)
 
 Read for: from answering to acting, the agent as a loop you own, tools as named functions with schemas, never handing the model a shell, deny by default and bounding the loop.
 

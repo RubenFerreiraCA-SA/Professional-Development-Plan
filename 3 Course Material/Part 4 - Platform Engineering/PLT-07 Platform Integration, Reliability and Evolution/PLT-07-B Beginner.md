@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-092](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-07-B — Platform Integration, Reliability and Evolution — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-07-b) — Read putting the pieces together, the end-to-end path, integration debt, evidence not claims and the first integration checklist.
+- [T-PLT-07-B — Platform Integration, Reliability and Evolution — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-07%20Platform%20Integration,%20Reliability%20and%20Evolution/T-PLT-07-B%20Beginner.md#t-plt-07-b) — Read putting the pieces together, the end-to-end path, integration debt, evidence not claims and the first integration checklist.
 
 Optional enrichment: the exercise that walks the path with a small example service. Optional material is clearly marked in the textbook.
 

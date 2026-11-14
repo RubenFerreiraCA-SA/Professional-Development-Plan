@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-015](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-04-E — Infrastructure as Code and Terraform — Expert](../../../5%20Textbook/Master%20Textbook.md#t-dev-04-e)
+- [T-DEV-04-E — Infrastructure as Code and Terraform — Expert](../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-04%20Infrastructure%20as%20Code%20and%20Terraform/T-DEV-04-E%20Expert.md#t-dev-04-e)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-04` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

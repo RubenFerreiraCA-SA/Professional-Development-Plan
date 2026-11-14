@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-079](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-03-E — Kubernetes Security and Policy — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-03-e) — Read the cluster threat model, escalation analysis, policy engine design at scale, runtime security, isolation strength, identity and zero trust, and the failure catalogue.
+- [T-PLT-03-E — Kubernetes Security and Policy — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-03%20Kubernetes%20Security%20and%20Policy/T-PLT-03-E%20Expert.md#t-plt-03-e) — Read the cluster threat model, escalation analysis, policy engine design at scale, runtime security, isolation strength, identity and zero trust, and the failure catalogue.
 
 Optional enrichment: the mentoring prompts at the end of the same section. Optional material is clearly marked in the textbook.
 

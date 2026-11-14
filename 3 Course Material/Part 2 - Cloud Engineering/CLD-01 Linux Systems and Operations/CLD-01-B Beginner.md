@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-028](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-01-B — Linux Systems and Operations — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-cld-01-b)
+- [T-CLD-01-B — Linux Systems and Operations — Beginner](../../../5%20Textbook/Part%202%20-%20Cloud%20Engineering/T-CLD-01%20Linux%20Systems%20and%20Operations/T-CLD-01-B%20Beginner.md#t-cld-01-b)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 

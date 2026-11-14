@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-086](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-05-P — Platform Product Thinking and Architecture — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-05-p) — Read the integrated outcome matrix, what trusted means, promotion that verifies, approved environments, policy in two places, secrets, stateful dependencies and health targets.
+- [T-PLT-05-P — Platform Product Thinking and Architecture — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-05%20Platform%20Product%20Thinking%20and%20Architecture/T-PLT-05-P%20Professional.md#t-plt-05-p) — Read the integrated outcome matrix, what trusted means, promotion that verifies, approved environments, policy in two places, secrets, stateful dependencies and health targets.
 
 Optional enrichment: the decision guide in the same chapter. Optional material is clearly marked in the textbook.
 

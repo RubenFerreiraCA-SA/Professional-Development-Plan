@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-089](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-06-I — Golden Paths, Templates and Developer Experience — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-06-i) — Study the template as a product artefact, the generated layout, scaffolding with validation, template testing, safe self-service, promotion by pull request and deviation records.
+- [T-PLT-06-I — Golden Paths, Templates and Developer Experience — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-06%20Golden%20Paths,%20Templates%20and%20Developer%20Experience/T-PLT-06-I%20Intermediate.md#t-plt-06-i) — Study the template as a product artefact, the generated layout, scaffolding with validation, template testing, safe self-service, promotion by pull request and deviation records.
 
 Optional enrichment: the exercise that deletes a readiness probe and confirms the checker fails. Optional material is clearly marked in the textbook.
 

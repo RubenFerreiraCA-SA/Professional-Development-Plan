@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-071](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-01-E — Kubernetes Fundamentals and Architecture — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-01-e) — Read control-plane mechanics, understanding rollouts precisely, the failure-signature table, scheduling at scale, cluster design choices and API evolution.
+- [T-PLT-01-E — Kubernetes Fundamentals and Architecture — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-01%20Kubernetes%20Fundamentals%20and%20Architecture/T-PLT-01-E%20Expert.md#t-plt-01-e) — Read control-plane mechanics, understanding rollouts precisely, the failure-signature table, scheduling at scale, cluster design choices and API evolution.
 
 Optional enrichment: the mentoring prompts at the end of the same section. Optional material is clearly marked in the textbook.
 

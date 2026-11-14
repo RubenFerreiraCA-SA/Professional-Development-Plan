@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-083](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-04-E — Kubernetes Operations, Incidents and Recovery — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-04-e) — Read failure domains, control-plane operations, capacity and cost, upgrade strategies in depth, disaster-recovery design, the failure catalogue and human factors.
+- [T-PLT-04-E — Kubernetes Operations, Incidents and Recovery — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-04%20Kubernetes%20Operations,%20Incidents%20and%20Recovery/T-PLT-04-E%20Expert.md#t-plt-04-e) — Read failure domains, control-plane operations, capacity and cost, upgrade strategies in depth, disaster-recovery design, the failure catalogue and human factors.
 
 Optional enrichment: the mentoring prompts at the end of the same section. Optional material is clearly marked in the textbook.
 

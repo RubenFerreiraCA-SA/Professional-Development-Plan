@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-065](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-05-I — LLMOps, Deployment and Monitoring — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-aie-05-i)
+- [T-AIE-05-I — LLMOps, Deployment and Monitoring — Intermediate](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-05%20LLMOps,%20Deployment%20and%20Monitoring/T-AIE-05-I%20Intermediate.md#t-aie-05-i)
 
 Read for: serving the feature as a small HTTP service, the request path, limits that protect cost and safety, the kill-switch and rollback script, monitoring hooks and testing the integrated path.
 

@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-088](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-06-B — Golden Paths, Templates and Developer Experience — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-06-b) — Read cognitive load, golden-path definition and specification, the first thirty minutes and the section on testing your own onboarding.
+- [T-PLT-06-B — Golden Paths, Templates and Developer Experience — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-06%20Golden%20Paths,%20Templates%20and%20Developer%20Experience/T-PLT-06-B%20Beginner.md#t-plt-06-b) — Read cognitive load, golden-path definition and specification, the first thirty minutes and the section on testing your own onboarding.
 
 Optional enrichment: the clean-machine exercise that lists every improvised step. Optional material is clearly marked in the textbook.
 

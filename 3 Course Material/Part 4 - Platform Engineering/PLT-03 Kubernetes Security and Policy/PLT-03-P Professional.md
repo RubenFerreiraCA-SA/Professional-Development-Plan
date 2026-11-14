@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-078](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-03-P — Kubernetes Security and Policy — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-03-p) — Study policy as code at admission, typical baseline rules, securing the control plane and nodes, secrets management, supply chain at the cluster, tenancy and auditing evidence.
+- [T-PLT-03-P — Kubernetes Security and Policy — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-03%20Kubernetes%20Security%20and%20Policy/T-PLT-03-P%20Professional.md#t-plt-03-p) — Study policy as code at admission, typical baseline rules, securing the control plane and nodes, secrets management, supply chain at the cluster, tenancy and auditing evidence.
 
 Optional enrichment: the decision guide in the same chapter. Optional material is clearly marked in the textbook.
 

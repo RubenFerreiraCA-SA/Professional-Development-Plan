@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-082](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-04-P — Kubernetes Operations, Incidents and Recovery — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-04-p) — Study recovery levels, backup and restore design, upgrades, the operating cadence, the runbook skeleton, incident management and the decision guide.
+- [T-PLT-04-P — Kubernetes Operations, Incidents and Recovery — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-04%20Kubernetes%20Operations,%20Incidents%20and%20Recovery/T-PLT-04-P%20Professional.md#t-plt-04-p) — Study recovery levels, backup and restore design, upgrades, the operating cadence, the runbook skeleton, incident management and the decision guide.
 
 Optional enrichment: the etcd snapshot section from the Intermediate chapter. Optional material is clearly marked in the textbook.
 

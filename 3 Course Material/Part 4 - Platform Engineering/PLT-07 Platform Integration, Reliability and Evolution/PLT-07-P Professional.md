@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-094](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-07-P — Platform Integration, Reliability and Evolution — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-07-p) — Read reliability, cost and improvement, the failure-injection menu, game days, SLOs for the platform, integration seams, the demonstration run and the reflection record.
+- [T-PLT-07-P — Platform Integration, Reliability and Evolution — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-07%20Platform%20Integration,%20Reliability%20and%20Evolution/T-PLT-07-P%20Professional.md#t-plt-07-p) — Read reliability, cost and improvement, the failure-injection menu, game days, SLOs for the platform, integration seams, the demonstration run and the reflection record.
 
 Optional enrichment: the decision guide in the same chapter. Optional material is clearly marked in the textbook.
 

@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-058](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-03-P — AI Evaluation, Safety and Quality — Professional](../../../5%20Textbook/Master%20Textbook.md#t-aie-03-p)
+- [T-AIE-03-P — AI Evaluation, Safety and Quality — Professional](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-03%20AI%20Evaluation,%20Safety%20and%20Quality/T-AIE-03-P%20Professional.md#t-aie-03-p)
 
 Read for: an evaluation strategy with golden, regression, adversarial and held-out sets, careful model-graded evaluation, safety controls beyond evaluation, over- and under-refusal, and documentation and accountability.
 

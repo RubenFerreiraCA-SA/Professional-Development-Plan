@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-063](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-04-E — Agents, Tools and Orchestration — Expert](../../../5%20Textbook/Master%20Textbook.md#t-aie-04-e)
+- [T-AIE-04-E — Agents, Tools and Orchestration — Expert](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-04%20Agents,%20Tools%20and%20Orchestration/T-AIE-04-E%20Expert.md#t-aie-04-e)
 
 Read for: threat modelling an agent, the dangerous combination of capabilities, protocol and ecosystem risk, reliability of long-running agents, evaluating trajectories, governance for autonomy and the failure catalogue.
 

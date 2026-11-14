@@ -30,7 +30,7 @@ Exact tasks: see [PRJ-001 through PRJ-068](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-01-B — Kubernetes Fundamentals and Architecture — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-01-b) — Read the architecture picture, the core-objects table and the first-commands sequence before doing the exercise.
+- [T-PLT-01-B — Kubernetes Fundamentals and Architecture — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-01%20Kubernetes%20Fundamentals%20and%20Architecture/T-PLT-01-B%20Beginner.md#t-plt-01-b) — Read the architecture picture, the core-objects table and the first-commands sequence before doing the exercise.
 
 Optional enrichment: the "What Kubernetes does not do" and training-versus-production-cluster notes in the same chapter. Optional material is clearly marked in the textbook.
 

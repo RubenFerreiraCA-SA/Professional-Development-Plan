@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-081](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-04-I — Kubernetes Operations, Incidents and Recovery — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-04-i) — Work through the fault catalogue, ephemeral debugging, node operations, why node failure is not a drain, and the namespace rebuild from Git.
+- [T-PLT-04-I — Kubernetes Operations, Incidents and Recovery — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-04%20Kubernetes%20Operations,%20Incidents%20and%20Recovery/T-PLT-04-I%20Intermediate.md#t-plt-04-i) — Work through the fault catalogue, ephemeral debugging, node operations, why node failure is not a drain, and the namespace rebuild from Git.
 
 Optional enrichment: the etcd snapshot awareness section. Optional material is clearly marked in the textbook.
 

@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-080](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-04-B — Kubernetes Operations, Incidents and Recovery — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-04-b) — Read what day two means, the triage ladder, reading statuses, maintenance vocabulary and the recovery-sources overview.
+- [T-PLT-04-B — Kubernetes Operations, Incidents and Recovery — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-04%20Kubernetes%20Operations,%20Incidents%20and%20Recovery/T-PLT-04-B%20Beginner.md#t-plt-04-b) — Read what day two means, the triage ladder, reading statuses, maintenance vocabulary and the recovery-sources overview.
 
 Optional enrichment: the exercise that breaks a service three different ways. Optional material is clearly marked in the textbook.
 

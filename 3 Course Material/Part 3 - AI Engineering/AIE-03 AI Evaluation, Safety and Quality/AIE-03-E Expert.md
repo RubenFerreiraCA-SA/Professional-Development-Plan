@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-059](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-03-E — AI Evaluation, Safety and Quality — Expert](../../../5%20Textbook/Master%20Textbook.md#t-aie-03-e)
+- [T-AIE-03-E — AI Evaluation, Safety and Quality — Expert](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-03%20AI%20Evaluation,%20Safety%20and%20Quality/T-AIE-03-E%20Expert.md#t-aie-03-e)
 
 Read for: measurement theory for AI evaluation, limits of automated judging, red-teaming programmes, layered safety architecture, drift and the failure catalogue.
 

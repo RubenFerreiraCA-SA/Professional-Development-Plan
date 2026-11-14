@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-085](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-05-I — Platform Product Thinking and Architecture — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-05-i) — Study why a portal alone is not a platform, the platform contract, runtime scope, architecture views as text, ADR guidance and the limitations register.
+- [T-PLT-05-I — Platform Product Thinking and Architecture — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-05%20Platform%20Product%20Thinking%20and%20Architecture/T-PLT-05-I%20Intermediate.md#t-plt-05-i) — Study why a portal alone is not a platform, the platform contract, runtime scope, architecture views as text, ADR guidance and the limitations register.
 
 Optional enrichment: the exercise that writes an ownership table and a five-entry limitations register. Optional material is clearly marked in the textbook.
 

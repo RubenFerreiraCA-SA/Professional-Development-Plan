@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-090](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-06-P — Golden Paths, Templates and Developer Experience — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-06-p) — Study discoverability, documentation as a product, operational status, investigability, the runbook quality bar, portal options, the measurement protocol and operating the platform as a product.
+- [T-PLT-06-P — Golden Paths, Templates and Developer Experience — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-06%20Golden%20Paths,%20Templates%20and%20Developer%20Experience/T-PLT-06-P%20Professional.md#t-plt-06-p) — Study discoverability, documentation as a product, operational status, investigability, the runbook quality bar, portal options, the measurement protocol and operating the platform as a product.
 
 Optional enrichment: the decision guide in the same chapter. Optional material is clearly marked in the textbook.
 

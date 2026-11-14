@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-061](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-04-I — Agents, Tools and Orchestration — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-aie-04-i)
+- [T-AIE-04-I — Agents, Tools and Orchestration — Intermediate](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-04%20Agents,%20Tools%20and%20Orchestration/T-AIE-04-I%20Intermediate.md#t-aie-04-i)
 
 Read for: the fixed dispatcher order, schema validation, constraining tool behaviour (path confinement), sanitised audit logging, the training approval gate versus real approval, and a deterministic planner.
 

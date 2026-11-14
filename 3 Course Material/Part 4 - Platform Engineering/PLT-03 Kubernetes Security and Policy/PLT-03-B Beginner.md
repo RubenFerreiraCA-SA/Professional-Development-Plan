@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-076](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-03-B — Kubernetes Security and Policy — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-03-b) — Read the three request questions, the RBAC vocabulary, the first Role, proving access with commands, the namespace caveat and the Pod hardening basics.
+- [T-PLT-03-B — Kubernetes Security and Policy — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-03%20Kubernetes%20Security%20and%20Policy/T-PLT-03-B%20Beginner.md#t-plt-03-b) — Read the three request questions, the RBAC vocabulary, the first Role, proving access with commands, the namespace caveat and the Pod hardening basics.
 
 Optional enrichment: the exercise in the same chapter that creates a read-only Role and proves it with `can-i`. Optional material is clearly marked in the textbook.
 

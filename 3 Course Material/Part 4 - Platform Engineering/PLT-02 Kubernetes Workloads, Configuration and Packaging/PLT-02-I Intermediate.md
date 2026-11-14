@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-073](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-02-I — Kubernetes Workloads, Configuration and Packaging — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-02-i) — Study choosing deliberately between tools, writing a good chart, overlay patterns, config-change rollouts, workload shapes and the autoscaling basics.
+- [T-PLT-02-I — Kubernetes Workloads, Configuration and Packaging — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-02%20Kubernetes%20Workloads,%20Configuration%20and%20Packaging/T-PLT-02-I%20Intermediate.md#t-plt-02-i) — Study choosing deliberately between tools, writing a good chart, overlay patterns, config-change rollouts, workload shapes and the autoscaling basics.
 
 Optional enrichment: the Job and HorizontalPodAutoscaler examples in the same chapter. Optional material is clearly marked in the textbook.
 

@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-053](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-02-I — Grounding, Retrieval and Knowledge Use — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-aie-02-i)
+- [T-AIE-02-I — Grounding, Retrieval and Knowledge Use — Intermediate](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-02%20Grounding,%20Retrieval%20and%20Knowledge%20Use/T-AIE-02-I%20Intermediate.md#t-aie-02-i)
 
 Read for: preparing a corpus with stable chunk identifiers, context assembly, verifying citations, keyword versus embedding versus hybrid retrieval, similarity thresholds, re-ranking and troubleshooting.
 

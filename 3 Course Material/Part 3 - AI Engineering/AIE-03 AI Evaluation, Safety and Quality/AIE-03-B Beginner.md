@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-056](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-03-B — AI Evaluation, Safety and Quality — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-aie-03-b)
+- [T-AIE-03-B — AI Evaluation, Safety and Quality — Beginner](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-03%20AI%20Evaluation,%20Safety%20and%20Quality/T-AIE-03-B%20Beginner.md#t-aie-03-b)
 
 Read for: why evaluate, the shape of an evaluation case, the four behaviours every assistant needs, a tiny runner, and what a pass does and does not prove.
 

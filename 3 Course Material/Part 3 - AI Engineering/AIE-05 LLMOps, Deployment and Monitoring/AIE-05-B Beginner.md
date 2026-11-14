@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-064](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-05-B — LLMOps, Deployment and Monitoring — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-aie-05-b)
+- [T-AIE-05-B — LLMOps, Deployment and Monitoring — Beginner](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-05%20LLMOps,%20Deployment%20and%20Monitoring/T-AIE-05-B%20Beginner.md#t-aie-05-b)
 
 Read for: what LLMOps is for a feature, what to version, pinning metadata and artefact identity, the health endpoint reporting AI state and the single-flag stop button.
 

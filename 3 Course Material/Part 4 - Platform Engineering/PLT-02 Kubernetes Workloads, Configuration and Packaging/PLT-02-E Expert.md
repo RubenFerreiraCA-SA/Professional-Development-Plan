@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-075](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-02-E — Kubernetes Workloads, Configuration and Packaging — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-02-e) — Read templating pitfalls, custom resources and controllers, server-side apply, package supply chain, the failure-mode table and designing for many teams.
+- [T-PLT-02-E — Kubernetes Workloads, Configuration and Packaging — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-02%20Kubernetes%20Workloads,%20Configuration%20and%20Packaging/T-PLT-02-E%20Expert.md#t-plt-02-e) — Read templating pitfalls, custom resources and controllers, server-side apply, package supply chain, the failure-mode table and designing for many teams.
 
 Optional enrichment: the mentoring prompts at the end of the same section. Optional material is clearly marked in the textbook.
 

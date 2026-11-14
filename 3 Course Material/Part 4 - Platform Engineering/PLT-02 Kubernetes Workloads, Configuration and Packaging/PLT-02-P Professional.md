@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-074](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-02-P — Kubernetes Workloads, Configuration and Packaging — Professional](../../../5%20Textbook/Master%20Textbook.md#t-plt-02-p) — Read packaging as a platform API, quality gates for manifests, ownership and drift, chart upgrade policy, configuration management rules and the decision guide.
+- [T-PLT-02-P — Kubernetes Workloads, Configuration and Packaging — Professional](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-02%20Kubernetes%20Workloads,%20Configuration%20and%20Packaging/T-PLT-02-P%20Professional.md#t-plt-02-p) — Read packaging as a platform API, quality gates for manifests, ownership and drift, chart upgrade policy, configuration management rules and the decision guide.
 
 Optional enrichment: the autoscaling-in-production notes and the chart compatibility policy in the same chapter. Optional material is clearly marked in the textbook.
 

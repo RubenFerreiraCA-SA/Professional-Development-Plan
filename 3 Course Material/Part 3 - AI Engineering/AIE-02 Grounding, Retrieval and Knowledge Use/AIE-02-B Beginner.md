@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-052](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-02-B — Grounding, Retrieval and Knowledge Use — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-aie-02-b)
+- [T-AIE-02-B — Grounding, Retrieval and Knowledge Use — Beginner](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-02%20Grounding,%20Retrieval%20and%20Knowledge%20Use/T-AIE-02-B%20Beginner.md#t-aie-02-b)
 
 Read for: why grounding matters, the retrieval picture, corpus, chunk, citation and no-match vocabulary, a keyword retriever with stop words, and the honest no-match.
 

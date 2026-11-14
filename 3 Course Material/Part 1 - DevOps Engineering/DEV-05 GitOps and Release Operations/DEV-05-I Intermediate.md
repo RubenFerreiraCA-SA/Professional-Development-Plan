@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-017](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-05-I — GitOps and Release Operations — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-dev-05-i)
+- [T-DEV-05-I — GitOps and Release Operations — Intermediate](../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-05%20GitOps%20and%20Release%20Operations/T-DEV-05-I%20Intermediate.md#t-dev-05-i)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-05` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

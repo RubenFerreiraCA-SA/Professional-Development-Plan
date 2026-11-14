@@ -30,7 +30,7 @@ Exact tasks: see [PRJ-001 through PRJ-025](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-07-I — Datadog Monitoring — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-dev-07-i)
+- [T-DEV-07-I — Datadog Monitoring — Intermediate](../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-07%20Datadog%20Monitoring/T-DEV-07-I%20Intermediate.md#t-dev-07-i)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-07` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

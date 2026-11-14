@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-066](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-05-P — LLMOps, Deployment and Monitoring — Professional](../../../5%20Textbook/Master%20Textbook.md#t-aie-05-p)
+- [T-AIE-05-P — LLMOps, Deployment and Monitoring — Professional](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-05%20LLMOps,%20Deployment%20and%20Monitoring/T-AIE-05-P%20Professional.md#t-aie-05-p)
 
 Read for: release management for AI changes, observability signals for LLM features, resilience, security and compliance, the feature runbook and the decision guide.
 

@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-077](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-03-I — Kubernetes Security and Policy — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-plt-03-i) — Work through the unprivileged identity, escalation traps, workload identities, quotas, limits and Pod Security, NetworkPolicy testing and the default-deny exercise.
+- [T-PLT-03-I — Kubernetes Security and Policy — Intermediate](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-03%20Kubernetes%20Security%20and%20Policy/T-PLT-03-I%20Intermediate.md#t-plt-03-i) — Work through the unprivileged identity, escalation traps, workload identities, quotas, limits and Pod Security, NetworkPolicy testing and the default-deny exercise.
 
 Optional enrichment: the certificate-signing-request example for creating a real user identity. Optional material is clearly marked in the textbook.
 

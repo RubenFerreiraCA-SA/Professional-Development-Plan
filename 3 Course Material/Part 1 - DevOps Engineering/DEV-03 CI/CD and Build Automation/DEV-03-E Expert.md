@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-011](../../../../4%20Project%20Document/Pr
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-03-E — CI/CD and Build Automation — Expert](../../../../5%20Textbook/Master%20Textbook.md#t-dev-03-e)
+- [T-DEV-03-E — CI/CD and Build Automation — Expert](../../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-03%20CI-CD%20and%20Build%20Automation/T-DEV-03-E%20Expert.md#t-dev-03-e)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-03` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

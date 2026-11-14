@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-054](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-02-P — Grounding, Retrieval and Knowledge Use — Professional](../../../5%20Textbook/Master%20Textbook.md#t-aie-02-p)
+- [T-AIE-02-P — Grounding, Retrieval and Knowledge Use — Professional](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-02%20Grounding,%20Retrieval%20and%20Knowledge%20Use/T-AIE-02-P%20Professional.md#t-aie-02-p)
 
 Read for: retrieval design decisions, authorisation at retrieval time, citations as a control, retrieval quality metrics, knowledge lifecycle and decision guide.
 

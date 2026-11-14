@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-091](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-06-E — Golden Paths, Templates and Developer Experience — Expert](../../../5%20Textbook/Master%20Textbook.md#t-plt-06-e) — Read running an independent trial properly, honest statistics, turning findings into changes, template architecture at scale, the failure catalogue and developer experience beyond the platform.
+- [T-PLT-06-E — Golden Paths, Templates and Developer Experience — Expert](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-06%20Golden%20Paths,%20Templates%20and%20Developer%20Experience/T-PLT-06-E%20Expert.md#t-plt-06-e) — Read running an independent trial properly, honest statistics, turning findings into changes, template architecture at scale, the failure catalogue and developer experience beyond the platform.
 
 Optional enrichment: the mentoring prompts on I2 interventions and retiring parts of the golden path. Optional material is clearly marked in the textbook.
 

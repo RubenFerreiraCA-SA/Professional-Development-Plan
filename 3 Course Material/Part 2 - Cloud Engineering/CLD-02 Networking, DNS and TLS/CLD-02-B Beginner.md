@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-032](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-02-B — Networking, DNS and TLS — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-cld-02-b)
+- [T-CLD-02-B — Networking, DNS and TLS — Beginner](../../../5%20Textbook/Part%202%20-%20Cloud%20Engineering/T-CLD-02%20Networking,%20DNS%20and%20TLS/T-CLD-02-B%20Beginner.md#t-cld-02-b)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 

@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-084](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-05-B — Platform Product Thinking and Architecture — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-05-b) — Read a platform has customers, the IDP definition, users and jobs-to-be-done, the one-page product brief and metrics from the user's outcome.
+- [T-PLT-05-B — Platform Product Thinking and Architecture — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-05%20Platform%20Product%20Thinking%20and%20Architecture/T-PLT-05-B%20Beginner.md#t-plt-05-b) — Read a platform has customers, the IDP definition, users and jobs-to-be-done, the one-page product brief and metrics from the user's outcome.
 
 Optional enrichment: the discussion of the platform-as-product anti-patterns in the same chapter. Optional material is clearly marked in the textbook.
 

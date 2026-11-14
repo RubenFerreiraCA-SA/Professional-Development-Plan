@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-062](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-04-P — Agents, Tools and Orchestration — Professional](../../../5%20Textbook/Master%20Textbook.md#t-aie-04-p)
+- [T-AIE-04-P — Agents, Tools and Orchestration — Professional](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-04%20Agents,%20Tools%20and%20Orchestration/T-AIE-04-P%20Professional.md#t-aie-04-p)
 
 Read for: agent design principles, tool design, authorisation model, untrusted data in the loop, orchestration patterns, testing agents and operational limits.
 

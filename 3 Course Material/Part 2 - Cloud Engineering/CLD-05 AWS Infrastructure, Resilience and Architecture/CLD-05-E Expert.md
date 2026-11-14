@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-047](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-05-E — AWS Infrastructure, Resilience and Architecture — Expert](../../../5%20Textbook/Master%20Textbook.md#t-cld-05-e)
+- [T-CLD-05-E — AWS Infrastructure, Resilience and Architecture — Expert](../../../5%20Textbook/Part%202%20-%20Cloud%20Engineering/T-CLD-05%20AWS%20Infrastructure,%20Resilience%20and%20Architecture/T-CLD-05-E%20Expert.md#t-cld-05-e)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 

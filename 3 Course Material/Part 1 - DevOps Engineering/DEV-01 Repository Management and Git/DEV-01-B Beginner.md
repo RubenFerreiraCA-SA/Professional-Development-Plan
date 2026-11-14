@@ -24,7 +24,7 @@ There are no preceding project steps for this first module, so the gate is satis
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-DEV-01-B — Repository Management and Git — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-dev-01-b)
+- [T-DEV-01-B — Repository Management and Git — Beginner](../../../5%20Textbook/Part%201%20-%20DevOps%20Engineering/T-DEV-01%20Repository%20Management%20and%20Git/T-DEV-01-B%20Beginner.md#t-dev-01-b)
 
 Optional enrichment: the decision guide or mentoring prompts at the end of the same topic chapter, and the adjacent level of `DEV-01` if a term in this level is unfamiliar. Optional reading never replaces the required section above.
 

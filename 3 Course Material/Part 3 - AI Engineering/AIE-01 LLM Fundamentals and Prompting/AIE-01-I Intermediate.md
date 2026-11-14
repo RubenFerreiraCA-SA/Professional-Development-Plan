@@ -26,7 +26,7 @@ Exact tasks: see [PRJ-001 through PRJ-049](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-AIE-01-I — LLM Fundamentals and Prompting — Intermediate](../../../5%20Textbook/Master%20Textbook.md#t-aie-01-i)
+- [T-AIE-01-I — LLM Fundamentals and Prompting — Intermediate](../../../5%20Textbook/Part%203%20-%20AI%20Engineering/T-AIE-01%20LLM%20Fundamentals%20and%20Prompting/T-AIE-01-I%20Intermediate.md#t-aie-01-i)
 
 Read for: prompt anatomy, few-shot and decomposition techniques, validating model output in code, deterministic pre-checks, offline fake models and the common-failures table.
 

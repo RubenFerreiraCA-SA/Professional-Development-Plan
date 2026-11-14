@@ -19,6 +19,6 @@ You self-assess every topic as Beginner, Intermediate, Professional or Expert; f
 | [2 PDP Development](2%20PDP%20Development/) | Profile, assessment, pathway, schedule, progress |
 | [3 Course Material](3%20Course%20Material/) | 24 topics × 4 levels = 96 modules |
 | [4 Project Document](4%20Project%20Document/Project.md) | Independent project steps PRJ-001–PRJ-096 |
-| [5 Textbook](5%20Textbook/Master%20Textbook.md) | One independent master textbook |
+| [5 Textbook](5%20Textbook/Master%20Textbook.md) | One independent master textbook (unified publication across part/chapter/level files) |
 
 This repository is **educational text and planning worksheets only**. Implement practical work in your own project workspace.

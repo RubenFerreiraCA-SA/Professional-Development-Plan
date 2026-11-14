@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-042](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-04-P — AWS Identity, Networking and Cost Controls — Professional](../../../5%20Textbook/Master%20Textbook.md#t-cld-04-p)
+- [T-CLD-04-P — AWS Identity, Networking and Cost Controls — Professional](../../../5%20Textbook/Part%202%20-%20Cloud%20Engineering/T-CLD-04%20AWS%20Identity,%20Networking%20and%20Cost%20Controls/T-CLD-04-P%20Professional.md#t-cld-04-p)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 

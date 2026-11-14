@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-038](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-CLD-03-P — Cloud Foundations and Governance — Professional](../../../5%20Textbook/Master%20Textbook.md#t-cld-03-p)
+- [T-CLD-03-P — Cloud Foundations and Governance — Professional](../../../5%20Textbook/Part%202%20-%20Cloud%20Engineering/T-CLD-03%20Cloud%20Foundations%20and%20Governance/T-CLD-03-P%20Professional.md#t-cld-03-p)
 
 Optional enrichment: related sections in the same topic chapter, clearly marked optional in the textbook.
 

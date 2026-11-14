@@ -28,7 +28,7 @@ Exact tasks: see [PRJ-001 through PRJ-072](../../../4%20Project%20Document/Proje
 
 Read the following section in the master textbook (independent of this PDP):
 
-- [T-PLT-02-B — Kubernetes Workloads, Configuration and Packaging — Beginner](../../../5%20Textbook/Master%20Textbook.md#t-plt-02-b) — Read the packaging-motivation material alongside the Kustomize and Helm miniatures to see the same Deployment, Service and ConfigMap rendered both ways.
+- [T-PLT-02-B — Kubernetes Workloads, Configuration and Packaging — Beginner](../../../5%20Textbook/Part%204%20-%20Platform%20Engineering/T-PLT-02%20Kubernetes%20Workloads,%20Configuration%20and%20Packaging/T-PLT-02-B%20Beginner.md#t-plt-02-b) — Read the packaging-motivation material alongside the Kustomize and Helm miniatures to see the same Deployment, Service and ConfigMap rendered both ways.
 
 Optional enrichment: the "One owner rule" note and the probe and configuration discussion in the Intermediate chapter of PLT-01. Optional material is clearly marked in the textbook.
 
