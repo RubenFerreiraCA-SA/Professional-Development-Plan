@@ -384,8 +384,14 @@ export AWS_PROFILE=harbour-training
 # Reuse CLUSTER/SERVICE from §2.4.2 (discover if unset):
 export CLUSTER="${CLUSTER:-harbour-stg-cluster}"
 export SERVICE="${SERVICE:-harbour-stg-api}"
-aws ecs list-services --cluster "$CLUSTER" --region "$AWS_REGION" | grep -F "$SERVICE" \
-  || { echo "SERVICE not found on CLUSTER — list-clusters / list-services and set names"; exit 1; }
+# Exact name match (avoid substring false positives from grep on list-services):
+FOUND_SERVICE="$(aws ecs describe-services --region "$AWS_REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].serviceName' --output text)"
+test "$FOUND_SERVICE" = "$SERVICE" || {
+  echo "SERVICE not found on CLUSTER — list-clusters / list-services and set exact names"
+  exit 1
+}
 
 TASK_DEF="$(aws ecs describe-services --region "$AWS_REGION" \
   --cluster "$CLUSTER" --services "$SERVICE" \
