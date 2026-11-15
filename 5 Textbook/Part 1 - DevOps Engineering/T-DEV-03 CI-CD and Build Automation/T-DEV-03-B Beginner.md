@@ -11,7 +11,7 @@ Imagine a team of four people working on one service. Each person builds and tes
 
 None of those people did anything unusual. The problem is structural: **the steps that decide whether a change is acceptable depend on the memory and the machine of whoever happens to perform them.** Automation removes that dependence. A *pipeline* is a written-down, executable description of the steps — build, check, package — that runs the same way for every change, on a clean machine, and reports the result in a place where reviewers will see it.
 
-This Beginner section assumes you can use Git and have opened a pull request (see [T-DEV-01-B](T-DEV-01-B%20Beginner.md#t-dev-01-b) if not). It does **not** assume you have ever written a pipeline. The examples use GitHub Actions syntax because it is widely used and easy to read, but every idea transfers to GitLab CI, Jenkins, Buildkite, CircleCI and others; only the file format changes.
+This Beginner section assumes you can use Git and have opened a pull request (see [T-DEV-01-B](../T-DEV-01%20Repository%20Management%20and%20Git/T-DEV-01-B%20Beginner.md#t-dev-01-b) if not). It does **not** assume you have ever written a pipeline. The examples use GitHub Actions syntax because it is widely used and easy to read, but every idea transfers to GitLab CI, Jenkins, Buildkite, CircleCI and others; only the file format changes.
 
 ## First principles: what problem does integration solve?
 
