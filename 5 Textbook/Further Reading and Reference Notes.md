@@ -40,6 +40,10 @@ These pointers are for deepening understanding and for checking version-specific
 - **Platform engineering and developer experience:** the CNCF Platforms White Paper and Platform Engineering Maturity Model; *Team Topologies*; the Diátaxis documentation framework; Backstage documentation (software catalogue and templates); DORA and SPACE frameworks for developer productivity (with their stated limitations).
 - **Integration and architecture:** guidance on architecture decision records (Michael Nygard's original article); C4 model for architecture views; supply-chain attestation and verification tooling documentation.
 
+### Version-sensitive topics to re-check
+
+Before relying on a worked example in production, verify current official documentation for at least: Git hosting rulesets and CODEOWNERS enforcement; Dockerfile and BuildKit syntax; CI OIDC claim formats; Terraform backend locking; Flux/Argo APIs; OpenTelemetry semantic conventions; Datadog Agent and monitor query syntax; AWS IAM evaluation edge cases and VPC features; Kubernetes API deprecations, Pod Security and admission; model-provider structured-output and tool-calling APIs. Where a chapter marks a detail as version-specific or illustrative, treat that label as authoritative for the book’s intent.
+
 ### Reference notes carried through this book
 
 1. **Setting is not enforcement.** Show a rejected action to prove a control exists; a settings screenshot proves only a setting.

@@ -28,10 +28,11 @@ Each topic has four levels. The suffix on the heading says which level you are r
 
 ### Suggested reading paths
 
-- **Complete newcomer:** read all **B** sections of a part in order, doing the small exercises, before touching any **I** section.
-- **Working engineer filling a gap:** go straight to the topic, read **I** and **P**, and use **B** only for vocabulary.
-- **Senior engineer or reviewer:** read **P** and **E**. They contain the decision tables, failure-mode catalogues and review checklists.
-- **Reference use:** every topic's **P** section ends with a decision guide, and the Glossary at the end defines the terms used throughout.
+- **Complete newcomer:** read all **B** sections of a part in order, doing the guided examples and exercises, before touching any **I** section. Within DevOps, start with Git (T-DEV-01), then containers (T-DEV-02), then CI/CD (T-DEV-03). Within Cloud, Linux (T-CLD-01) and networking (T-CLD-02) unlock later AWS chapters. Within Platform, Kubernetes fundamentals (T-PLT-01) before workloads, security and operations.
+- **Working engineer filling a gap:** go straight to the topic, read **I** and **P**, and use **B** only where a term is unfamiliar. Higher levels include short refreshers and cross-links; they do not require reading every earlier level first.
+- **Senior engineer or reviewer:** read **P** and **E**. They contain decision tables, failure-mode catalogues, governance cases and mentoring prompts.
+- **Cross-topic paths:** Git prepares containers and CI; Linux and networking support cloud identity and resilience; GitOps distinguishes desired state, deployed artifact, runtime state and data recovery; observability ideas recur in Datadog, Kubernetes operations and AI monitoring; AI chapters treat models as software components with evaluation and trust boundaries.
+- **Reference use:** Professional sections include decision guides; the [Glossary](Glossary.md) defines recurring terms; [Further Reading](Further%20Reading%20and%20Reference%20Notes.md) points at primary docs for version-sensitive checks.
 
 ### Conventions
 
