@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Build one tidy PDF from the PDP's modular master textbook.
 
-Run from repository root:
-    python3 -m pip install mistune weasyprint
-    python3 "5 Textbook/export_textbook.py"
+From the repository root (uses a local venv; system Python is often PEP 668-locked):
+
+    python3 -m venv tools/.venv
+    tools/.venv/bin/pip install -r tools/requirements-textbook.txt
+    tools/.venv/bin/python tools/export_textbook.py
 
 Optional:
-    python3 "5 Textbook/export_textbook.py" --output textbook.pdf
+
+    tools/.venv/bin/python tools/export_textbook.py --output textbook.pdf
 """
 import argparse
 import html
@@ -17,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 import mistune
 from weasyprint import HTML
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 LEVELS = ("B", "I", "P", "E")
 
 CSS = """
@@ -174,15 +178,17 @@ def build_pdf(book: Path, output: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export PDP master textbook as PDF")
     parser.add_argument(
-        "--textbook", type=Path, default=Path("5 Textbook"),
-        help="Textbook folder (default: ./5 Textbook)"
+        "--textbook", type=Path, default=REPO_ROOT / "5 Textbook",
+        help="Textbook folder (default: <repo>/5 Textbook)",
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("Master Textbook.pdf"),
-        help="Output PDF (default: ./Master Textbook.pdf)"
+        "--output", type=Path, default=REPO_ROOT / "Master Textbook.pdf",
+        help="Output PDF (default: <repo>/Master Textbook.pdf)",
     )
     args = parser.parse_args()
-    build_pdf(args.textbook.resolve(), args.output.resolve())
+    textbook = args.textbook if args.textbook.is_absolute() else REPO_ROOT / args.textbook
+    output = args.output if args.output.is_absolute() else REPO_ROOT / args.output
+    build_pdf(textbook.resolve(), output.resolve())
 
 if __name__ == "__main__":
     main()

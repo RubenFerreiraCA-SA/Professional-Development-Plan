@@ -1,0 +1,5 @@
+.venv-textbook/
+tools/.venv/
+tools/__pycache__/
+__pycache__/
+Master Textbook.pdf
