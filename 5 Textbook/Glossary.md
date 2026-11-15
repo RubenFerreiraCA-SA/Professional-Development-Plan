@@ -80,5 +80,14 @@
 | Trust boundary | A line across which data or code moves between different levels of trust. |
 | VPC | Virtual private cloud: an isolated, user-defined network in a cloud provider. |
 | Workload identity | A short-lived identity given to a running workload rather than a person. |
+| Burn rate | How quickly an error budget is being consumed relative to the SLO window. |
+| Field manager | In Kubernetes server-side apply, the recorded owner of a field; conflicts arise when managers disagree. |
+| Gray failure | A degraded mode that is neither fully healthy nor fully down, often hard for coarse monitoring to detect. |
+| Head / tail sampling | Trace sampling at the start of a request versus after the outcome is known. |
+| Landing zone | A governed baseline of accounts, identity, networking and logging from which cloud workloads are launched. |
+| Partial clone / sparse checkout | Git techniques that fetch or materialise only part of a large repository. |
+| Ruleset | Hosting-provider policies (often as code) that enforce branch protections and related controls. |
+| Saga | A multi-step workflow with compensating actions when a later step fails. |
+| Wilson interval | A confidence interval for a proportion that behaves better than a naive normal approximation on small samples. |
 
 ---
