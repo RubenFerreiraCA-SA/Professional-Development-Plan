@@ -152,6 +152,72 @@ kubectl rollout status deploy/orders-api -n orders-staging
 | `OOMKilled` in last state | Memory limit below real use | `describe pod`; compare usage to limit |
 | Config change has no effect | Value was injected as an env var | Restart the rollout: `kubectl rollout restart deploy/orders-api` |
 
+**What a rollout actually does.** Change anything under `spec.template` (the image, an env var, a probe) and the Deployment creates a *new* ReplicaSet, then gradually shifts Pods from the old one to the new one. Changing `replicas` alone does not create a new ReplicaSet; it only rescales the current one. The pace is set by the strategy:
+
+```yaml
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # may run one extra Pod above replicas during the update
+      maxUnavailable: 0    # never drop below the desired ready count
+```
+
+With `replicas: 2`, `maxSurge: 1` and `maxUnavailable: 0`, Kubernetes starts one new Pod, waits until its readiness probe passes, then terminates one old Pod, and repeats. This is why readiness matters for rollouts and not only for traffic: **a new Pod that never becomes ready stalls the rollout, and the old Pods keep serving.** That is the behaviour you want from a bad release.
+
+```bash
+kubectl set image deploy/orders-api api=registry.example.com/orders-api@sha256:7ab2...41cd -n orders-staging
+kubectl rollout status deploy/orders-api -n orders-staging       # blocks until done or the deadline passes
+kubectl rollout history deploy/orders-api -n orders-staging      # revisions kept (one per ReplicaSet)
+kubectl rollout undo deploy/orders-api -n orders-staging         # back to the previous revision
+```
+
+Prefer editing the manifest in Git and applying it over `kubectl set image`; the command above is shown so that you can see the mechanism. A hand edit that is not reflected in the file will be overwritten by the next `apply`.
+
+**A worked failure: reading a stalled rollout.** You roll out a new image and `kubectl rollout status` prints "Waiting for deployment "orders-api" rollout to finish: 1 out of 2 new replicas have been updated" and then nothing. Work from the outside in.
+
+```bash
+kubectl get pods -n orders-staging -l app=orders-api
+# orders-api-6d5f9c7b8-abcde   1/1  Running   0   2d      <- old, still serving
+# orders-api-6d5f9c7b8-fghij   1/1  Running   0   2d      <- old, still serving
+# orders-api-84c7d6f59-xk2lm   0/1  Running   0   4m      <- new, never ready
+kubectl describe pod orders-api-84c7d6f59-xk2lm -n orders-staging | sed -n '/Events/,$p'
+# Warning  Unhealthy  Readiness probe failed: HTTP probe failed with statuscode: 503
+kubectl logs orders-api-84c7d6f59-xk2lm -n orders-staging
+# ERROR  config: missing required setting PAGE_SIZE
+```
+
+Reading the evidence: the old ReplicaSet is intact, so users are unaffected; the new Pod is `Running` (the process started) but not `Ready` (the application says it cannot serve); the log gives the cause (a setting the new version requires). The fix is a configuration change, not a restart. Rolling back with `kubectl rollout undo` restores service immediately and buys time; the permanent fix goes through Git. Record the symptom, the command that revealed the cause and the fix; that triple is the evidence format used throughout this chapter.
+
+**Labels: a small design discipline.** The selector of a Deployment is immutable after creation, and a Service selector that is too broad will quietly send traffic to the wrong Pods. Use the standard recommended labels so tools and humans agree on meaning.
+
+| Label | Example | Use |
+| --- | --- | --- |
+| `app.kubernetes.io/name` | `orders-api` | What the component is; use in selectors |
+| `app.kubernetes.io/instance` | `orders-api-staging` | Which installation of it |
+| `app.kubernetes.io/version` | `1.8.2` | Informational; never put it in a selector (it would change on every release) |
+| `app.kubernetes.io/managed-by` | `kustomize`, `Helm` | Which tool owns the object |
+
+Keep the selector to one or two stable labels. If the selector includes the version, the Deployment can no longer adopt its own next-version Pods.
+
+**Hardening a container: the minimum.** Add a `securityContext` from the first manifest rather than as a later chore.
+
+```yaml
+      securityContext:                      # Pod level
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api
+          securityContext:                  # container level
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+```
+
+A read-only root filesystem means the application needs a writable `emptyDir` mounted at `/tmp` if it writes temporary files. Discovering that in staging, from a log line, is far cheaper than discovering it in production.
+
+**Namespaces are a boundary for names, not for the network.** Two Deployments with the same name can live in different namespaces, and a Service in `orders-staging` is reachable from other namespaces by its full DNS name unless a network policy says otherwise. Namespaces give you a scope for quotas and access control; they do not by themselves isolate traffic.
+
 **Why packaging matters.** A real application needs a Deployment, a Service, configuration, probes, resource settings and permissions, often with differences between environments. Copy-pasting YAML into each environment guarantees drift. Packaging tools produce the manifests from shared source plus small, explicit differences. Helm and Kustomize are introduced here only as packaging tools; you do not need to design charts at this level.
 
 **Two common tools**
@@ -219,3 +285,17 @@ resources:
 **Exercise 2 (run).** Apply the manifests to a disposable cluster. Break each thing deliberately, one at a time: change a Service selector label, reference a missing ConfigMap key, point readiness at a wrong path. For each break, record the symptom, the command that revealed the cause, and the fix.
 
 **Exercise 3 (compare).** Render the same service with Kustomize and with Helm and compare the output. Note which was easier to read for a reviewer.
+
+**Exercise 4 (roll out and recover).** Deploy version one, then roll out a version that fails readiness (for example, a missing required setting). Confirm that the old Pods keep serving, capture the evidence triple, roll back, and then fix forward by editing the manifest. State in one sentence why the failed rollout did not cause an outage.
+
+**Exercise 5 (harden).** Add the `securityContext` above to your Deployment. Run it, find what breaks (typically a write to a read-only path), and fix it with a mounted `emptyDir` rather than by weakening the context.
+
+**Self-check questions**
+
+1. Why must `template.metadata.labels` satisfy the selector, and why should a version label not be in the selector?
+2. A Pod is `Running` but `0/1 Ready`. Is it restarted? Does it receive traffic? What do you check first?
+3. You edit a ConfigMap consumed through `envFrom`. Do running Pods see the change? What do you do?
+4. Why is a database dependency check wrong in a liveness probe but right in a readiness probe?
+5. What is the difference between a CPU limit being exceeded and a memory limit being exceeded?
+
+**Definition of done for this level.** You can write a Deployment, Service, ConfigMap and Secret reference for a stateless service from memory; explain the Deployment-to-Pod ownership chain; diagnose the seven common symptoms in the table using only `get`, `describe`, `logs` and `get endpoints`; perform and reverse a rollout; and explain in one paragraph why a packaging layer exists.
